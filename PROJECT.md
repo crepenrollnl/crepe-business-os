@@ -234,11 +234,19 @@ Shared contracts live in:
 
 ### Planned accounting tables
 
+Full proposal: [`docs/ACCOUNTING_DATA_MODEL.md`](docs/ACCOUNTING_DATA_MODEL.md).
+
 | Table | Purpose |
 |---|---|
 | `transactions` | Universal business event spine |
 | `accounts` | Chart of accounts |
-| `journal_entries` | Double-entry postings |
+| `fiscal_periods` | Open / closed / locked posting windows |
+| `currency_rates` | FX rates into company base currency |
+| `posting_rules` / `posting_rule_lines` | Event → account role mappings |
+| `account_role_bindings` | Role → concrete account bindings |
+| `accounting_business_events` | Immutable financial intake for posting |
+| `journal_entries` / `journal_lines` | Double-entry postings |
+| `ledger_entries` | Append-only general ledger facts |
 | `payments` | Cash / bank / card settlements |
 | `bank_accounts` | Bank and cash accounts |
 | `tax_rates` | VAT and other tax definitions |
@@ -277,16 +285,22 @@ Accounting is the sole financial module. It will become the home for:
 - Payroll integration
 - Financial reports
 
+**Canonical architecture:** [`docs/ACCOUNTING.md`](docs/ACCOUNTING.md)  
+**Data model / SQL plan:** [`docs/ACCOUNTING_DATA_MODEL.md`](docs/ACCOUNTING_DATA_MODEL.md)  
+**Shared contracts:** `src/types/accounting.ts`
+
 ### Design intent
 
-1. Every posted `Transaction` can generate one or more `journal_entries`.
-2. Every journal entry balances debits and credits.
-3. Operational modules emit business events; accounting posts from those events.
-4. VAT and tax workflows read from transactions / journal entries / VAT periods; they do not invent a second financial truth.
-5. Reports are projections over accounting and operational data, not isolated spreadsheets.
-6. There is no separate Finance or Taxes feature module.
+1. Required flow: Business Event → Posting Engine → Journal Entry → Ledger → Financial Reports.
+2. Every posted journal entry balances debits and credits in company base currency.
+3. Operational modules emit Accounting Business Events; Accounting alone posts journals/ledger.
+4. Operational modules never write accounting tables.
+5. Multi-currency is first-class (base currency, transaction currency, exchange rate, base/transaction amounts).
+6. VAT and tax workflows live inside Accounting; they do not invent a second financial truth.
+7. Reports are projections over accounting and operational data, not isolated spreadsheets.
+8. There is no separate Finance or Taxes feature module.
 
-Accounting UI and posting engines are future work. Domain contracts already define the intended shape in `src/types/accounting.ts`.
+Accounting UI, SQL migrations, and posting engines are future work. Architecture and contracts are locked by DEV-086.
 
 ---
 

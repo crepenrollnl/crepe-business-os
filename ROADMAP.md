@@ -185,6 +185,11 @@ Exit criteria:
 
 Accounting is the sole financial module. All VAT, tax, bank, GL, and statement work lives here.
 
+**Architecture locked (DEV-086):** [`docs/ACCOUNTING.md`](docs/ACCOUNTING.md), [`docs/ACCOUNTING_DATA_MODEL.md`](docs/ACCOUNTING_DATA_MODEL.md)
+
+Flow: Business Event → Posting Engine → Journal Entry → Ledger → Financial Reports.  
+Operational modules emit events only; they never write accounting tables.
+
 ### Sprint 13 — Payments & bank accounts
 - payments
 - payment methods

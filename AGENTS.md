@@ -11,6 +11,8 @@ Read `docs/MODULE_FOUNDATION.md` for module layout, shared primitives, error han
 Read `docs/BATCH_CONSUMPTION.md` for immutable Production Batch + Sale Batch Consumption architecture.
 Read `docs/FINISHED_GOODS.md` before implementing Finished Goods.
 Read `docs/SALES.md` before implementing Sales.
+Read `docs/ACCOUNTING.md` before implementing Accounting (canonical financial architecture).
+Read `docs/ACCOUNTING_DATA_MODEL.md` for the Accounting SQL object plan (proposal only until implementation sprint).
 Follow this file for implementation rules.
 
 **Architecture Freeze v1.0** is mandatory. Core entities may not be redesigned without an Architecture Decision Record (ADR). Implementation alone must never redefine architecture.
@@ -417,7 +419,7 @@ Before marking a module ready:
 | Sales | After Recipes / Finished Goods readiness | Revenue events and append-only Sale Batch Consumption (FIFO) — see `docs/SALES.md`, `docs/BATCH_CONSUMPTION.md` |
 | Customers | After Sales needs deepen | Customer master and history |
 | Events | After master data expansion | Catering / market / service context |
-| Accounting | After money movement exists | Sole financial module: VAT, taxes, bank accounts, GL, journal entries, Balance Sheet, P&L, Cash Flow, fixed assets, payroll integration, financial reports |
+| Accounting | After money movement exists | Sole financial module: VAT, taxes, bank accounts, GL, journal entries, Balance Sheet, P&L, Cash Flow, fixed assets, payroll integration, financial reports — see `docs/ACCOUNTING.md`, `docs/ACCOUNTING_DATA_MODEL.md` |
 | Reports | After enough domain data exists | Cross-module analytics |
 | AI | After stable operational core | Assistive automation through services |
 
@@ -431,28 +433,32 @@ Do not reintroduce a separate Finance or Taxes module.
 
 ## Accounting Preparation Rules
 
-Accounting is the sole financial home. Prepare for:
+Accounting is the sole financial home.
 
-- VAT
-- Taxes
-- Bank Accounts
-- General Ledger
-- Journal Entries
-- Balance Sheet
-- Profit & Loss
-- Cash Flow
-- Fixed Assets
-- Payroll integration
-- Financial reports
+**Canonical specifications:** [`docs/ACCOUNTING.md`](docs/ACCOUNTING.md), [`docs/ACCOUNTING_DATA_MODEL.md`](docs/ACCOUNTING_DATA_MODEL.md)
 
-Do not implement accounting engines until the roadmap reaches Accounting.
+Required financial flow:
+
+```
+Business Event → Posting Engine → Journal Entry → Ledger → Financial Reports
+```
+
+Rules:
+
+1. Operational modules (Inventory, Purchases, Production, Sales, Finished Goods) **never write** accounting tables.
+2. Operational modules **only emit** Accounting Business Events with money facts.
+3. Accounting owns Chart of Accounts, journals, ledger, posting rules, fiscal periods, currencies/FX, VAT, and statements.
+4. Accounting knows accounts, journals, ledger entries, currencies, amounts, and posting rules — **not** Inventory, Recipes, Products, Production, or Sales UI.
+5. Do not implement posting engines, Accounting SQL, RPCs, or UI until the roadmap reaches Accounting.
+6. Do not create a separate Finance or Taxes module.
 
 When touching money or stock:
 
-- keep amounts explicit
+- keep amounts explicit (transaction + base currency where relevant)
 - keep timestamps explicit
 - keep reference ids explicit
 - keep reversal/refund as first-class future concepts
+- design for event emission, not direct journal writes
 
 ---
 

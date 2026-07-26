@@ -1,11 +1,5 @@
 /**
- * Accounting feature type surface (architecture only — DEV-086).
- *
- * Accounting is the sole financial module — VAT, taxes, bank accounts,
- * GL, posting, statements, and related capabilities live here.
- *
- * Canonical architecture: docs/ACCOUNTING.md
- * Keep posting logic out until the Accounting roadmap phase.
+ * Accounting types barrel (architecture only — DEV-086).
  */
 
 export type {

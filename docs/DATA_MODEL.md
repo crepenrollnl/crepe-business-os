@@ -665,7 +665,7 @@ Sales (depends on Finished Goods availability; appends consumptions)
     ↓
 Reporting
     ↓
-Accounting (future; posts from operational events — not a parallel stock ledger)
+Accounting (future; posts from Accounting Business Events only — see docs/ACCOUNTING.md)
 ```
 
 Recipes sit **before** Production and inform Purchases/Production planning, but **Purchases** remain the path that increases raw materials. Finished Goods depends on Production Batches immediately and on Sale Batch Consumptions after sales exist.
@@ -722,11 +722,13 @@ Production Planning sits beside this flow: it may calculate requirements but nev
 | Immutable batches + FIFO consumption | `docs/BATCH_CONSUMPTION.md` |
 | Finished Goods read model | `docs/FINISHED_GOODS.md` |
 | Sales workflow, COGS, returns | `docs/SALES.md` |
+| Accounting architecture & posting | `docs/ACCOUNTING.md` |
+| Accounting tables / SQL plan | `docs/ACCOUNTING_DATA_MODEL.md` |
 | Product vision | `PROJECT.md` |
 | Sequencing | `ROADMAP.md` |
 | Agent / engineer charter | `AGENTS.md` |
 
-When documents disagree on **stock ownership, immutability, FIFO, or COGS**, Architecture Freeze v1.0 and `docs/BATCH_CONSUMPTION.md` win. When documents disagree on **entity identity and relationships**, **this data model** wins, provided it does not contradict the freeze.
+When documents disagree on **stock ownership, immutability, FIFO, or COGS**, Architecture Freeze v1.0 and `docs/BATCH_CONSUMPTION.md` win. When documents disagree on **Accounting posting boundaries or financial ledger ownership**, `docs/ACCOUNTING.md` wins. When documents disagree on **entity identity and relationships**, **this data model** wins, provided it does not contradict the freeze or Accounting architecture.
 
 ---
 

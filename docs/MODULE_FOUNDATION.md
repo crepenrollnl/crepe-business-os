@@ -74,7 +74,7 @@ Inventory is the reference implementation for quality and structure.
 | `sales` | `src/features/sales` | Planned |
 | `customers` | `src/features/customers` | Planned |
 | `events` | `src/features/events` | Planned |
-| `accounting` | `src/features/accounting` | Planned |
+| `accounting` | `src/features/accounting` | Planned (architecture + contracts only — see `docs/ACCOUNTING.md`) |
 | `reports` | `src/features/reporting-workspace` | Live (Reports nav host at `/reports`) |
 | `ai` | `src/features/ai` | Planned |
 
