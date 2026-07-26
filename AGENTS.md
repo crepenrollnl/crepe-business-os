@@ -6,7 +6,14 @@ This file is the operating manual for every AI agent and engineer working on Cre
 
 Read `PROJECT.md` for product vision and system design.
 Read `ROADMAP.md` for sequencing.
+Read `docs/ARCHITECTURE_FREEZE_V1.md` for the frozen ERP Core Architecture baseline (v1.0).
+Read `docs/MODULE_FOUNDATION.md` for module layout, shared primitives, error handling, and boundary rules.
+Read `docs/BATCH_CONSUMPTION.md` for immutable Production Batch + Sale Batch Consumption architecture.
+Read `docs/FINISHED_GOODS.md` before implementing Finished Goods.
+Read `docs/SALES.md` before implementing Sales.
 Follow this file for implementation rules.
+
+**Architecture Freeze v1.0** is mandatory. Core entities may not be redesigned without an Architecture Decision Record (ADR). Implementation alone must never redefine architecture.
 
 ---
 
@@ -23,22 +30,21 @@ Target customers:
 
 It must eventually support:
 
+- Dashboard
 - Inventory
 - Products
 - Recipes
-- Sales
+- Suppliers
 - Purchases
 - Production
-- Events
-- Suppliers
+- Sales
 - Customers
+- Events
 - Accounting
-- Finance
-- Taxes
-- VAT
-- Payroll
 - Reports
 - AI Assistant
+
+Accounting is the sole financial module. It will own VAT, taxes, bank accounts, general ledger, journal entries, financial statements, fixed assets, payroll integration, and financial reports.
 
 Always design for a long-term ERP platform.
 Never design for a disposable demo.
@@ -81,17 +87,20 @@ Never change working UI unless the task explicitly requires it.
 src/
   app/                      # Route entrypoints only
   components/               # Shared UI + layout
-  constants/                # Shared constants
-  features/<module>/        # Domain modules
+  constants/                # Shared constants (modules, units, statuses, limits, config)
+  features/<module>/        # Domain modules (ERP module root)
     components/
     hooks/
     services/
     types/
+    utils/
     page/
   hooks/                    # Shared hooks only
-  lib/                      # Infrastructure utilities
-  types/                    # Cross-domain contracts
+  lib/                      # Infrastructure (Supabase, money, service errors, navigation)
+  types/                    # Cross-domain contracts (erp, service, transactions, accounting)
 ```
+
+Canonical module foundation: [`docs/MODULE_FOUNDATION.md`](docs/MODULE_FOUNDATION.md).
 
 ### Feature ownership
 
@@ -101,7 +110,14 @@ Each feature owns its own:
 - `hooks/` — UI state and orchestration
 - `services/` — database access
 - `types/` — feature interfaces
+- `utils/` — feature-local pure helpers
 - `page/` — page composition used by `app/`
+
+### Module boundary rule
+
+Modules communicate through **services** (and shared `@/types` / `@/constants` / `@/lib`).
+
+Do not import another module’s `components/`, `hooks/`, or `page/`.
 
 ### Route rule
 
@@ -111,6 +127,128 @@ Each feature owns its own:
 - wrap with auth guard when required
 - no business logic
 - no Supabase queries
+
+---
+
+## Architecture Rules
+
+These domain rules govern inventory ownership and stock mutation. They are documentation for future modules; do not implement unfinished production or finished-goods logic ahead of the roadmap.
+
+**Frozen baseline:** [`docs/ARCHITECTURE_FREEZE_V1.md`](docs/ARCHITECTURE_FREEZE_V1.md) — ERP Core Architecture Freeze v1.0. Do not redesign core entities without an ADR.
+
+### Inventory ownership
+
+- **Inventory** stores **raw materials** only (ingredients such as flour, milk, chicken, cheese).
+- **Finished Goods** presents **sellable products** only (for example Chicken Crepe, Apple Crepe, Nutella Banana Crepe).
+- Raw materials and finished goods are different stock domains. Never treat them as one stock pool.
+
+### Production Batch and Finished Goods rules
+
+These rules govern future Production, Sales, and Reports. Document and design against them; do not implement unfinished batch logic ahead of the roadmap.
+
+**Canonical consumption architecture:** [`docs/BATCH_CONSUMPTION.md`](docs/BATCH_CONSUMPTION.md)
+
+- **Production Batches are immutable** historical production events (append-only after creation).
+- **Production Batches never store `remaining_quantity`.** Remaining is always calculated.
+- **Sale Batch Consumption** is the append-only record of every FIFO consumption. Never edited. Never deleted.
+- **Finished Goods are derived** from Production Batches minus Sale Batch Consumptions. They are an aggregated view, not an independent inventory ledger.
+- Every Production Execution creates exactly one Production Batch.
+- Finished Goods available quantity must always be calculated:
+
+  ```
+  Remaining Quantity (per batch) =
+    Produced Quantity − SUM(Sale Batch Consumptions)
+
+  Available Quantity =
+    SUM(Remaining Quantity of active batches)
+  ```
+
+  Equivalent: `SUM(Produced − Consumed)` over eligible batches.
+
+- **Never duplicate** finished-goods quantities at the product level as a second source of truth.
+- **Sales never modifies Production Batch rows.** Sales only inserts Sale Batch Consumption records.
+- **Sales never consume Recipes.**
+- **Sales never consume Raw Materials.**
+- **FIFO** (oldest available batch first) is the default allocation strategy.
+- Batch selection is internal. Users do not manually choose which batch to sell from.
+- Each batch stores its own immutable `unit_cost` at creation for later margin and profitability reporting.
+- **COGS** comes from Sale Batch Consumption records only — never from Production Batch alone, Finished Goods average, or Recipe.
+
+### Stock mutation authority
+
+| Action | Allowed module(s) |
+|---|---|
+| Increase raw material stock | Purchases (always; manual purchases must remain possible) |
+| Deduct raw materials | Production Execution only |
+| Create finished goods stock (via immutable Production Batch) | Production Execution only |
+| Deduct finished goods (via Sale Batch Consumption) | Sales only |
+
+Rules:
+
+- Recipes **never** modify inventory.
+- Production Planning **never** modifies inventory.
+- Production Execution is the **only** module allowed to deduct raw materials.
+- Production Execution is the **only** module allowed to create Production Batches.
+- Sales is the **only** module allowed to deduct finished goods, and it does so by appending Sale Batch Consumption records under automatic FIFO — **never** by updating Production Batches.
+- Purchases always increase raw material inventory.
+- Manual Purchases must always remain possible.
+- Production Planning is optional.
+
+### Future Production split
+
+Production has two logical stages:
+
+1. **Production Planning** — planning only; no inventory changes.
+2. **Production Execution** — actual production: deduct raw materials, create exactly one immutable Production Batch, set that batch's `unit_cost`.
+
+### Future Finished Goods module
+
+Finished Goods will become a dedicated module between Production Execution and Sales. It aggregates produced − consumed availability; it does not own duplicated product quantities and never stores inventory.
+
+```
+Production Execution → Production Batch → Finished Goods (view) → Sales (Sale Batch Consumption)
+```
+
+Document and design for that separation. Do not implement the module until the roadmap reaches it.
+
+**Canonical specifications:** [`docs/BATCH_CONSUMPTION.md`](docs/BATCH_CONSUMPTION.md), [`docs/FINISHED_GOODS.md`](docs/FINISHED_GOODS.md)
+
+That Finished Goods spec locks:
+
+- list and batch-detail display fields
+- automatic Production Status (`Available` / `Low Stock` / `Out of Stock`)
+- available quantity and weighted-average cost formulas (from calculated remaining)
+- field origin map
+- allowed vs forbidden actions (read-only module)
+- edge cases and future integrations
+
+When implementing Finished Goods, follow those documents. Never introduce a product-level finished-goods stock ledger. Never store `remaining_quantity` on batches.
+
+### Future Sales module
+
+Sales records completed customer transactions. It is the **only** module allowed to deduct finished goods, and it does so by creating immutable **Sale Batch Consumption** records under automatic FIFO — never by mutating Production Batches.
+
+**Canonical specifications:** [`docs/BATCH_CONSUMPTION.md`](docs/BATCH_CONSUMPTION.md), [`docs/SALES.md`](docs/SALES.md)
+
+That Sales spec locks:
+
+- sales workflow (draft → validate → FIFO → complete → append Sale Batch Consumptions → Finished Goods recalculation by derivation)
+- sale document and sale line fields
+- FIFO algorithm and Sale Batch Consumption layers
+- COGS from Sale Batch Consumption only (never Production Batch alone, Finished Goods average, recipe, or inventory)
+- gross profit = revenue − COGS
+- status transitions (Draft / Completed / Cancelled / Refunded future)
+- validation, concurrency, and idempotency rules
+- returns as a separate process (do not immediately restore batch quantities by editing a sale)
+- permissions and integrations (Finished Goods, Production, Reports, Accounting, future POS)
+
+When implementing Sales, follow those documents. Never allow manual batch selection, manual COGS, Inventory mutation, or Production Batch updates from Sales.
+
+### Transaction and reuse discipline
+
+- Every inventory modification must use database transactions.
+- Business logic must not be duplicated across features.
+- Prefer reusable UI components whenever the interaction is shared.
 
 ---
 
@@ -171,6 +309,7 @@ Never:
 - leave placeholder implementations
 - invent parallel architectures for the same concern
 - bypass the transaction model for stock or money movements
+- create a separate Finance or Taxes module — those capabilities belong in Accounting
 
 ---
 
@@ -266,35 +405,45 @@ Before marking a module ready:
 
 | Module | Build when | Responsibility |
 |---|---|---|
+| Dashboard | Live | Cross-module operational overview |
 | Inventory | Now / reference | Ingredient stock master and CRUD |
 | Products | Next | Sellable catalog |
 | Recipes | After Products | BOM, cost, allergens |
-| Sales | After Recipes | Revenue events and stock outflow |
+| Suppliers | After core ops | Vendor master beyond inventory lookups |
 | Purchases | After Sales foundation | Receiving, cost, stock inflow |
-| Production | After Purchases/Recipes readiness | Transform ingredients into products |
-| Suppliers | Dedicated module after core ops | Vendor master beyond inventory lookups |
+| Production Planning | After Purchases/Recipes readiness | Planning only; no inventory mutation |
+| Production Execution | After Production Planning readiness | Deduct raw materials; create immutable Production Batches |
+| Finished Goods | After Production Execution | Read-only aggregated sellable availability from Produced − Consumed — see `docs/FINISHED_GOODS.md`, `docs/BATCH_CONSUMPTION.md` |
+| Sales | After Recipes / Finished Goods readiness | Revenue events and append-only Sale Batch Consumption (FIFO) — see `docs/SALES.md`, `docs/BATCH_CONSUMPTION.md` |
 | Customers | After Sales needs deepen | Customer master and history |
-| Finance | After money movement exists | Payments and cash views |
-| Accounting | After Finance spine | GL and double-entry |
-| Taxes | After Accounting foundations | VAT and tax periods |
+| Events | After master data expansion | Catering / market / service context |
+| Accounting | After money movement exists | Sole financial module: VAT, taxes, bank accounts, GL, journal entries, Balance Sheet, P&L, Cash Flow, fixed assets, payroll integration, financial reports |
 | Reports | After enough domain data exists | Cross-module analytics |
 | AI | After stable operational core | Assistive automation through services |
 
+Canonical registry: `src/constants/modules.ts`.
+Module foundation: `docs/MODULE_FOUNDATION.md`.
+
 Do not implement modules out of roadmap order unless explicitly instructed.
+Do not reintroduce a separate Finance or Taxes module.
 
 ---
 
 ## Accounting Preparation Rules
 
-Prepare for:
+Accounting is the sole financial home. Prepare for:
 
+- VAT
+- Taxes
+- Bank Accounts
 - General Ledger
-- Double-entry bookkeeping
+- Journal Entries
 - Balance Sheet
 - Profit & Loss
 - Cash Flow
-- VAT reporting
-- Income Tax
+- Fixed Assets
+- Payroll integration
+- Financial reports
 
 Do not implement accounting engines until the roadmap reaches Accounting.
 
@@ -412,5 +561,7 @@ If unsure:
 6. Prefer shared contracts over duplication.
 7. Do not break auth, dashboard, or inventory.
 8. Do not invent scope outside the current roadmap item.
+9. Put all financial capabilities in Accounting — never spawn Finance/Taxes modules.
+10. Respect Architecture Freeze v1.0 (`docs/ARCHITECTURE_FREEZE_V1.md`) — never redefine core architecture through implementation alone.
 
-If a request conflicts with this charter, protect architecture and ask for explicit confirmation before destructive changes.
+If a request conflicts with this charter or the Architecture Freeze, protect architecture and ask for explicit confirmation before destructive changes.

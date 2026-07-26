@@ -1,0 +1,402 @@
+diff --git a/src/features/reporting-dashboard/page/reporting-dashboard-performance.test.tsx b/src/features/reporting-dashboard/page/reporting-dashboard-performance.test.tsx
+new file mode 100644
+index 0000000..10e4b70
+--- /dev/null
++++ b/src/features/reporting-dashboard/page/reporting-dashboard-performance.test.tsx
+@@ -0,0 +1,396 @@
++/**
++ * UI coverage for Reporting Dashboard performance polish (DEV-081).
++ *
++ * Verifies memo boundaries, stable Composition identity, and equality helper.
++ * Uses reportingWorkspaceService.getReportingWorkspace only for host integration.
++ */
++
++import {
++  act,
++  cleanup,
++  render,
++  screen,
++  within,
++} from "@testing-library/react";
++import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
++import "@testing-library/jest-dom/vitest";
++import type { ReportingWorkspace } from "@/features/reporting-workspace/types/reporting-workspace";
++import type { ReportingOverview } from "@/features/reporting-api/types/reporting-api";
++import { ReportingDashboardCards } from "../components/reporting-dashboard-cards";
++import { ReportingDashboardComposition } from "../components/reporting-dashboard-composition";
++import { ReportingDashboardDataBinding } from "../components/reporting-dashboard-data-binding";
++import { isSameOverviewProps } from "../components/reporting-dashboard-overview-equality";
++import { ReportingDashboardWidgets } from "../components/widgets/reporting-dashboard-widgets";
++
++const { getReportingWorkspaceMock, fromMock, rpcMock } = vi.hoisted(() => ({
++  getReportingWorkspaceMock: vi.fn(),
++  fromMock: vi.fn(),
++  rpcMock: vi.fn(),
++}));
++
++vi.mock("next/link", () => ({
++  default: ({
++    children,
++    href,
++    ...props
++  }: {
++    children: React.ReactNode;
++    href: string;
++    onClick?: () => void;
++    className?: string;
++    "aria-current"?: "page";
++  }) => (
++    <a href={href} {...props}>
++      {children}
++    </a>
++  ),
++}));
++
++vi.mock("@/lib/supabase", () => ({
++  supabase: {
++    from: fromMock,
++    rpc: rpcMock,
++  },
++}));
++
++vi.mock("@/features/search/components/global-search", () => ({
++  GlobalSearch: () => <div data-testid="global-search" />,
++}));
++
++vi.mock("@/features/reporting-workspace/services/reporting-workspace-service", () => ({
++  reportingWorkspaceService: {
++    getReportingWorkspace: (...args: unknown[]) =>
++      getReportingWorkspaceMock(...args),
++  },
++}));
++
++import { ReportingDashboardPage } from "./reporting-dashboard-page";
++
++function navigationItem(overrides?: Record<string, unknown>) {
++  return {
++    dashboard_key: "executive",
++    display_name: "Executive Dashboard",
++    category: "overview",
++    description: "Highest-level company health, growth, and operating signals.",
++    sort_order: 10,
++    icon_identifier: "executive",
++    availability: "available",
++    ...overrides,
++  };
++}
++
++function overview(overrides?: Partial<ReportingOverview>): ReportingOverview {
++  return {
++    generated_at: "2026-07-25T16:00:00.000Z",
++    sections: [
++      {
++        section_name: "executive",
++        title: "Executive Dashboard",
++        source_view: "executive_dashboard",
++        source_rpc: "get_executive_dashboard",
++      },
++    ],
++    executive: {
++      company_health: "ok",
++      inventory_value: 100,
++      low_stock_count: 1,
++      total_sales: 2,
++      total_purchases: 3,
++      total_batches: 4,
++      sales_growth: 5.5,
++      last_sale_date: null,
++      last_purchase_date: null,
++      last_production_date: null,
++    },
++    kpi: {
++      gross_revenue: 1250,
++      total_orders: 10,
++      average_order_value: 125,
++      inventory_turnover: null,
++      recipe_cost_average: null,
++      supplier_count: 0,
++      customer_count: 0,
++      production_efficiency: null,
++      low_stock_ratio: null,
++      sales_growth: null,
++    },
++    company: {
++      total_suppliers: 4,
++      total_customers: 8,
++      total_recipes: 0,
++      total_ingredients: 0,
++      total_finished_goods: 0,
++      total_sales: 0,
++      total_purchases: 0,
++      total_production_batches: 0,
++      last_sale_date: null,
++      last_purchase_date: null,
++      last_production_date: null,
++    },
++    inventory: {
++      total_ingredients: 12,
++      low_stock_count: 3,
++      out_of_stock_count: 1,
++      total_inventory_value: 0,
++      last_purchase_date: null,
++      last_production_date: null,
++    },
++    production: {
++      total_batches: 6,
++      completed_batches: 5,
++      failed_batches: 0,
++      total_finished_goods: 0,
++      last_production_date: null,
++      average_batch_duration: null,
++    },
++    audit: {
++      total_audit_events: 20,
++      events_today: 0,
++      events_last_7_days: 0,
++      failed_operations: 2,
++      user_activity_count: 0,
++      production_events: 0,
++      inventory_events: 0,
++      sales_events: 0,
++      purchase_events: 0,
++      last_audit_event_at: null,
++    },
++    user_activity: {
++      active_users_today: 3,
++      active_users_last_7_days: 0,
++      total_user_actions: 0,
++      production_actions: 0,
++      inventory_actions: 0,
++      purchase_actions: 0,
++      sales_actions: 0,
++      last_user_activity_at: null,
++      most_active_user: "Ada Admin",
++      average_actions_per_user: null,
++    },
++    alerts: {
++      low_stock_alerts: 3,
++      out_of_stock_alerts: 0,
++      overdue_production: 0,
++      failed_batches: 0,
++      stale_purchase_prices: 0,
++      inactive_suppliers: 0,
++      declining_sales: false,
++      missing_company_settings: false,
++      backup_status: "ok",
++      import_export_failures: 0,
++    },
++    ...overrides,
++  };
++}
++
++function workspace(overrides?: Partial<ReportingWorkspace>): ReportingWorkspace {
++  return {
++    workspace_title: "Reporting Workspace",
++    reporting_version: "1.0",
++    available_dashboards: [navigationItem()],
++    navigation_catalog: [navigationItem()],
++    reporting_overview: overview(),
++    generated_at: "2026-07-25T16:00:00.000Z",
++    ...overrides,
++  };
++}
++
++async function flushMicrotasks() {
++  await act(async () => {
++    await Promise.resolve();
++    await Promise.resolve();
++  });
++}
++
++async function renderSettled() {
++  const view = render(<ReportingDashboardPage />);
++  await flushMicrotasks();
++  return view;
++}
++
++describe("Reporting Dashboard performance equality helper (DEV-081 UI)", () => {
++  it("treats identical overview object references as equal", () => {
++    const data = overview();
++
++    expect(
++      isSameOverviewProps({ overview: data }, { overview: data }),
++    ).toBe(true);
++  });
++
++  it("treats different overview object identities as unequal", () => {
++    const first = overview();
++    const second = overview();
++
++    expect(first).not.toBe(second);
++    expect(
++      isSameOverviewProps({ overview: first }, { overview: second }),
++    ).toBe(false);
++  });
++});
++
++describe("Reporting Dashboard performance memo boundaries (DEV-081 UI)", () => {
++  afterEach(() => {
++    cleanup();
++  });
++
++  it("preserves Composition identity on ReportingDashboardCards without an extra wrapper", () => {
++    expect(ReportingDashboardCards).toBe(ReportingDashboardComposition);
++
++    const data = overview();
++    const { container: compositionContainer } = render(
++      <ReportingDashboardComposition overview={data} />,
++    );
++    const compositionHtml = compositionContainer.innerHTML;
++    cleanup();
++
++    const { container: cardsContainer } = render(
++      <ReportingDashboardCards overview={data} />,
++    );
++
++    expect(cardsContainer.innerHTML).toBe(compositionHtml);
++    expect(
++      cardsContainer.querySelectorAll(
++        "section.rounded-xl.border.border-zinc-200.bg-white.shadow-sm",
++      ),
++    ).toHaveLength(1);
++  });
++
++  it("keeps Composition ??? DataBinding ??? Widgets memo boundaries on same overview identity", () => {
++    const data = overview();
++
++    const compositionView = render(
++      <ReportingDashboardComposition overview={data} />,
++    );
++    const compositionPanel = screen
++      .getByRole("heading", { name: "Reporting dashboards" })
++      .closest("section");
++    expect(compositionPanel).not.toBeNull();
++
++    compositionView.rerender(<ReportingDashboardComposition overview={data} />);
++    expect(
++      screen.getByRole("heading", { name: "Reporting dashboards" }).closest(
++        "section",
++      ),
++    ).toBe(compositionPanel);
++    cleanup();
++
++    const bindingView = render(<ReportingDashboardDataBinding overview={data} />);
++    const bindingRegion = screen.getByRole("region", {
++      name: "Bound reporting dashboard overview",
++    });
++
++    bindingView.rerender(<ReportingDashboardDataBinding overview={data} />);
++    expect(
++      screen.getByRole("region", {
++        name: "Bound reporting dashboard overview",
++      }),
++    ).toBe(bindingRegion);
++    cleanup();
++
++    const widgetsView = render(<ReportingDashboardWidgets overview={data} />);
++    const widgetList = screen.getByRole("list", {
++      name: "Reporting dashboard section widgets",
++    });
++
++    widgetsView.rerender(<ReportingDashboardWidgets overview={data} />);
++    expect(
++      screen.getByRole("list", {
++        name: "Reporting dashboard section widgets",
++      }),
++    ).toBe(widgetList);
++  });
++
++  it("updates the composition when overview identity changes", () => {
++    const initial = overview();
++    const { rerender } = render(
++      <ReportingDashboardComposition overview={initial} />,
++    );
++
++    const executive = screen.getByRole("region", {
++      name: "Executive Dashboard",
++    });
++    expect(within(executive).getByText("ok")).toBeInTheDocument();
++
++    const next = overview({
++      executive: {
++        ...initial.executive,
++        company_health: "critical",
++      },
++    });
++
++    rerender(<ReportingDashboardComposition overview={next} />);
++
++    const updatedExecutive = screen.getByRole("region", {
++      name: "Executive Dashboard",
++    });
++    expect(within(updatedExecutive).getByText("critical")).toBeInTheDocument();
++    expect(
++      within(updatedExecutive).getByLabelText("Company Health: critical"),
++    ).toBeInTheDocument();
++  });
++});
++
++describe("Reporting Dashboard performance workspace integration (DEV-081 UI)", () => {
++  beforeEach(() => {
++    getReportingWorkspaceMock.mockReset();
++    fromMock.mockReset();
++    rpcMock.mockReset();
++  });
++
++  afterEach(() => {
++    cleanup();
++  });
++
++  it("preserves accessibility landmarks through the performance-integrated path", async () => {
++    getReportingWorkspaceMock.mockResolvedValue({
++      data: workspace(),
++      error: null,
++    });
++
++    await renderSettled();
++
++    expect(
++      screen.getByRole("heading", {
++        level: 3,
++        name: "Reporting dashboards",
++      }),
++    ).toHaveAttribute("id", "reporting-dashboards-heading");
++    expect(
++      screen.getByRole("region", {
++        name: "Bound reporting dashboard overview",
++      }),
++    ).toBeInTheDocument();
++    expect(
++      screen.getByRole("list", {
++        name: "Reporting dashboard section widgets",
++      }),
++    ).toBeInTheDocument();
++    expect(
++      screen.getByRole("heading", {
++        level: 2,
++        name: "Reporting Workspace",
++      }),
++    ).toBeInTheDocument();
++
++    const reportsLink = screen.getByRole("link", { name: "Reports" });
++    expect(reportsLink).toHaveAttribute("href", "/reports");
++    expect(reportsLink).toHaveAttribute("aria-current", "page");
++  });
++
++  it("is read-only and only calls getReportingWorkspace", async () => {
++    getReportingWorkspaceMock.mockResolvedValue({
++      data: workspace(),
++      error: null,
++    });
++
++    await renderSettled();
++
++    expect(getReportingWorkspaceMock).toHaveBeenCalledTimes(1);
++    expect(getReportingWorkspaceMock).toHaveBeenCalledWith();
++    expect(fromMock).not.toHaveBeenCalled();
++    expect(rpcMock).not.toHaveBeenCalled();
++    expect(
++      screen.queryByRole("button", { name: /save|edit|delete|create/i }),
++    ).not.toBeInTheDocument();
++  });
++});

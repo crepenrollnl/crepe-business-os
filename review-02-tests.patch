@@ -1,0 +1,482 @@
+diff --git a/src/features/sales/services/sales-read-service.test.ts b/src/features/sales/services/sales-read-service.test.ts
+new file mode 100644
+index 0000000..e029t01
+--- /dev/null
++++ b/src/features/sales/services/sales-read-service.test.ts
+@@ -0,0 +1,476 @@
++/**
++ * Service-level coverage for salesReadService (DEV-029).
++ *
++ * Reads must go only through sales_list_view / sale_details_view.
++ * The service must not query base tables, call RPCs, recalculate totals,
++ * compute COGS, or implement FIFO.
++ */
++
++import { beforeEach, describe, expect, it, vi } from "vitest";
++
++const { supabaseMock } = vi.hoisted(() => {
++  const supabaseMock = {
++    from: vi.fn(),
++    rpc: vi.fn(),
++    auth: {
++      getUser: vi.fn(),
++    },
++  };
++  return { supabaseMock };
++});
++
++vi.mock("@/lib/supabase", () => ({
++  supabase: supabaseMock,
++}));
++
++import { salesReadService } from "./sales-read-service";
++
++const SALE_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
++const SALE_ID_2 = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
++const LINE_ID = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
++const LINE_ID_2 = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
++const PRODUCT_ID = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
++
++const insertMock = vi.fn();
++const updateMock = vi.fn();
++const deleteMock = vi.fn();
++
++const LIST_SELECT =
++  "sale_id, sale_number, status, sale_date, customer_id, subtotal, tax_total, total, confirmed_at, paid_at, cancelled_at";
++
++const DETAILS_SELECT =
++  "sale_id, sale_number, status, sale_date, customer_id, subtotal, tax_total, total, confirmed_at, paid_at, cancelled_at, line_id, product_id, quantity, unit_price, line_total";
++
++function listRow(overrides?: Record<string, unknown>) {
++  return {
++    sale_id: SALE_ID,
++    sale_number: "S-1001",
++    status: "confirmed",
++    sale_date: "2026-07-22",
++    customer_id: null,
++    subtotal: "25",
++    tax_total: "0",
++    total: "25",
++    confirmed_at: "2026-07-22T16:00:00.000Z",
++    paid_at: null,
++    cancelled_at: null,
++    ...overrides,
++  };
++}
++
++function detailsRow(overrides?: Record<string, unknown>) {
++  return {
++    sale_id: SALE_ID,
++    sale_number: "S-1001",
++    status: "confirmed",
++    sale_date: "2026-07-22",
++    customer_id: null,
++    subtotal: "25",
++    tax_total: "0",
++    total: "25",
++    confirmed_at: "2026-07-22T16:00:00.000Z",
++    paid_at: null,
++    cancelled_at: null,
++    line_id: LINE_ID,
++    product_id: PRODUCT_ID,
++    quantity: "5",
++    unit_price: "5",
++    line_total: "25",
++    ...overrides,
++  };
++}
++
++function emptyDraftDetailsRow() {
++  return detailsRow({
++    status: "draft",
++    confirmed_at: null,
++    subtotal: "0",
++    tax_total: "0",
++    total: "0",
++    line_id: null,
++    product_id: null,
++    quantity: null,
++    unit_price: null,
++    line_total: null,
++  });
++}
++
++function forbidBaseTables(table: string) {
++  if (
++    table === "sales" ||
++    table === "sale_lines" ||
++    table === "finished_goods_batch_consumptions" ||
++    table === "production_batches" ||
++    table === "finished_goods_batch_availability"
++  ) {
++    throw new Error(`Base table queried: ${table}`);
++  }
++}
++
++function mockListView(rows: ReturnType<typeof listRow>[], error: unknown = null) {
++  const orderSecond = vi.fn().mockResolvedValue({
++    data: error ? null : rows,
++    error,
++  });
++  const orderFirst = vi.fn().mockReturnValue({
++    order: orderSecond,
++  });
++  const selectMock = vi.fn().mockReturnValue({
++    order: orderFirst,
++  });
++
++  supabaseMock.from.mockImplementation((table: string) => {
++    forbidBaseTables(table);
++
++    if (table === "sales_list_view") {
++      return {
++        select: selectMock,
++        insert: insertMock,
++        update: updateMock,
++        delete: deleteMock,
++      };
++    }
++
++    throw new Error(`Unexpected table: ${table}`);
++  });
++
++  return { selectMock, orderFirst, orderSecond };
++}
++
++function mockDetailsView(
++  rows: ReturnType<typeof detailsRow>[],
++  error: unknown = null,
++) {
++  const orderMock = vi.fn().mockResolvedValue({
++    data: error ? null : rows,
++    error,
++  });
++  const eqMock = vi.fn().mockReturnValue({
++    order: orderMock,
++  });
++  const selectMock = vi.fn().mockReturnValue({
++    eq: eqMock,
++  });
++
++  supabaseMock.from.mockImplementation((table: string) => {
++    forbidBaseTables(table);
++
++    if (table === "sale_details_view") {
++      return {
++        select: selectMock,
++        insert: insertMock,
++        update: updateMock,
++        delete: deleteMock,
++      };
++    }
++
++    throw new Error(`Unexpected table: ${table}`);
++  });
++
++  return { selectMock, eqMock, orderMock };
++}
++
++describe("salesReadService.listSales (DEV-029)", () => {
++  beforeEach(() => {
++    vi.clearAllMocks();
++    insertMock.mockReset();
++    updateMock.mockReset();
++    deleteMock.mockReset();
++  });
++
++  it("queries only sales_list_view", async () => {
++    const { selectMock, orderFirst, orderSecond } = mockListView([listRow()]);
++
++    const result = await salesReadService.listSales();
++
++    expect(result.error).toBeNull();
++    expect(supabaseMock.from).toHaveBeenCalledTimes(1);
++    expect(supabaseMock.from).toHaveBeenCalledWith("sales_list_view");
++    expect(selectMock).toHaveBeenCalledWith(LIST_SELECT);
++    expect(orderFirst).toHaveBeenCalledWith("sale_date", { ascending: false });
++    expect(orderSecond).toHaveBeenCalledWith("sale_id", { ascending: true });
++
++    const tablesTouched = supabaseMock.from.mock.calls.map((call) => call[0]);
++    expect(tablesTouched).toEqual(["sales_list_view"]);
++    expect(tablesTouched).not.toContain("sales");
++    expect(tablesTouched).not.toContain("sale_lines");
++    expect(supabaseMock.rpc).not.toHaveBeenCalled();
++    expect(insertMock).not.toHaveBeenCalled();
++    expect(updateMock).not.toHaveBeenCalled();
++    expect(deleteMock).not.toHaveBeenCalled();
++  });
++
++  it("returns mapped SaleListItem[]", async () => {
++    mockListView([
++      listRow(),
++      listRow({
++        sale_id: SALE_ID_2,
++        sale_number: "S-1000",
++        status: "draft",
++        sale_date: "2026-07-21",
++        subtotal: 10,
++        tax_total: 2,
++        total: 12,
++        confirmed_at: null,
++      }),
++    ]);
++
++    const result = await salesReadService.listSales();
++
++    expect(result.error).toBeNull();
++    expect(result.data).toEqual([
++      {
++        sale_id: SALE_ID,
++        sale_number: "S-1001",
++        status: "confirmed",
++        sale_date: "2026-07-22",
++        customer_id: null,
++        subtotal: 25,
++        tax_total: 0,
++        total: 25,
++        confirmed_at: "2026-07-22T16:00:00.000Z",
++        paid_at: null,
++        cancelled_at: null,
++      },
++      {
++        sale_id: SALE_ID_2,
++        sale_number: "S-1000",
++        status: "draft",
++        sale_date: "2026-07-21",
++        customer_id: null,
++        subtotal: 10,
++        tax_total: 2,
++        total: 12,
++        confirmed_at: null,
++        paid_at: null,
++        cancelled_at: null,
++      },
++    ]);
++  });
++
++  it("maps DB errors", async () => {
++    mockListView([], {
++      message: 'relation "sales_list_view" does not exist',
++      code: "42P01",
++    });
++
++    const result = await salesReadService.listSales();
++
++    expect(result.data).toBeNull();
++    expect(result.error).toBe(
++      "Sales read model is not available yet. Apply the sales read-model database script and try again.",
++    );
++    expect(supabaseMock.rpc).not.toHaveBeenCalled();
++  });
++
++  it("never queries base tables, calls RPC, or recalculates totals", async () => {
++    mockListView([
++      listRow({
++        subtotal: "100",
++        tax_total: "20",
++        total: "999",
++      }),
++    ]);
++
++    const result = await salesReadService.listSales();
++
++    expect(result.error).toBeNull();
++    // Totals come from the view as-is — never recomputed from lines.
++    expect(result.data?.[0]?.total).toBe(999);
++    expect(result.data?.[0]?.subtotal).toBe(100);
++    expect(result.data?.[0]?.tax_total).toBe(20);
++
++    const tablesTouched = supabaseMock.from.mock.calls.map((call) => call[0]);
++    expect(tablesTouched).toEqual(["sales_list_view"]);
++    expect(tablesTouched).not.toContain("sales");
++    expect(tablesTouched).not.toContain("sale_lines");
++    expect(tablesTouched).not.toContain("finished_goods_batch_consumptions");
++    expect(supabaseMock.rpc).not.toHaveBeenCalled();
++    expect(supabaseMock.rpc).not.toHaveBeenCalledWith(
++      "confirm_sale",
++      expect.anything(),
++    );
++    expect(supabaseMock.rpc).not.toHaveBeenCalledWith(
++      "allocate_finished_goods_fifo",
++      expect.anything(),
++    );
++  });
++});
++
++describe("salesReadService.getSale (DEV-029)", () => {
++  beforeEach(() => {
++    vi.clearAllMocks();
++    insertMock.mockReset();
++    updateMock.mockReset();
++    deleteMock.mockReset();
++  });
++
++  it("rejects invalid UUID without querying", async () => {
++    const result = await salesReadService.getSale("not-a-uuid");
++
++    expect(result.data).toBeNull();
++    expect(result.error).toBe("Sale id is required.");
++    expect(supabaseMock.from).not.toHaveBeenCalled();
++    expect(supabaseMock.rpc).not.toHaveBeenCalled();
++  });
++
++  it("rejects empty sale id without querying", async () => {
++    const result = await salesReadService.getSale("");
++
++    expect(result.data).toBeNull();
++    expect(result.error).toBe("Sale id is required.");
++    expect(supabaseMock.from).not.toHaveBeenCalled();
++    expect(supabaseMock.rpc).not.toHaveBeenCalled();
++  });
++
++  it("queries only sale_details_view", async () => {
++    const { selectMock, eqMock, orderMock } = mockDetailsView([detailsRow()]);
++
++    const result = await salesReadService.getSale(SALE_ID);
++
++    expect(result.error).toBeNull();
++    expect(supabaseMock.from).toHaveBeenCalledTimes(1);
++    expect(supabaseMock.from).toHaveBeenCalledWith("sale_details_view");
++    expect(selectMock).toHaveBeenCalledWith(DETAILS_SELECT);
++    expect(eqMock).toHaveBeenCalledWith("sale_id", SALE_ID);
++    expect(orderMock).toHaveBeenCalledWith("line_id", { ascending: true });
++
++    const tablesTouched = supabaseMock.from.mock.calls.map((call) => call[0]);
++    expect(tablesTouched).toEqual(["sale_details_view"]);
++    expect(tablesTouched).not.toContain("sales");
++    expect(tablesTouched).not.toContain("sale_lines");
++    expect(supabaseMock.rpc).not.toHaveBeenCalled();
++    expect(insertMock).not.toHaveBeenCalled();
++    expect(updateMock).not.toHaveBeenCalled();
++    expect(deleteMock).not.toHaveBeenCalled();
++  });
++
++  it("returns header + lines", async () => {
++    mockDetailsView([
++      detailsRow({
++        subtotal: "35",
++        total: "35",
++      }),
++      detailsRow({
++        line_id: LINE_ID_2,
++        product_id: PRODUCT_ID,
++        quantity: "2",
++        unit_price: "5",
++        line_total: "10",
++        subtotal: "35",
++        total: "35",
++      }),
++    ]);
++
++    const result = await salesReadService.getSale(SALE_ID);
++
++    expect(result.error).toBeNull();
++    expect(result.data).toEqual({
++      sale_id: SALE_ID,
++      sale_number: "S-1001",
++      status: "confirmed",
++      sale_date: "2026-07-22",
++      customer_id: null,
++      subtotal: 35,
++      tax_total: 0,
++      total: 35,
++      confirmed_at: "2026-07-22T16:00:00.000Z",
++      paid_at: null,
++      cancelled_at: null,
++      lines: [
++        {
++          line_id: LINE_ID,
++          product_id: PRODUCT_ID,
++          quantity: 5,
++          unit_price: 5,
++          line_total: 25,
++        },
++        {
++          line_id: LINE_ID_2,
++          product_id: PRODUCT_ID,
++          quantity: 2,
++          unit_price: 5,
++          line_total: 10,
++        },
++      ],
++    });
++  });
++
++  it("empty draft returns lines: []", async () => {
++    mockDetailsView([emptyDraftDetailsRow()]);
++
++    const result = await salesReadService.getSale(SALE_ID);
++
++    expect(result.error).toBeNull();
++    expect(result.data?.status).toBe("draft");
++    expect(result.data?.lines).toEqual([]);
++    expect(result.data?.sale_id).toBe(SALE_ID);
++  });
++
++  it("returns not found when view has no rows", async () => {
++    mockDetailsView([]);
++
++    const result = await salesReadService.getSale(SALE_ID);
++
++    expect(result.data).toBeNull();
++    expect(result.error).toBe("Sale was not found.");
++    expect(supabaseMock.rpc).not.toHaveBeenCalled();
++  });
++
++  it("maps DB errors", async () => {
++    mockDetailsView([], {
++      message: 'relation "sale_details_view" does not exist',
++      code: "42P01",
++    });
++
++    const result = await salesReadService.getSale(SALE_ID);
++
++    expect(result.data).toBeNull();
++    expect(result.error).toBe(
++      "Sales read model is not available yet. Apply the sales read-model database script and try again.",
++    );
++  });
++
++  it("never queries base tables, calls RPC, recalculates totals, COGS, or FIFO", async () => {
++    mockDetailsView([
++      detailsRow({
++        subtotal: "10",
++        tax_total: "1",
++        total: "777",
++        quantity: "5",
++        unit_price: "5",
++        line_total: "25",
++      }),
++    ]);
++
++    const result = await salesReadService.getSale(SALE_ID);
++
++    expect(result.error).toBeNull();
++    // Header totals come from the view — never sum(line_total) or invent COGS.
++    expect(result.data?.total).toBe(777);
++    expect(result.data?.total).not.toBe(result.data?.lines[0]?.line_total);
++    expect(result.data).not.toHaveProperty("total_cogs");
++    expect(result.data).not.toHaveProperty("cogs");
++    expect(result.data?.lines[0]).not.toHaveProperty("unit_cost");
++    expect(result.data?.lines[0]).not.toHaveProperty("batch_id");
++
++    const tablesTouched = supabaseMock.from.mock.calls.map((call) => call[0]);
++    expect(tablesTouched).toEqual(["sale_details_view"]);
++    expect(tablesTouched).not.toContain("sales");
++    expect(tablesTouched).not.toContain("sale_lines");
++    expect(tablesTouched).not.toContain("finished_goods_batch_consumptions");
++    expect(tablesTouched).not.toContain("production_batches");
++    expect(supabaseMock.rpc).not.toHaveBeenCalled();
++    expect(supabaseMock.rpc).not.toHaveBeenCalledWith(
++      "confirm_sale",
++      expect.anything(),
++    );
++    expect(supabaseMock.rpc).not.toHaveBeenCalledWith(
++      "allocate_finished_goods_fifo",
++      expect.anything(),
++    );
++    expect(insertMock).not.toHaveBeenCalled();
++    expect(updateMock).not.toHaveBeenCalled();
++    expect(deleteMock).not.toHaveBeenCalled();
++  });
++});

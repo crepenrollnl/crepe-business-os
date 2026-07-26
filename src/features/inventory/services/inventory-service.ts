@@ -1,3 +1,4 @@
+import { toUserError as mapServiceError } from "@/lib/service-errors";
 import { supabase } from "@/lib/supabase";
 import type { ServiceResult } from "@/types/service";
 import type {
@@ -8,6 +9,88 @@ import type {
   Supplier,
   UpdateIngredientInput,
 } from "../types/inventory";
+
+const DUPLICATE_NAME_ERROR =
+  "An ingredient with this name already exists. Please choose a different name.";
+
+function isDuplicateNameError(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) {
+    return false;
+  }
+
+  const code =
+    "code" in error && typeof (error as { code: unknown }).code === "string"
+      ? (error as { code: string }).code
+      : "";
+  const message =
+    "message" in error &&
+    typeof (error as { message: unknown }).message === "string"
+      ? (error as { message: string }).message.toLowerCase()
+      : "";
+
+  return (
+    code === "23505" ||
+    (message.includes("duplicate") && message.includes("name")) ||
+    message.includes("ingredients_name")
+  );
+}
+
+function toUserError(error: unknown, fallback: string): string {
+  return mapServiceError(error, fallback, {
+    map: (value) => (isDuplicateNameError(value) ? DUPLICATE_NAME_ERROR : null),
+  });
+}
+
+async function findDuplicateName(
+  name: string,
+  excludeId?: string,
+): Promise<ServiceResult<boolean>> {
+  try {
+    const normalizedName = name.trim().toLowerCase();
+
+    if (normalizedName.length === 0) {
+      return { data: false, error: null };
+    }
+
+    const { data, error } = await supabase
+      .from("ingredients")
+      .select("id, name");
+
+    if (error) {
+      return {
+        data: null,
+        error: toUserError(error, "Failed to validate ingredient name"),
+      };
+    }
+
+    const hasDuplicate = (data ?? []).some((row) => {
+      if (excludeId && row.id === excludeId) {
+        return false;
+      }
+
+      return row.name.trim().toLowerCase() === normalizedName;
+    });
+
+    return { data: hasDuplicate, error: null };
+  } catch (error) {
+    return {
+      data: null,
+      error: toUserError(error, "Failed to validate ingredient name"),
+    };
+  }
+}
+
+function toIngredientPayload(input: CreateIngredientInput | UpdateIngredientInput) {
+  return {
+    name: input.name.trim(),
+    category_id: input.category_id,
+    supplier_id: input.supplier_id.trim().length > 0 ? input.supplier_id : null,
+    unit: input.unit.trim(),
+    current_stock: input.current_stock,
+    minimum_stock: input.minimum_stock,
+    cost_per_unit: input.cost_per_unit,
+  };
+}
 
 function enrichIngredients(
   ingredients: Ingredient[],
@@ -31,26 +114,39 @@ function enrichIngredients(
 async function fetchReferenceData(): Promise<
   ServiceResult<{ categories: IngredientCategory[]; suppliers: Supplier[] }>
 > {
-  const [categoriesResult, suppliersResult] = await Promise.all([
-    supabase.from("ingredient_categories").select("id, name").order("name"),
-    supabase.from("suppliers").select("id, name").order("name"),
-  ]);
+  try {
+    const [categoriesResult, suppliersResult] = await Promise.all([
+      supabase.from("ingredient_categories").select("id, name").order("name"),
+      supabase.from("suppliers").select("id, name").order("name"),
+    ]);
 
-  if (categoriesResult.error) {
-    return { data: null, error: categoriesResult.error.message };
+    if (categoriesResult.error) {
+      return {
+        data: null,
+        error: toUserError(categoriesResult.error, "Failed to load categories"),
+      };
+    }
+
+    if (suppliersResult.error) {
+      return {
+        data: null,
+        error: toUserError(suppliersResult.error, "Failed to load suppliers"),
+      };
+    }
+
+    return {
+      data: {
+        categories: categoriesResult.data ?? [],
+        suppliers: suppliersResult.data ?? [],
+      },
+      error: null,
+    };
+  } catch (error) {
+    return {
+      data: null,
+      error: toUserError(error, "Failed to load reference data"),
+    };
   }
-
-  if (suppliersResult.error) {
-    return { data: null, error: suppliersResult.error.message };
-  }
-
-  return {
-    data: {
-      categories: categoriesResult.data ?? [],
-      suppliers: suppliersResult.data ?? [],
-    },
-    error: null,
-  };
 }
 
 function getReferenceData(
@@ -65,122 +161,202 @@ function getReferenceData(
 
 export const inventoryService = {
   async getInventory(): Promise<ServiceResult<IngredientWithRelations[]>> {
-    const referenceResult = getReferenceData(await fetchReferenceData());
+    try {
+      const referenceResult = getReferenceData(await fetchReferenceData());
 
-    if ("error" in referenceResult) {
-      return referenceResult;
+      if ("error" in referenceResult) {
+        return referenceResult;
+      }
+
+      const { data, error } = await supabase
+        .from("ingredients")
+        .select("*")
+        .order("name");
+
+      if (error) {
+        return {
+          data: null,
+          error: toUserError(error, "Failed to load inventory"),
+        };
+      }
+
+      return {
+        data: enrichIngredients(
+          data ?? [],
+          referenceResult.categories,
+          referenceResult.suppliers,
+        ),
+        error: null,
+      };
+    } catch (error) {
+      return {
+        data: null,
+        error: toUserError(error, "Failed to load inventory"),
+      };
     }
-
-    const { data, error } = await supabase
-      .from("ingredients")
-      .select("*")
-      .order("name");
-
-    if (error) {
-      return { data: null, error: error.message };
-    }
-
-    return {
-      data: enrichIngredients(
-        data ?? [],
-        referenceResult.categories,
-        referenceResult.suppliers,
-      ),
-      error: null,
-    };
   },
 
   async getCategories(): Promise<ServiceResult<IngredientCategory[]>> {
-    const { data, error } = await supabase
-      .from("ingredient_categories")
-      .select("id, name")
-      .order("name");
+    try {
+      const { data, error } = await supabase
+        .from("ingredient_categories")
+        .select("id, name")
+        .order("name");
 
-    if (error) {
-      return { data: null, error: error.message };
+      if (error) {
+        return {
+          data: null,
+          error: toUserError(error, "Failed to load categories"),
+        };
+      }
+
+      return { data: data ?? [], error: null };
+    } catch (error) {
+      return {
+        data: null,
+        error: toUserError(error, "Failed to load categories"),
+      };
     }
-
-    return { data: data ?? [], error: null };
   },
 
   async getSuppliers(): Promise<ServiceResult<Supplier[]>> {
-    const { data, error } = await supabase
-      .from("suppliers")
-      .select("id, name")
-      .order("name");
+    try {
+      const { data, error } = await supabase
+        .from("suppliers")
+        .select("id, name")
+        .order("name");
 
-    if (error) {
-      return { data: null, error: error.message };
+      if (error) {
+        return {
+          data: null,
+          error: toUserError(error, "Failed to load suppliers"),
+        };
+      }
+
+      return { data: data ?? [], error: null };
+    } catch (error) {
+      return {
+        data: null,
+        error: toUserError(error, "Failed to load suppliers"),
+      };
     }
-
-    return { data: data ?? [], error: null };
   },
 
   async createIngredient(
     input: CreateIngredientInput,
   ): Promise<ServiceResult<IngredientWithRelations>> {
-    const referenceResult = getReferenceData(await fetchReferenceData());
+    try {
+      const duplicateResult = await findDuplicateName(input.name);
 
-    if ("error" in referenceResult) {
-      return referenceResult;
+      if (duplicateResult.error) {
+        return { data: null, error: duplicateResult.error };
+      }
+
+      if (duplicateResult.data) {
+        return { data: null, error: DUPLICATE_NAME_ERROR };
+      }
+
+      const referenceResult = getReferenceData(await fetchReferenceData());
+
+      if ("error" in referenceResult) {
+        return referenceResult;
+      }
+
+      const { data, error } = await supabase
+        .from("ingredients")
+        .insert(toIngredientPayload(input))
+        .select("*")
+        .single();
+
+      if (error) {
+        return {
+          data: null,
+          error: toUserError(error, "Failed to create ingredient"),
+        };
+      }
+
+      const [enriched] = enrichIngredients(
+        [data],
+        referenceResult.categories,
+        referenceResult.suppliers,
+      );
+
+      return { data: enriched, error: null };
+    } catch (error) {
+      return {
+        data: null,
+        error: toUserError(error, "Failed to create ingredient"),
+      };
     }
-
-    const { data, error } = await supabase
-      .from("ingredients")
-      .insert(input)
-      .select("*")
-      .single();
-
-    if (error) {
-      return { data: null, error: error.message };
-    }
-
-    const [enriched] = enrichIngredients(
-      [data],
-      referenceResult.categories,
-      referenceResult.suppliers,
-    );
-
-    return { data: enriched, error: null };
   },
 
   async updateIngredient(
     id: string,
     input: UpdateIngredientInput,
   ): Promise<ServiceResult<IngredientWithRelations>> {
-    const referenceResult = getReferenceData(await fetchReferenceData());
+    try {
+      const duplicateResult = await findDuplicateName(input.name, id);
 
-    if ("error" in referenceResult) {
-      return referenceResult;
+      if (duplicateResult.error) {
+        return { data: null, error: duplicateResult.error };
+      }
+
+      if (duplicateResult.data) {
+        return { data: null, error: DUPLICATE_NAME_ERROR };
+      }
+
+      const referenceResult = getReferenceData(await fetchReferenceData());
+
+      if ("error" in referenceResult) {
+        return referenceResult;
+      }
+
+      const { data, error } = await supabase
+        .from("ingredients")
+        .update(toIngredientPayload(input))
+        .eq("id", id)
+        .select("*")
+        .single();
+
+      if (error) {
+        return {
+          data: null,
+          error: toUserError(error, "Failed to update ingredient"),
+        };
+      }
+
+      const [enriched] = enrichIngredients(
+        [data],
+        referenceResult.categories,
+        referenceResult.suppliers,
+      );
+
+      return { data: enriched, error: null };
+    } catch (error) {
+      return {
+        data: null,
+        error: toUserError(error, "Failed to update ingredient"),
+      };
     }
-
-    const { data, error } = await supabase
-      .from("ingredients")
-      .update(input)
-      .eq("id", id)
-      .select("*")
-      .single();
-
-    if (error) {
-      return { data: null, error: error.message };
-    }
-
-    const [enriched] = enrichIngredients(
-      [data],
-      referenceResult.categories,
-      referenceResult.suppliers,
-    );
-
-    return { data: enriched, error: null };
   },
 
   async deleteIngredient(id: string): Promise<ServiceResult<null>> {
-    const { error } = await supabase.from("ingredients").delete().eq("id", id);
+    try {
+      const { error } = await supabase.from("ingredients").delete().eq("id", id);
 
-    if (error) {
-      return { data: null, error: error.message };
+      if (error) {
+        return {
+          data: null,
+          error: toUserError(error, "Failed to delete ingredient"),
+        };
+      }
+
+      return { data: null, error: null };
+    } catch (error) {
+      return {
+        data: null,
+        error: toUserError(error, "Failed to delete ingredient"),
+      };
     }
-
-    return { data: null, error: null };
   },
 };

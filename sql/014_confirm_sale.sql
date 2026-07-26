@@ -1,0 +1,101 @@
+-- Confirm Sale (DEV-027)
+-- Run in Supabase SQL editor after sql/013_create_sales.sql
+-- and sql/011_allocate_finished_goods_fifo.sql.
+--
+-- Atomically confirms a draft Sale in one SQL transaction:
+--   lock sale -> validate draft + lines
+--   -> allocate Finished Goods per line via allocate_finished_goods_fifo
+--   -> mark confirmed + confirmed_at
+--   -> return sale_id + total_cogs
+--
+-- This RPC is the ONLY place allowed to confirm a sale and drive FG outflow.
+--
+-- Does NOT:
+--   - implement FIFO (reuses allocate_finished_goods_fifo only)
+--   - calculate or store remaining_quantity
+--   - modify production_batches
+--   - update Finished Goods directly
+--   - create services, hooks, or UI
+
+CREATE OR REPLACE FUNCTION confirm_sale(
+  p_sale_id uuid
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_sale sales%ROWTYPE;
+  v_line sale_lines%ROWTYPE;
+  v_line_count integer := 0;
+  v_allocation jsonb;
+  v_total_cogs numeric := 0;
+  v_now timestamptz := now();
+BEGIN
+  IF p_sale_id IS NULL THEN
+    RAISE EXCEPTION 'Sale id is required.';
+  END IF;
+
+  -- 1. Lock the Sale FOR UPDATE.
+  SELECT *
+  INTO v_sale
+  FROM sales
+  WHERE id = p_sale_id
+  FOR UPDATE;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Sale was not found.';
+  END IF;
+
+  -- 2. Validate status == draft.
+  IF v_sale.status IS DISTINCT FROM 'draft' THEN
+    RAISE EXCEPTION 'Only draft sales can be confirmed.';
+  END IF;
+
+  -- 3 / 4 / 5. Lock lines, require at least one, allocate FIFO per line,
+  --    and sum COGS from allocation results.
+  FOR v_line IN
+    SELECT *
+    FROM sale_lines
+    WHERE sale_id = p_sale_id
+    ORDER BY created_at ASC, id ASC
+    FOR UPDATE
+  LOOP
+    v_allocation := allocate_finished_goods_fifo(
+      v_line.product_id,
+      v_line.quantity,
+      'sale',
+      'sale_line',
+      v_line.id
+    );
+
+    v_total_cogs := v_total_cogs
+      + COALESCE((v_allocation ->> 'total_cost')::numeric, 0);
+    v_line_count := v_line_count + 1;
+  END LOOP;
+
+  IF v_line_count = 0 THEN
+    RAISE EXCEPTION 'Sale has no lines to confirm.';
+  END IF;
+
+  -- 6 / 7. Mark Sale confirmed and store confirmed_at.
+  UPDATE sales
+  SET
+    status = 'confirmed',
+    confirmed_at = v_now,
+    updated_at = v_now
+  WHERE id = p_sale_id;
+
+  -- 8. Return sale_id + total_cogs (COGS snapshotted in ledger outs).
+  RETURN jsonb_build_object(
+    'sale_id', p_sale_id,
+    'total_cogs', v_total_cogs
+  );
+END;
+$$;
+
+COMMENT ON FUNCTION confirm_sale(uuid) IS
+  'Confirm a draft sale: FIFO-allocate finished goods per line via allocate_finished_goods_fifo, then mark confirmed. COGS comes from ledger allocation totals only.';
+
+GRANT EXECUTE ON FUNCTION confirm_sale(uuid) TO authenticated;

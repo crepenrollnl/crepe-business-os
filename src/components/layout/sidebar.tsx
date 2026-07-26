@@ -33,13 +33,15 @@ export function Sidebar({ isOpen, onClose, activePath = "/" }: SidebarProps) {
         <nav className="flex-1 overflow-y-auto px-3 py-4">
           <ul className="space-y-1">
             {navItems.map((item) => {
-              const isActive = item.href === activePath;
+              const isActive =
+                item.href !== "#" && item.href === activePath;
 
               return (
                 <li key={item.label}>
                   <Link
                     href={item.href}
                     onClick={onClose}
+                    aria-current={isActive ? "page" : undefined}
                     className={`block rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
                       isActive
                         ? "bg-amber-500/15 text-amber-400"

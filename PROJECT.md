@@ -14,7 +14,7 @@ It is designed for:
 
 It is not a single-purpose food truck app.
 
-It is a long-term operating system for food businesses, covering operations, inventory, sales, purchasing, production, finance, accounting, taxes, reporting, and AI-assisted workflows.
+It is a long-term operating system for food businesses, covering operations, inventory, sales, purchasing, production, accounting, reporting, and AI-assisted workflows.
 
 ---
 
@@ -26,6 +26,8 @@ It is a long-term operating system for food businesses, covering operations, inv
 4. **Inventory as the quality standard** — new modules must match Inventory quality before they ship.
 5. **No temporary hacks** — prefer durable design over short-term shortcuts.
 6. **Preserve working software** — never break existing functionality while evolving the platform.
+7. **One financial module** — Accounting owns all financial capabilities; do not create parallel Finance or Taxes modules.
+8. **Architecture Freeze v1.0** — the ERP Core is frozen; see [`docs/ARCHITECTURE_FREEZE_V1.md`](docs/ARCHITECTURE_FREEZE_V1.md). Core entities may not be redesigned without an ADR.
 
 ---
 
@@ -34,19 +36,19 @@ It is a long-term operating system for food businesses, covering operations, inv
 | Area | Status |
 |---|---|
 | Authentication | Live |
-| Dashboard shell | Live |
+| Dashboard | Live |
 | Inventory CRUD | Live (reference module) |
 | Supabase integration | Live |
 | Products | Planned |
 | Recipes | Planned |
-| Sales | Planned |
+| Suppliers (module UI) | Planned (table exists) |
 | Purchases | Planned |
 | Production | Planned |
-| Suppliers (module UI) | Planned (table exists) |
+| Finished Goods | Specified (`docs/FINISHED_GOODS.md`, `docs/BATCH_CONSUMPTION.md`) — not implemented |
+| Sales | Specified (`docs/SALES.md`, `docs/BATCH_CONSUMPTION.md`) — not implemented |
 | Customers | Planned |
-| Finance | Planned |
+| Events | Planned |
 | Accounting | Planned |
-| Taxes / VAT | Planned |
 | Reports | Planned |
 | AI Assistant | Planned |
 
@@ -97,8 +99,12 @@ features/<feature>/
   hooks/                # UI state and orchestration
   services/             # Supabase / data access only
   types/                # Feature-owned interfaces
+  utils/                # Feature-local pure helpers
   page/                 # Feature page composition
 ```
+
+Module layout, shared primitives, error handling, and import boundaries:
+[`docs/MODULE_FOUNDATION.md`](docs/MODULE_FOUNDATION.md).
 
 ### Responsibility boundaries
 
@@ -109,6 +115,9 @@ features/<feature>/
 | Hooks | Loading state, filters, modal flow, calling services | Raw SQL / Supabase client usage |
 | Services | All database access, data mapping, error normalization | JSX, UI state |
 | Types | Contracts and input/output shapes | Runtime side effects |
+| Utils | Pure feature-local helpers | Database clients, React components |
+
+Modules communicate through services. Do not import another feature’s components, hooks, or pages.
 
 ### Inventory is the reference implementation
 
@@ -124,6 +133,28 @@ Inventory currently demonstrates the required pattern:
 - dashboard layout integration
 
 All future modules must follow this pattern.
+
+---
+
+## Canonical Platform Modules
+
+The platform contains only these modules (see `src/constants/modules.ts`):
+
+1. Dashboard
+2. Inventory
+3. Products
+4. Recipes
+5. Suppliers
+6. Purchases
+7. Production Planning (`src/features/production`)
+8. Production Execution (`src/features/production-execution`) — planned
+9. Finished Goods (`src/features/finished-goods`) — planned
+10. Sales
+11. Customers
+12. Events
+13. Accounting
+14. Reports
+15. AI
 
 ---
 
@@ -194,12 +225,14 @@ Shared contracts live in:
 | `stock_batches` | Lot / batch tracking and cost layers |
 | `sales` | Sale headers |
 | `sale_items` | Sold lines |
+| `sale_batch_consumptions` | Append-only FIFO consumption layers and COGS audit (see `docs/BATCH_CONSUMPTION.md`, `docs/SALES.md`) |
+| `production_batches` | Immutable Production Execution output; produced qty/cost only — remaining is calculated (see `docs/BATCH_CONSUMPTION.md`) |
 | `customers` | Customer master data |
 | `events` | Catering / market / service events |
 | `production_orders` | Production runs |
 | `production_items` | Produced output and consumption links |
 
-### Planned finance and accounting tables
+### Planned accounting tables
 
 | Table | Purpose |
 |---|---|
@@ -207,8 +240,10 @@ Shared contracts live in:
 | `accounts` | Chart of accounts |
 | `journal_entries` | Double-entry postings |
 | `payments` | Cash / bank / card settlements |
+| `bank_accounts` | Bank and cash accounts |
 | `tax_rates` | VAT and other tax definitions |
 | `vat_periods` | VAT reporting periods and filing state |
+| `fixed_assets` | Fixed asset register readiness |
 
 ### Inventory evolution path
 
@@ -228,25 +263,30 @@ Target:
 
 ## Accounting Architecture (Prepared, Not Implemented)
 
-The platform must support:
+Accounting is the sole financial module. It will become the home for:
 
+- VAT
+- Taxes
+- Bank Accounts
 - General Ledger
-- Double-entry bookkeeping
+- Journal Entries
 - Balance Sheet
 - Profit & Loss
 - Cash Flow
-- VAT reporting
-- Income tax readiness
+- Fixed Assets
+- Payroll integration
+- Financial reports
 
 ### Design intent
 
 1. Every posted `Transaction` can generate one or more `journal_entries`.
 2. Every journal entry balances debits and credits.
 3. Operational modules emit business events; accounting posts from those events.
-4. Tax modules read from transactions / journal entries / VAT periods; they do not invent a second financial truth.
+4. VAT and tax workflows read from transactions / journal entries / VAT periods; they do not invent a second financial truth.
 5. Reports are projections over accounting and operational data, not isolated spreadsheets.
+6. There is no separate Finance or Taxes feature module.
 
-Accounting UI and posting engines are future work. Domain contracts already define the intended shape.
+Accounting UI and posting engines are future work. Domain contracts already define the intended shape in `src/types/accounting.ts`.
 
 ---
 
@@ -259,16 +299,15 @@ Accounting UI and posting engines are future work. Domain contracts already defi
 | **Inventory** | Ingredient stock master, stock warnings, category/supplier links, CRUD |
 | **Products** | Sellable catalog, pricing, product-recipe links |
 | **Recipes** | BOM, cost rollup, allergens, future nutrition |
-| **Sales** | Orders/tickets, customer linkage, stock impact, revenue transactions |
-| **Purchases** | Supplier receiving, invoice capture, stock increase, cost updates |
-| **Production** | Convert ingredients into finished goods via recipes |
 | **Suppliers** | Vendor master, contacts, purchase history |
+| **Purchases** | Supplier receiving, invoice capture, stock increase, cost updates |
+| **Production** | Convert ingredients into finished goods via recipes (Planning + Execution; Execution creates Production Batches) |
+| **Finished Goods** | Read-only aggregated view of sellable availability from Produced − Consumed (specs: `docs/FINISHED_GOODS.md`, `docs/BATCH_CONSUMPTION.md`) — never stores inventory |
+| **Sales** | Sale documents, append-only Sale Batch Consumption (FIFO), COGS/profit from consumption layers, revenue transactions (specs: `docs/SALES.md`, `docs/BATCH_CONSUMPTION.md`) — never mutates Inventory, never updates Production Batches, never creates Finished Goods |
 | **Customers** | Customer master, sales history, receivables readiness |
 | **Events** | Event-based operations and fulfillment context |
-| **Finance** | Payments, cash position, working-capital views |
-| **Accounting** | Chart of accounts, journal posting, GL, statements |
-| **Taxes** | VAT rates, VAT periods, tax settlements |
-| **Reports** | Operational and financial reporting |
+| **Accounting** | Sole financial module: VAT, taxes, bank accounts, chart of accounts, journal posting, GL, Balance Sheet, P&L, Cash Flow, fixed assets, payroll integration, financial reports |
+| **Reports** | Operational and financial reporting (projects from Accounting for money views) |
 | **AI** | OCR, suggestions, forecasting — always acting through services, never bypassing domain rules |
 | **Transactions** | Shared transaction contracts and future posting orchestration |
 
@@ -355,6 +394,26 @@ Do not redesign working screens unless explicitly requested.
 
 ---
 
+## Architecture Freeze v1.0
+
+The **ERP Core Architecture** is officially frozen as the project baseline.
+
+**Canonical freeze document:** [`docs/ARCHITECTURE_FREEZE_V1.md`](docs/ARCHITECTURE_FREEZE_V1.md)
+
+Supporting specs (must not contradict the freeze):
+
+- [`docs/BATCH_CONSUMPTION.md`](docs/BATCH_CONSUMPTION.md) — immutable Production Batches and Sale Batch Consumption
+- [`docs/FINISHED_GOODS.md`](docs/FINISHED_GOODS.md) — read-only calculated Finished Goods view
+- [`docs/SALES.md`](docs/SALES.md) — Sales FIFO, COGS, and returns
+
+From Architecture Freeze v1.0 onward:
+
+- New modules must follow the approved ERP Core.
+- Core entities may not be redesigned without an Architecture Decision Record (ADR).
+- Future work should focus on implementation instead of redesign.
+
+---
+
 ## Success Criteria for Architecture
 
 The architecture is correct when:
@@ -365,3 +424,5 @@ The architecture is correct when:
 4. Accounting can be introduced later without rewriting sales/purchases/production.
 5. No feature queries Supabase from components.
 6. No feature introduces a parallel financial or stock ledger.
+7. There is exactly one financial module: Accounting.
+8. Implementation respects Architecture Freeze v1.0 (`docs/ARCHITECTURE_FREEZE_V1.md`).

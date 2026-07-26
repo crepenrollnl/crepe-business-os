@@ -1,7 +1,9 @@
 /**
  * Accounting domain contracts.
  *
- * Prepared for General Ledger and double-entry posting.
+ * Accounting is the sole financial module. It owns VAT, taxes, bank accounts,
+ * general ledger, journal entries, statements, fixed assets, and payroll integration.
+ *
  * Do not implement posting engines until the Accounting roadmap phase.
  */
 
@@ -62,6 +64,24 @@ export interface Payment {
   created_at: string;
 }
 
+export interface BankAccount {
+  id: string;
+  name: string;
+  currency: string;
+  account_id: string | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at?: string;
+}
+
+export interface CashPosition {
+  currency: string;
+  available_amount: number;
+  pending_inbound: number;
+  pending_outbound: number;
+  as_of: string;
+}
+
 export interface TaxRate {
   id: string;
   name: string;
@@ -82,8 +102,8 @@ export interface VatPeriod {
 }
 
 /**
- * Statement projections that accounting modules will eventually serve.
- * Kept as contracts so Reports does not invent a second financial model.
+ * Statement projections that Accounting serves.
+ * Reports must project from these contracts, not invent a second financial model.
  */
 export type FinancialStatementType =
   | "trial_balance"
@@ -91,3 +111,19 @@ export type FinancialStatementType =
   | "profit_and_loss"
   | "cash_flow"
   | "vat_return";
+
+/**
+ * Future Accounting capability surface (contracts only until roadmap phase).
+ */
+export type AccountingCapability =
+  | "vat"
+  | "taxes"
+  | "bank_accounts"
+  | "general_ledger"
+  | "journal_entries"
+  | "balance_sheet"
+  | "profit_and_loss"
+  | "cash_flow"
+  | "fixed_assets"
+  | "payroll_integration"
+  | "financial_reports";

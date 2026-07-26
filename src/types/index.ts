@@ -1,4 +1,5 @@
 export type { ServiceResult } from "./service";
+export { fail, isFail, isOk, ok } from "./service";
 
 export {
   LIVE_TABLES,
@@ -13,6 +14,20 @@ export type {
 } from "./database";
 
 export type {
+  ActivationStatus,
+  CalendarDate,
+  CurrencyCode,
+  DateTime,
+  DocumentLifecycleStatus,
+  EntityId,
+  Money,
+  Quantity,
+  SortDirection,
+  StockAvailabilityStatus,
+  Unit,
+} from "./erp";
+
+export type {
   StockBatch,
   StockMovement,
   StockMovementType,
@@ -25,6 +40,9 @@ export type {
 export type {
   Account,
   AccountType,
+  AccountingCapability,
+  BankAccount,
+  CashPosition,
   FinancialStatementType,
   JournalEntry,
   JournalLine,

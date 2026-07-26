@@ -1,0 +1,3106 @@
+﻿diff --git a/sql/007_complete_production.sql b/sql/007_complete_production.sql
+new file mode 100644
+index 0000000..d5b063a
+--- /dev/null
++++ b/sql/007_complete_production.sql
+@@ -0,0 +1,708 @@
++-- Complete Production (PRD-001 / DEV-015)
++-- Run in Supabase SQL editor after 006_create_production_sessions.sql.
++--
++-- Atomic Production Session completion (single DB transaction):
++--   validate IN_PROGRESS тЖТ consume raw materials via inventory transactions
++--   (transactions + stock_movements) тЖТ production batches (Finished Goods)
++--   тЖТ mark session COMPLETED with completed_at / completed_by
++--
++-- Inventory balances are never edited outside stock mutation primitives that
++-- run together with immutable stock_movements in this same transaction.
++-- Finished Goods availability is registered by inserting immutable
++-- production_batches. There is no finished_goods stock table.
++-- remaining_quantity is NEVER stored on batches.
++-- Only Actual Produced Quantity is used (never Planned Quantity).
++
++-- ---------------------------------------------------------------------------
++-- Session completion audit columns
++-- ---------------------------------------------------------------------------
++
++ALTER TABLE production_sessions
++  ADD COLUMN IF NOT EXISTS completed_by uuid;
++
++-- ---------------------------------------------------------------------------
++-- Transactions (operational event ledger = Inventory Transactions)
++-- ---------------------------------------------------------------------------
++
++CREATE TABLE IF NOT EXISTS transactions (
++  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
++  type text NOT NULL
++    CHECK (
++      type IN (
++        'purchase',
++        'sale',
++        'production',
++        'waste',
++        'transfer',
++        'inventory_adjustment',
++        'salary',
++        'tax',
++        'expense',
++        'refund'
++      )
++    ),
++  status text NOT NULL DEFAULT 'posted'
++    CHECK (status IN ('draft', 'posted', 'voided')),
++  reference_type text NOT NULL
++    CHECK (
++      reference_type IN (
++        'purchase',
++        'sale',
++        'production_order',
++        'production_session',
++        'stock_movement',
++        'payment',
++        'manual',
++        'event'
++      )
++    ),
++  reference_id uuid,
++  amount numeric(12, 2) NOT NULL DEFAULT 0 CHECK (amount >= 0),
++  currency text NOT NULL DEFAULT 'EUR',
++  description text,
++  occurred_at timestamptz NOT NULL DEFAULT now(),
++  posted_at timestamptz,
++  created_at timestamptz NOT NULL DEFAULT now(),
++  updated_at timestamptz NOT NULL DEFAULT now()
++);
++
++CREATE INDEX IF NOT EXISTS transactions_type_idx ON transactions (type);
++CREATE INDEX IF NOT EXISTS transactions_reference_idx
++  ON transactions (reference_type, reference_id);
++CREATE INDEX IF NOT EXISTS transactions_occurred_at_idx
++  ON transactions (occurred_at DESC);
++
++-- ---------------------------------------------------------------------------
++-- Stock movements (immutable quantity ledger)
++-- ---------------------------------------------------------------------------
++
++CREATE TABLE IF NOT EXISTS stock_movements (
++  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
++  ingredient_id uuid REFERENCES ingredients (id),
++  product_id uuid,
++  movement_type text NOT NULL
++    CHECK (
++      movement_type IN (
++        'purchase_in',
++        'sale_out',
++        'production_in',
++        'production_out',
++        'waste_out',
++        'transfer_in',
++        'transfer_out',
++        'adjustment'
++      )
++    ),
++  quantity numeric(12, 3) NOT NULL CHECK (quantity > 0),
++  unit_cost numeric(12, 4),
++  transaction_id uuid REFERENCES transactions (id),
++  reference_type text NOT NULL
++    CHECK (
++      reference_type IN (
++        'purchase',
++        'sale',
++        'production_order',
++        'production_session',
++        'stock_movement',
++        'payment',
++        'manual',
++        'event'
++      )
++    ),
++  reference_id uuid,
++  occurred_at timestamptz NOT NULL DEFAULT now(),
++  created_at timestamptz NOT NULL DEFAULT now(),
++  CONSTRAINT stock_movements_target_chk CHECK (
++    ingredient_id IS NOT NULL OR product_id IS NOT NULL
++  )
++);
++
++CREATE INDEX IF NOT EXISTS stock_movements_ingredient_id_idx
++  ON stock_movements (ingredient_id);
++CREATE INDEX IF NOT EXISTS stock_movements_product_id_idx
++  ON stock_movements (product_id);
++CREATE INDEX IF NOT EXISTS stock_movements_transaction_id_idx
++  ON stock_movements (transaction_id);
++CREATE INDEX IF NOT EXISTS stock_movements_reference_idx
++  ON stock_movements (reference_type, reference_id);
++CREATE INDEX IF NOT EXISTS stock_movements_occurred_at_idx
++  ON stock_movements (occurred_at DESC);
++
++-- ---------------------------------------------------------------------------
++-- Production batches (immutable finished-goods production events)
++-- ---------------------------------------------------------------------------
++
++CREATE TABLE IF NOT EXISTS production_batches (
++  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
++  batch_number integer GENERATED ALWAYS AS IDENTITY UNIQUE,
++  production_session_id uuid NOT NULL REFERENCES production_sessions (id),
++  production_session_line_id uuid NOT NULL REFERENCES production_session_lines (id),
++  -- Until Products master exists, finished_good_id = recipe_id (planning convention).
++  finished_good_id uuid NOT NULL,
++  recipe_id uuid NOT NULL REFERENCES recipes (id),
++  produced_quantity numeric(12, 3) NOT NULL CHECK (produced_quantity > 0),
++  unit_cost numeric(12, 4) NOT NULL CHECK (unit_cost >= 0),
++  produced_at timestamptz NOT NULL,
++  created_at timestamptz NOT NULL DEFAULT now(),
++  CONSTRAINT production_batches_one_per_line UNIQUE (production_session_line_id)
++);
++
++CREATE INDEX IF NOT EXISTS production_batches_session_id_idx
++  ON production_batches (production_session_id);
++CREATE INDEX IF NOT EXISTS production_batches_finished_good_id_idx
++  ON production_batches (finished_good_id);
++CREATE INDEX IF NOT EXISTS production_batches_recipe_id_idx
++  ON production_batches (recipe_id);
++CREATE INDEX IF NOT EXISTS production_batches_produced_at_idx
++  ON production_batches (produced_at DESC);
++
++-- ---------------------------------------------------------------------------
++-- Stock decrease with sufficiency check (shared inventory primitive)
++-- ---------------------------------------------------------------------------
++
++CREATE OR REPLACE FUNCTION decrement_ingredient_stock(
++  p_ingredient_id uuid,
++  p_quantity numeric
++)
++RETURNS void
++LANGUAGE plpgsql
++AS $$
++DECLARE
++  v_name text;
++  v_stock numeric;
++BEGIN
++  IF p_quantity IS NULL OR p_quantity <= 0 THEN
++    RAISE EXCEPTION 'Stock decrease quantity must be greater than zero';
++  END IF;
++
++  SELECT name, current_stock
++  INTO v_name, v_stock
++  FROM ingredients
++  WHERE id = p_ingredient_id
++  FOR UPDATE;
++
++  IF NOT FOUND THEN
++    RAISE EXCEPTION 'Ingredient not found: %', p_ingredient_id;
++  END IF;
++
++  IF v_stock < p_quantity THEN
++    RAISE EXCEPTION
++      'Insufficient stock for "%". Required %, available %.',
++      COALESCE(v_name, 'ingredient'),
++      round(p_quantity, 3),
++      round(v_stock, 3);
++  END IF;
++
++  UPDATE ingredients
++  SET current_stock = current_stock - p_quantity
++  WHERE id = p_ingredient_id;
++END;
++$$;
++
++-- ---------------------------------------------------------------------------
++-- Atomic complete production session
++-- ---------------------------------------------------------------------------
++
++DROP FUNCTION IF EXISTS complete_production_session(uuid, text, jsonb);
++DROP FUNCTION IF EXISTS complete_production_session(uuid, text, jsonb, uuid);
++
++CREATE OR REPLACE FUNCTION complete_production_session(
++  p_session_id uuid,
++  p_notes text,
++  p_lines jsonb,
++  p_completed_by uuid DEFAULT NULL
++)
++RETURNS jsonb
++LANGUAGE plpgsql
++AS $$
++DECLARE
++  v_session production_sessions%ROWTYPE;
++  v_now timestamptz := now();
++  v_completed_by uuid;
++  v_line jsonb;
++  v_line_id uuid;
++  v_actual numeric;
++  v_session_line production_session_lines%ROWTYPE;
++  v_recipe recipes%ROWTYPE;
++  v_scale numeric;
++  v_recipe_item record;
++  v_batch_plan record;
++  v_consumption record;
++  v_stock record;
++  v_scaled_qty numeric;
++  v_line_total_cost numeric;
++  v_unit_cost numeric;
++  v_transaction_id uuid;
++  v_total_cost numeric := 0;
++  v_batch_ids uuid[] := ARRAY[]::uuid[];
++  v_batch_id uuid;
++  v_batch_count integer := 0;
++  v_line_count integer := 0;
++  v_updated integer;
++BEGIN
++  IF p_session_id IS NULL THEN
++    RAISE EXCEPTION 'Production session id is required.';
++  END IF;
++
++  IF p_lines IS NULL OR jsonb_typeof(p_lines) <> 'array' THEN
++    RAISE EXCEPTION 'Production session lines are required.';
++  END IF;
++
++  v_completed_by := COALESCE(p_completed_by, auth.uid());
++  IF v_completed_by IS NULL THEN
++    RAISE EXCEPTION 'Completed by user is required.';
++  END IF;
++
++  SELECT *
++  INTO v_session
++  FROM production_sessions
++  WHERE id = p_session_id
++  FOR UPDATE;
++
++  IF NOT FOUND THEN
++    RAISE EXCEPTION 'Production session was not found.';
++  END IF;
++
++  -- BR-001 / BR-002: only IN_PROGRESS may complete; completed is immutable.
++  IF v_session.status = 'completed' THEN
++    RAISE EXCEPTION 'This production session is already completed.';
++  END IF;
++
++  IF v_session.status = 'cancelled' THEN
++    RAISE EXCEPTION 'This production session was cancelled.';
++  END IF;
++
++  IF v_session.status IS DISTINCT FROM 'in_progress' THEN
++    RAISE EXCEPTION 'Only in-progress production sessions can be completed.';
++  END IF;
++
++  v_line_count := jsonb_array_length(p_lines);
++  IF v_line_count = 0 THEN
++    RAISE EXCEPTION 'This session has no products to produce.';
++  END IF;
++
++  UPDATE production_sessions
++  SET
++    notes = NULLIF(btrim(COALESCE(p_notes, '')), ''),
++    updated_at = v_now
++  WHERE id = p_session_id;
++
++  FOR v_line IN SELECT * FROM jsonb_array_elements(p_lines)
++  LOOP
++    BEGIN
++      v_line_id := (v_line ->> 'line_id')::uuid;
++    EXCEPTION
++      WHEN others THEN
++        RAISE EXCEPTION 'One or more session lines are invalid.';
++    END;
++
++    IF v_line_id IS NULL THEN
++      RAISE EXCEPTION 'One or more session lines are invalid.';
++    END IF;
++
++    IF v_line ->> 'actual_produced_quantity' IS NULL
++       OR btrim(v_line ->> 'actual_produced_quantity') = '' THEN
++      RAISE EXCEPTION
++        'Enter an actual produced quantity for every product before finishing.';
++    END IF;
++
++    BEGIN
++      v_actual := (v_line ->> 'actual_produced_quantity')::numeric;
++    EXCEPTION
++      WHEN others THEN
++        RAISE EXCEPTION 'Enter a valid produced quantity.';
++    END;
++
++    IF v_actual < 0 THEN
++      RAISE EXCEPTION 'Produced quantity cannot be negative.';
++    END IF;
++
++    UPDATE production_session_lines
++    SET
++      actual_produced_quantity = v_actual,
++      updated_at = v_now
++    WHERE id = v_line_id
++      AND production_session_id = p_session_id;
++
++    GET DIAGNOSTICS v_updated = ROW_COUNT;
++    IF v_updated = 0 THEN
++      RAISE EXCEPTION 'One or more session lines are invalid.';
++    END IF;
++  END LOOP;
++
++  IF EXISTS (
++    SELECT 1
++    FROM production_session_lines
++    WHERE production_session_id = p_session_id
++      AND actual_produced_quantity IS NULL
++  ) THEN
++    RAISE EXCEPTION
++      'Enter an actual produced quantity for every product before finishing.';
++  END IF;
++
++  IF (
++    SELECT count(*)::integer
++    FROM production_session_lines
++    WHERE production_session_id = p_session_id
++  ) <> v_line_count THEN
++    RAISE EXCEPTION
++      'Enter an actual produced quantity for every product before finishing.';
++  END IF;
++
++  DROP TABLE IF EXISTS tmp_production_consumption;
++  DROP TABLE IF EXISTS tmp_production_batches;
++
++  CREATE TEMP TABLE tmp_production_consumption (
++    ingredient_id uuid PRIMARY KEY,
++    quantity numeric(12, 3) NOT NULL CHECK (quantity > 0),
++    total_cost numeric(14, 6) NOT NULL DEFAULT 0
++  ) ON COMMIT DROP;
++
++  CREATE TEMP TABLE tmp_production_batches (
++    session_line_id uuid PRIMARY KEY,
++    finished_good_id uuid NOT NULL,
++    recipe_id uuid NOT NULL,
++    produced_quantity numeric(12, 3) NOT NULL,
++    unit_cost numeric(12, 4) NOT NULL,
++    total_cost numeric(14, 6) NOT NULL
++  ) ON COMMIT DROP;
++
++  FOR v_session_line IN
++    SELECT *
++    FROM production_session_lines
++    WHERE production_session_id = p_session_id
++    ORDER BY sort_order ASC
++  LOOP
++    IF v_session_line.actual_produced_quantity IS NULL
++       OR v_session_line.actual_produced_quantity = 0 THEN
++      CONTINUE;
++    END IF;
++
++    SELECT *
++    INTO v_recipe
++    FROM recipes
++    WHERE id = v_session_line.recipe_id;
++
++    IF NOT FOUND THEN
++      RAISE EXCEPTION
++        'Recipe for "%" was not found.',
++        v_session_line.product_name;
++    END IF;
++
++    IF NOT v_recipe.is_active THEN
++      RAISE EXCEPTION
++        'Recipe "%" is inactive and cannot be produced.',
++        v_recipe.name;
++    END IF;
++
++    IF v_recipe.yield_quantity IS NULL OR v_recipe.yield_quantity <= 0 THEN
++      RAISE EXCEPTION
++        'Recipe "%" has an invalid yield.',
++        v_recipe.name;
++    END IF;
++
++    IF NOT EXISTS (
++      SELECT 1 FROM recipe_items WHERE recipe_id = v_recipe.id
++    ) THEN
++      RAISE EXCEPTION
++        'Recipe "%" has no ingredients.',
++        v_recipe.name;
++    END IF;
++
++    v_scale :=
++      v_session_line.actual_produced_quantity / v_recipe.yield_quantity;
++    v_line_total_cost := 0;
++
++    FOR v_recipe_item IN
++      SELECT
++        ri.ingredient_id,
++        ri.quantity AS bom_quantity,
++        COALESCE(i.cost_per_unit, 0) AS cost_per_unit
++      FROM recipe_items ri
++      JOIN ingredients i ON i.id = ri.ingredient_id
++      WHERE ri.recipe_id = v_recipe.id
++    LOOP
++      v_scaled_qty := round(v_recipe_item.bom_quantity * v_scale, 3);
++      IF v_scaled_qty <= 0 THEN
++        CONTINUE;
++      END IF;
++
++      v_line_total_cost :=
++        v_line_total_cost
++        + (v_scaled_qty * v_recipe_item.cost_per_unit);
++
++      INSERT INTO tmp_production_consumption AS c (
++        ingredient_id,
++        quantity,
++        total_cost
++      )
++      VALUES (
++        v_recipe_item.ingredient_id,
++        v_scaled_qty,
++        v_scaled_qty * v_recipe_item.cost_per_unit
++      )
++      ON CONFLICT (ingredient_id) DO UPDATE
++      SET
++        quantity = round(c.quantity + EXCLUDED.quantity, 3),
++        total_cost = c.total_cost + EXCLUDED.total_cost;
++    END LOOP;
++
++    v_unit_cost := round(
++      v_line_total_cost / v_session_line.actual_produced_quantity,
++      4
++    );
++
++    INSERT INTO tmp_production_batches (
++      session_line_id,
++      finished_good_id,
++      recipe_id,
++      produced_quantity,
++      unit_cost,
++      total_cost
++    )
++    VALUES (
++      v_session_line.id,
++      v_session_line.recipe_id,
++      v_session_line.recipe_id,
++      v_session_line.actual_produced_quantity,
++      v_unit_cost,
++      v_line_total_cost
++    );
++
++    v_total_cost := v_total_cost + v_line_total_cost;
++  END LOOP;
++
++  -- Lock and validate inventory before mutation.
++  FOR v_stock IN
++    SELECT
++      c.ingredient_id,
++      c.quantity AS required_quantity,
++      i.name AS ingredient_name,
++      i.current_stock
++    FROM tmp_production_consumption c
++    JOIN ingredients i ON i.id = c.ingredient_id
++    ORDER BY c.ingredient_id
++    FOR UPDATE OF i
++  LOOP
++    IF v_stock.current_stock < v_stock.required_quantity THEN
++      RAISE EXCEPTION
++        'Insufficient stock for "%". Required %, available %.',
++        v_stock.ingredient_name,
++        round(v_stock.required_quantity, 3),
++        round(v_stock.current_stock, 3);
++    END IF;
++  END LOOP;
++
++  INSERT INTO transactions (
++    type,
++    status,
++    reference_type,
++    reference_id,
++    amount,
++    currency,
++    description,
++    occurred_at,
++    posted_at,
++    created_at,
++    updated_at
++  )
++  VALUES (
++    'production',
++    'posted',
++    'production_session',
++    p_session_id,
++    round(v_total_cost, 2),
++    'EUR',
++    format('Production session #%s completed', v_session.session_number),
++    v_now,
++    v_now,
++    v_now,
++    v_now
++  )
++  RETURNING id INTO v_transaction_id;
++
++  FOR v_consumption IN
++    SELECT ingredient_id, quantity, total_cost
++    FROM tmp_production_consumption
++    ORDER BY ingredient_id
++  LOOP
++    PERFORM decrement_ingredient_stock(
++      v_consumption.ingredient_id,
++      v_consumption.quantity
++    );
++
++    INSERT INTO stock_movements (
++      ingredient_id,
++      product_id,
++      movement_type,
++      quantity,
++      unit_cost,
++      transaction_id,
++      reference_type,
++      reference_id,
++      occurred_at,
++      created_at
++    )
++    VALUES (
++      v_consumption.ingredient_id,
++      NULL,
++      'production_out',
++      v_consumption.quantity,
++      CASE
++        WHEN v_consumption.quantity > 0 THEN
++          round(v_consumption.total_cost / v_consumption.quantity, 4)
++        ELSE 0
++      END,
++      v_transaction_id,
++      'production_session',
++      p_session_id,
++      v_now,
++      v_now
++    );
++  END LOOP;
++
++  FOR v_batch_plan IN
++    SELECT
++      b.session_line_id,
++      b.finished_good_id,
++      b.recipe_id,
++      b.produced_quantity,
++      b.unit_cost
++    FROM tmp_production_batches b
++    JOIN production_session_lines sl ON sl.id = b.session_line_id
++    WHERE sl.production_session_id = p_session_id
++    ORDER BY sl.sort_order ASC
++  LOOP
++    INSERT INTO production_batches (
++      production_session_id,
++      production_session_line_id,
++      finished_good_id,
++      recipe_id,
++      produced_quantity,
++      unit_cost,
++      produced_at,
++      created_at
++    )
++    VALUES (
++      p_session_id,
++      v_batch_plan.session_line_id,
++      v_batch_plan.finished_good_id,
++      v_batch_plan.recipe_id,
++      v_batch_plan.produced_quantity,
++      v_batch_plan.unit_cost,
++      v_now,
++      v_now
++    )
++    RETURNING id INTO v_batch_id;
++
++    v_batch_ids := array_append(v_batch_ids, v_batch_id);
++    v_batch_count := v_batch_count + 1;
++
++    INSERT INTO stock_movements (
++      ingredient_id,
++      product_id,
++      movement_type,
++      quantity,
++      unit_cost,
++      transaction_id,
++      reference_type,
++      reference_id,
++      occurred_at,
++      created_at
++    )
++    VALUES (
++      NULL,
++      v_batch_plan.finished_good_id,
++      'production_in',
++      v_batch_plan.produced_quantity,
++      v_batch_plan.unit_cost,
++      v_transaction_id,
++      'production_session',
++      p_session_id,
++      v_now,
++      v_now
++    );
++  END LOOP;
++
++  UPDATE production_sessions
++  SET
++    status = 'completed',
++    completed_at = v_now,
++    completed_by = v_completed_by,
++    notes = NULLIF(btrim(COALESCE(p_notes, '')), ''),
++    updated_at = v_now
++  WHERE id = p_session_id
++    AND status = 'in_progress';
++
++  GET DIAGNOSTICS v_updated = ROW_COUNT;
++  IF v_updated = 0 THEN
++    RAISE EXCEPTION 'This production session is already completed.';
++  END IF;
++
++  RETURN jsonb_build_object(
++    'session_id', p_session_id,
++    'transaction_id', v_transaction_id,
++    'batch_count', v_batch_count,
++    'batch_ids', to_jsonb(v_batch_ids),
++    'total_cost', round(v_total_cost, 2),
++    'completed_at', v_now,
++    'completed_by', v_completed_by
++  );
++END;
++$$;
++
++-- ---------------------------------------------------------------------------
++-- RLS
++-- ---------------------------------------------------------------------------
++
++ALTER TABLE transactions ENABLE ROW LEVEL SECURITY;
++ALTER TABLE stock_movements ENABLE ROW LEVEL SECURITY;
++ALTER TABLE production_batches ENABLE ROW LEVEL SECURITY;
++
++DO $$
++BEGIN
++  IF NOT EXISTS (
++    SELECT 1
++    FROM pg_policies
++    WHERE tablename = 'transactions'
++      AND policyname = 'transactions_authenticated_all'
++  ) THEN
++    CREATE POLICY transactions_authenticated_all
++      ON transactions
++      FOR ALL
++      TO authenticated
++      USING (true)
++      WITH CHECK (true);
++  END IF;
++
++  IF NOT EXISTS (
++    SELECT 1
++    FROM pg_policies
++    WHERE tablename = 'stock_movements'
++      AND policyname = 'stock_movements_authenticated_all'
++  ) THEN
++    CREATE POLICY stock_movements_authenticated_all
++      ON stock_movements
++      FOR ALL
++      TO authenticated
++      USING (true)
++      WITH CHECK (true);
++  END IF;
++
++  IF NOT EXISTS (
++    SELECT 1
++    FROM pg_policies
++    WHERE tablename = 'production_batches'
++      AND policyname = 'production_batches_authenticated_all'
++  ) THEN
++    CREATE POLICY production_batches_authenticated_all
++      ON production_batches
++      FOR ALL
++      TO authenticated
++      USING (true)
++      WITH CHECK (true);
++  END IF;
++END $$;
++
++GRANT EXECUTE ON FUNCTION decrement_ingredient_stock(uuid, numeric) TO authenticated;
++GRANT EXECUTE ON FUNCTION complete_production_session(uuid, text, jsonb, uuid) TO authenticated;
+diff --git a/src/features/production-execution/services/complete-session.integration.test.ts b/src/features/production-execution/services/complete-session.integration.test.ts
+new file mode 100644
+index 0000000..c95765e
+--- /dev/null
++++ b/src/features/production-execution/services/complete-session.integration.test.ts
+@@ -0,0 +1,264 @@
++/**
++ * Service-level integration coverage for completeSession (PRD-001).
++ * Mocks Supabase to prove pre-transaction guards and RPC wiring.
++ */
++
++import { beforeEach, describe, expect, it, vi } from "vitest";
++
++const { supabaseMock } = vi.hoisted(() => {
++  const supabaseMock = {
++    from: vi.fn(),
++    rpc: vi.fn(),
++    auth: {
++      getUser: vi.fn(),
++    },
++  };
++  return { supabaseMock };
++});
++
++vi.mock("@/lib/supabase", () => ({
++  supabase: supabaseMock,
++}));
++
++vi.mock("@/features/production/services/production-service", () => ({
++  productionService: {
++    getProductionPlanById: vi.fn(),
++  },
++}));
++
++vi.mock("./production-batch-service", () => ({
++  productionBatchService: {
++    listBySessionId: vi.fn(async () => ({ data: [], error: null })),
++  },
++}));
++
++import { productionSessionService } from "./production-session-service";
++
++function sessionRow(status: string) {
++  return {
++    id: "session-1",
++    session_number: 7,
++    production_plan_id: "plan-1",
++    status,
++    started_at: "2026-07-21T10:00:00.000Z",
++    completed_at: status === "completed" ? "2026-07-21T11:00:00.000Z" : null,
++    completed_by: status === "completed" ? "user-1" : null,
++    operator_name: null,
++    notes: null,
++    created_at: "2026-07-21T10:00:00.000Z",
++    updated_at: "2026-07-21T10:00:00.000Z",
++  };
++}
++
++function lineRow() {
++  return {
++    id: "line-1",
++    production_session_id: "session-1",
++    production_plan_product_id: "ppp-1",
++    recipe_id: "recipe-1",
++    product_name: "Chicken Crepe",
++    planned_quantity: 10,
++    actual_produced_quantity: null,
++    yield_unit: "pcs",
++    sort_order: 0,
++  };
++}
++
++function mockFromForComplete(options: {
++  sessionStatus: string;
++  flourStock?: number;
++}) {
++  const flourStock = options.flourStock ?? 100;
++
++  supabaseMock.from.mockImplementation((table: string) => {
++    if (table === "production_sessions") {
++      return {
++        select: vi.fn().mockReturnValue({
++          eq: vi.fn().mockReturnValue({
++            maybeSingle: vi.fn().mockResolvedValue({
++              data: sessionRow(options.sessionStatus),
++              error: null,
++            }),
++          }),
++        }),
++      };
++    }
++
++    if (table === "production_session_lines") {
++      return {
++        select: vi.fn().mockReturnValue({
++          eq: vi.fn().mockReturnValue({
++            order: vi.fn().mockResolvedValue({
++              data: [lineRow()],
++              error: null,
++            }),
++          }),
++        }),
++      };
++    }
++
++    if (table === "production_plans") {
++      return {
++        select: vi.fn().mockReturnValue({
++          eq: vi.fn().mockReturnValue({
++            maybeSingle: vi.fn().mockResolvedValue({
++              data: { id: "plan-1", plan_number: 1, name: "Plan A" },
++              error: null,
++            }),
++          }),
++        }),
++      };
++    }
++
++    if (table === "recipes") {
++      return {
++        select: vi.fn().mockReturnValue({
++          in: vi.fn().mockResolvedValue({
++            data: [
++              {
++                id: "recipe-1",
++                name: "Chicken Crepe",
++                yield_quantity: 10,
++                is_active: true,
++              },
++            ],
++            error: null,
++          }),
++        }),
++      };
++    }
++
++    if (table === "recipe_items") {
++      return {
++        select: vi.fn().mockReturnValue({
++          in: vi.fn().mockResolvedValue({
++            data: [
++              {
++                recipe_id: "recipe-1",
++                ingredient_id: "flour",
++                quantity: 2,
++                unit: "kg",
++              },
++            ],
++            error: null,
++          }),
++        }),
++      };
++    }
++
++    if (table === "ingredients") {
++      return {
++        select: vi.fn().mockReturnValue({
++          in: vi.fn().mockResolvedValue({
++            data: [
++              {
++                id: "flour",
++                name: "Flour",
++                unit: "kg",
++                current_stock: flourStock,
++                cost_per_unit: 1.5,
++              },
++            ],
++            error: null,
++          }),
++        }),
++      };
++    }
++
++    throw new Error(`Unexpected table: ${table}`);
++  });
++}
++
++describe("productionSessionService.completeSession", () => {
++  beforeEach(() => {
++    vi.clearAllMocks();
++    supabaseMock.auth.getUser.mockResolvedValue({
++      data: { user: { id: "user-1" } },
++      error: null,
++    });
++  });
++
++  it("successful completion calls RPC with completed_by and actual quantities", async () => {
++    const logSpy = vi.spyOn(console, "info").mockImplementation(() => undefined);
++    mockFromForComplete({ sessionStatus: "in_progress" });
++    supabaseMock.rpc.mockResolvedValue({
++      data: {
++        session_id: "session-1",
++        transaction_id: "txn-1",
++        batch_count: 1,
++        batch_ids: ["batch-1"],
++        total_cost: 1.5,
++        completed_at: "2026-07-21T12:00:00.000Z",
++        completed_by: "user-1",
++      },
++      error: null,
++    });
++
++    const result = await productionSessionService.completeSession("session-1", {
++      notes: "Done",
++      lines: [{ line_id: "line-1", actual_produced_quantity: 5 }],
++    });
++
++    expect(result.error).toBeNull();
++    expect(supabaseMock.rpc).toHaveBeenCalledWith("complete_production_session", {
++      p_session_id: "session-1",
++      p_notes: "Done",
++      p_lines: [{ line_id: "line-1", actual_produced_quantity: 5 }],
++      p_completed_by: "user-1",
++    });
++    expect(logSpy).toHaveBeenCalledWith(
++      "ProductionCompleted",
++      expect.objectContaining({
++        session_id: "session-1",
++        batch_ids: ["batch-1"],
++        total_cost: 1.5,
++      }),
++    );
++    logSpy.mockRestore();
++  });
++
++  it("insufficient inventory returns a domain error and skips RPC", async () => {
++    mockFromForComplete({ sessionStatus: "in_progress", flourStock: 0.1 });
++
++    const result = await productionSessionService.completeSession("session-1", {
++      notes: null,
++      lines: [{ line_id: "line-1", actual_produced_quantity: 5 }],
++    });
++
++    expect(result.data).toBeNull();
++    expect(result.error).toContain("Insufficient stock for \"Flour\"");
++    expect(supabaseMock.rpc).not.toHaveBeenCalled();
++  });
++
++  it("double completion returns a domain error and skips RPC", async () => {
++    mockFromForComplete({ sessionStatus: "completed" });
++
++    const result = await productionSessionService.completeSession("session-1", {
++      notes: null,
++      lines: [{ line_id: "line-1", actual_produced_quantity: 5 }],
++    });
++
++    expect(result.data).toBeNull();
++    expect(result.error).toBe("This production session is already completed.");
++    expect(supabaseMock.rpc).not.toHaveBeenCalled();
++  });
++
++  it("RPC failure is surfaced as a domain error (transaction rolled back server-side)", async () => {
++    mockFromForComplete({ sessionStatus: "in_progress" });
++    supabaseMock.rpc.mockResolvedValue({
++      data: null,
++      error: {
++        message: "Forced failure during production batch creation.",
++      },
++    });
++
++    const result = await productionSessionService.completeSession("session-1", {
++      notes: null,
++      lines: [{ line_id: "line-1", actual_produced_quantity: 5 }],
++    });
++
++    expect(result.data).toBeNull();
++    expect(result.error).toBe("Forced failure during production batch creation.");
++    expect(supabaseMock.rpc).toHaveBeenCalledTimes(1);
++  });
++});
+diff --git a/src/features/production-execution/services/production-session-service.ts b/src/features/production-execution/services/production-session-service.ts
+new file mode 100644
+index 0000000..4578c6b
+--- /dev/null
++++ b/src/features/production-execution/services/production-session-service.ts
+@@ -0,0 +1,794 @@
++/**
++ * Production Session service (DEV-014 / DEV-015).
++ *
++ * Creates Production Sessions and atomically completes them:
++ * consume raw materials тЖТ stock movements тЖТ production batches тЖТ completed.
++ *
++ * Does NOT mutate the Production Plan.
++ */
++
++import { productionService } from "@/features/production/services/production-service";
++import { toUserError } from "@/lib/service-errors";
++import { supabase } from "@/lib/supabase";
++import { fail, ok, type ServiceResult } from "@/types/service";
++import { EXECUTABLE_PLAN_STATUS } from "../types/production-execution";
++import type {
++  CompleteProductionSessionInput,
++  ProductionSession,
++  ProductionSessionLine,
++  ProductionSessionStatus,
++  ProductionSessionWithRelations,
++  SaveProductionSessionInput,
++} from "../types/production-session";
++import { OPEN_PRODUCTION_SESSION_STATUSES } from "../types/production-session";
++import type { CompleteProductionSessionResult } from "../types/production-batch";
++import { productionBatchService } from "./production-batch-service";
++import {
++  assertCanCompleteProductionSession,
++  buildCompleteProductionPlan,
++  logProductionCompleted,
++  mapCompleteProductionRpcError,
++  validateInventoryForCompletion,
++  type CompleteProductionRecipeBom,
++} from "../utils/complete-production";
++import {
++  toSessionLineView,
++  validateSessionLinesForComplete,
++  validateProducedQuantity,
++} from "../utils/production-session";
++
++const SESSION_SELECT =
++  "id, session_number, production_plan_id, status, started_at, completed_at, completed_by, operator_name, notes, created_at, updated_at";
++
++interface ProductionSessionRow {
++  id: string;
++  session_number: number;
++  production_plan_id: string;
++  status: ProductionSessionStatus;
++  started_at: string;
++  completed_at: string | null;
++  completed_by: string | null;
++  operator_name: string | null;
++  notes: string | null;
++  created_at: string;
++  updated_at?: string;
++}
++
++interface ProductionSessionLineRow {
++  id: string;
++  production_session_id: string;
++  production_plan_product_id: string | null;
++  recipe_id: string;
++  product_name: string;
++  planned_quantity: number | string;
++  actual_produced_quantity: number | string | null;
++  yield_unit: string;
++  sort_order: number;
++}
++
++interface PlanHeaderRow {
++  id: string;
++  plan_number: number;
++  name: string;
++}
++
++interface RecipeRow {
++  id: string;
++  name: string;
++  yield_quantity: number | string;
++  is_active: boolean;
++}
++
++interface RecipeItemRow {
++  recipe_id: string;
++  ingredient_id: string;
++  quantity: number | string;
++  unit: string;
++}
++
++interface IngredientCostRow {
++  id: string;
++  name: string;
++  unit: string;
++  current_stock: number | string;
++  cost_per_unit: number | string;
++}
++
++function toNumber(value: number | string): number {
++  return typeof value === "number" ? value : Number(value);
++}
++
++function toNullableNumber(
++  value: number | string | null | undefined,
++): number | null {
++  if (value === null || value === undefined) {
++    return null;
++  }
++
++  return toNumber(value);
++}
++
++function mapSession(row: ProductionSessionRow): ProductionSession {
++  return {
++    id: row.id,
++    session_number: row.session_number,
++    production_plan_id: row.production_plan_id,
++    status: row.status,
++    started_at: row.started_at,
++    completed_at: row.completed_at,
++    completed_by: row.completed_by ?? null,
++    operator_name: row.operator_name,
++    notes: row.notes,
++    created_at: row.created_at,
++    updated_at: row.updated_at,
++  };
++}
++
++function mapSessionLine(row: ProductionSessionLineRow): ProductionSessionLine {
++  return {
++    id: row.id,
++    production_session_id: row.production_session_id,
++    production_plan_product_id: row.production_plan_product_id,
++    recipe_id: row.recipe_id,
++    product_name: row.product_name,
++    planned_quantity: toNumber(row.planned_quantity),
++    actual_produced_quantity: toNullableNumber(row.actual_produced_quantity),
++    yield_unit: row.yield_unit,
++    sort_order: row.sort_order,
++  };
++}
++
++async function fetchSessionLines(
++  sessionId: string,
++): Promise<ServiceResult<ProductionSessionLine[]>> {
++  const { data, error } = await supabase
++    .from("production_session_lines")
++    .select(
++      "id, production_session_id, production_plan_product_id, recipe_id, product_name, planned_quantity, actual_produced_quantity, yield_unit, sort_order",
++    )
++    .eq("production_session_id", sessionId)
++    .order("sort_order", { ascending: true });
++
++  if (error) {
++    return fail(toUserError(error, "Failed to load production session lines"));
++  }
++
++  return ok(
++    (data as ProductionSessionLineRow[] | null)?.map(mapSessionLine) ?? [],
++  );
++}
++
++async function fetchPlanHeader(
++  planId: string,
++): Promise<ServiceResult<PlanHeaderRow>> {
++  const { data, error } = await supabase
++    .from("production_plans")
++    .select("id, plan_number, name")
++    .eq("id", planId)
++    .maybeSingle();
++
++  if (error) {
++    return fail(toUserError(error, "Failed to load production plan"));
++  }
++
++  if (!data) {
++    return fail("Production plan was not found.");
++  }
++
++  return ok(data as PlanHeaderRow);
++}
++
++async function buildSessionWithRelations(
++  session: ProductionSession,
++): Promise<ServiceResult<ProductionSessionWithRelations>> {
++  const [linesResult, planResult] = await Promise.all([
++    fetchSessionLines(session.id),
++    fetchPlanHeader(session.production_plan_id),
++  ]);
++
++  if (linesResult.error || !linesResult.data) {
++    return fail(linesResult.error ?? "Failed to load production session lines");
++  }
++
++  if (planResult.error || !planResult.data) {
++    return fail(planResult.error ?? "Failed to load production plan");
++  }
++
++  const base: ProductionSessionWithRelations = {
++    ...session,
++    lines: linesResult.data.map(toSessionLineView),
++    plan: {
++      id: planResult.data.id,
++      plan_number: planResult.data.plan_number,
++      name: planResult.data.name,
++    },
++  };
++
++  if (session.status !== "completed") {
++    return ok(base);
++  }
++
++  const batchesResult = await productionBatchService.listBySessionId(session.id);
++  if (batchesResult.error) {
++    // Batches table may not exist yet before SQL 007 is applied.
++    const message = batchesResult.error.toLowerCase();
++    if (
++      message.includes("production_batches") ||
++      message.includes("does not exist") ||
++      message.includes("schema cache")
++    ) {
++      return ok({ ...base, batches: [] });
++    }
++    return fail(batchesResult.error);
++  }
++
++  return ok({
++    ...base,
++    batches: batchesResult.data ?? [],
++  });
++}
++
++function validateSaveInput(input: SaveProductionSessionInput): string | null {
++  for (const line of input.lines) {
++    const error = validateProducedQuantity(line.actual_produced_quantity);
++    if (error) {
++      return error;
++    }
++  }
++
++  return null;
++}
++
++async function loadRecipeBomsForCompletion(
++  recipeIds: string[],
++): Promise<ServiceResult<Map<string, CompleteProductionRecipeBom>>> {
++  const uniqueIds = [...new Set(recipeIds)];
++
++  if (uniqueIds.length === 0) {
++    return ok(new Map());
++  }
++
++  const [recipesResult, itemsResult] = await Promise.all([
++    supabase
++      .from("recipes")
++      .select("id, name, yield_quantity, is_active")
++      .in("id", uniqueIds),
++    supabase
++      .from("recipe_items")
++      .select("recipe_id, ingredient_id, quantity, unit")
++      .in("recipe_id", uniqueIds),
++  ]);
++
++  if (recipesResult.error) {
++    return fail(toUserError(recipesResult.error, "Failed to load recipes"));
++  }
++
++  if (itemsResult.error) {
++    return fail(
++      toUserError(itemsResult.error, "Failed to load recipe ingredients"),
++    );
++  }
++
++  const recipeRows = (recipesResult.data ?? []) as RecipeRow[];
++  const itemRows = (itemsResult.data ?? []) as RecipeItemRow[];
++  const ingredientIds = [
++    ...new Set(itemRows.map((item) => item.ingredient_id)),
++  ];
++
++  let ingredientRows: IngredientCostRow[] = [];
++
++  if (ingredientIds.length > 0) {
++    const ingredientsResult = await supabase
++      .from("ingredients")
++      .select("id, name, unit, current_stock, cost_per_unit")
++      .in("id", ingredientIds);
++
++    if (ingredientsResult.error) {
++      return fail(
++        toUserError(ingredientsResult.error, "Failed to load ingredient stock"),
++      );
++    }
++
++    ingredientRows = (ingredientsResult.data ?? []) as IngredientCostRow[];
++  }
++
++  const ingredientMap = new Map(
++    ingredientRows.map((row) => [
++      row.id,
++      {
++        id: row.id,
++        name: row.name,
++        unit: row.unit,
++        current_stock: toNumber(row.current_stock),
++        cost_per_unit: toNumber(row.cost_per_unit),
++      },
++    ]),
++  );
++
++  const itemsByRecipe = new Map<string, RecipeItemRow[]>();
++  for (const item of itemRows) {
++    const existing = itemsByRecipe.get(item.recipe_id) ?? [];
++    existing.push(item);
++    itemsByRecipe.set(item.recipe_id, existing);
++  }
++
++  const boms = new Map<string, CompleteProductionRecipeBom>();
++
++  for (const recipe of recipeRows) {
++    const items = itemsByRecipe.get(recipe.id) ?? [];
++    boms.set(recipe.id, {
++      recipe_id: recipe.id,
++      recipe_name: recipe.name,
++      yield_quantity: toNumber(recipe.yield_quantity),
++      is_active: recipe.is_active,
++      ingredients: items.map((item) => {
++        const ingredient = ingredientMap.get(item.ingredient_id);
++        return {
++          ingredient_id: item.ingredient_id,
++          quantity_per_yield: toNumber(item.quantity),
++          unit: ingredient?.unit ?? item.unit,
++          cost_per_unit: ingredient?.cost_per_unit ?? 0,
++          name: ingredient?.name ?? "Unknown ingredient",
++          current_stock: ingredient?.current_stock ?? 0,
++        };
++      }),
++    });
++  }
++
++  return ok(boms);
++}
++
++function mapRpcResult(data: unknown): CompleteProductionSessionResult | null {
++  if (typeof data !== "object" || data === null) {
++    return null;
++  }
++
++  const row = data as Record<string, unknown>;
++  const sessionId = row.session_id;
++  const transactionId = row.transaction_id;
++  const batchCount = row.batch_count;
++  const totalCost = row.total_cost;
++  const completedAt = row.completed_at;
++  const completedBy = row.completed_by;
++  const batchIds = row.batch_ids;
++
++  if (
++    typeof sessionId !== "string" ||
++    typeof transactionId !== "string" ||
++    typeof completedAt !== "string"
++  ) {
++    return null;
++  }
++
++  return {
++    session_id: sessionId,
++    transaction_id: transactionId,
++    batch_count:
++      typeof batchCount === "number" ? batchCount : Number(batchCount),
++    batch_ids: Array.isArray(batchIds)
++      ? batchIds.filter((id): id is string => typeof id === "string")
++      : [],
++    total_cost: typeof totalCost === "number" ? totalCost : Number(totalCost),
++    completed_at: completedAt,
++    completed_by: typeof completedBy === "string" ? completedBy : null,
++  };
++}
++
++function mapCompletionError(error: unknown, fallback: string): string {
++  return toUserError(error, fallback, {
++    map: (err) => {
++      const message =
++        typeof err === "object" &&
++        err !== null &&
++        "message" in err &&
++        typeof (err as { message: unknown }).message === "string"
++          ? (err as { message: string }).message
++          : typeof err === "string"
++            ? err
++            : null;
++      return message ? mapCompleteProductionRpcError(message) : null;
++    },
++  });
++}
++
++export const productionSessionService = {
++  /**
++   * Starts a Production Session for an executable plan.
++   * Reuses an existing open session if one already exists for the plan.
++   * Does not mutate the plan, inventory, or batches.
++   */
++  async startSession(
++    productionPlanId: string,
++  ): Promise<ServiceResult<ProductionSessionWithRelations>> {
++    try {
++      const planResult =
++        await productionService.getProductionPlanById(productionPlanId);
++
++      if (planResult.error || !planResult.data) {
++        return fail(planResult.error ?? "Failed to load production plan");
++      }
++
++      const plan = planResult.data;
++
++      if (plan.status !== EXECUTABLE_PLAN_STATUS) {
++        return fail(
++          "This production plan is not ready for execution. Only plans with status Ready for Production can start a session.",
++        );
++      }
++
++      const openResult = await this.getOpenSessionForPlan(plan.id);
++      if (openResult.error) {
++        return fail(openResult.error);
++      }
++
++      if (openResult.data) {
++        return this.getSessionById(openResult.data.id);
++      }
++
++      if (plan.products.length === 0) {
++        return fail(
++          "This production plan has no products. Add products before starting production.",
++        );
++      }
++
++      const now = new Date().toISOString();
++
++      const { data: sessionData, error: sessionError } = await supabase
++        .from("production_sessions")
++        .insert({
++          production_plan_id: plan.id,
++          status: "in_progress",
++          started_at: now,
++          operator_name: null,
++          notes: null,
++          updated_at: now,
++        })
++        .select(SESSION_SELECT)
++        .single();
++
++      if (sessionError || !sessionData) {
++        const racedOpen = await this.getOpenSessionForPlan(plan.id);
++        if (racedOpen.data) {
++          return this.getSessionById(racedOpen.data.id);
++        }
++
++        return fail(
++          toUserError(sessionError, "Failed to start production session"),
++        );
++      }
++
++      const session = mapSession(sessionData as ProductionSessionRow);
++
++      const lineRows = plan.products.map((product, index) => ({
++        production_session_id: session.id,
++        production_plan_product_id: product.id,
++        recipe_id: product.recipe_id,
++        product_name: product.recipe_name,
++        planned_quantity: product.planned_quantity,
++        actual_produced_quantity: null,
++        yield_unit: product.yield_unit,
++        sort_order: product.sort_order ?? index,
++        updated_at: now,
++      }));
++
++      const { error: linesError } = await supabase
++        .from("production_session_lines")
++        .insert(lineRows);
++
++      if (linesError) {
++        await supabase.from("production_sessions").delete().eq("id", session.id);
++        return fail(
++          toUserError(linesError, "Failed to create production session lines"),
++        );
++      }
++
++      return buildSessionWithRelations(session);
++    } catch (error) {
++      return fail(toUserError(error, "Failed to start production session"));
++    }
++  },
++
++  async getSessionById(
++    sessionId: string,
++  ): Promise<ServiceResult<ProductionSessionWithRelations>> {
++    try {
++      const { data, error } = await supabase
++        .from("production_sessions")
++        .select(SESSION_SELECT)
++        .eq("id", sessionId)
++        .maybeSingle();
++
++      if (error) {
++        return fail(toUserError(error, "Failed to load production session"));
++      }
++
++      if (!data) {
++        return fail("Production session was not found.");
++      }
++
++      return buildSessionWithRelations(mapSession(data as ProductionSessionRow));
++    } catch (error) {
++      return fail(toUserError(error, "Failed to load production session"));
++    }
++  },
++
++  async getOpenSessionForPlan(
++    productionPlanId: string,
++  ): Promise<
++    ServiceResult<Pick<
++      ProductionSession,
++      "id" | "session_number" | "status" | "started_at"
++    > | null>
++  > {
++    try {
++      const { data, error } = await supabase
++        .from("production_sessions")
++        .select("id, session_number, status, started_at")
++        .eq("production_plan_id", productionPlanId)
++        .in("status", [...OPEN_PRODUCTION_SESSION_STATUSES])
++        .order("started_at", { ascending: false })
++        .limit(1)
++        .maybeSingle();
++
++      if (error) {
++        return fail(toUserError(error, "Failed to load production session"));
++      }
++
++      if (!data) {
++        return ok(null);
++      }
++
++      return ok({
++        id: data.id as string,
++        session_number: data.session_number as number,
++        status: data.status as ProductionSessionStatus,
++        started_at: data.started_at as string,
++      });
++    } catch (error) {
++      return fail(toUserError(error, "Failed to load production session"));
++    }
++  },
++
++  async getLatestCompletedSessionForPlan(
++    productionPlanId: string,
++  ): Promise<
++    ServiceResult<Pick<
++      ProductionSession,
++      "id" | "session_number" | "status" | "started_at" | "completed_at"
++    > | null>
++  > {
++    try {
++      const { data, error } = await supabase
++        .from("production_sessions")
++        .select("id, session_number, status, started_at, completed_at")
++        .eq("production_plan_id", productionPlanId)
++        .eq("status", "completed")
++        .order("completed_at", { ascending: false })
++        .limit(1)
++        .maybeSingle();
++
++      if (error) {
++        return fail(toUserError(error, "Failed to load production session"));
++      }
++
++      if (!data) {
++        return ok(null);
++      }
++
++      return ok({
++        id: data.id as string,
++        session_number: data.session_number as number,
++        status: data.status as ProductionSessionStatus,
++        started_at: data.started_at as string,
++        completed_at: (data.completed_at as string | null) ?? null,
++      });
++    } catch (error) {
++      return fail(toUserError(error, "Failed to load production session"));
++    }
++  },
++
++  /**
++   * Persists in-progress session notes and produced quantities.
++   * Does not complete the session and does not mutate inventory.
++   */
++  async saveSessionProgress(
++    sessionId: string,
++    input: SaveProductionSessionInput,
++  ): Promise<ServiceResult<ProductionSessionWithRelations>> {
++    try {
++      const existing = await this.getSessionById(sessionId);
++      if (existing.error || !existing.data) {
++        return fail(existing.error ?? "Production session was not found.");
++      }
++
++      if (
++        existing.data.status === "completed" ||
++        existing.data.status === "cancelled"
++      ) {
++        return fail("This production session can no longer be edited.");
++      }
++
++      const validationError = validateSaveInput(input);
++      if (validationError) {
++        return fail(validationError);
++      }
++
++      const now = new Date().toISOString();
++      const existingLineIds = new Set(existing.data.lines.map((line) => line.id));
++
++      for (const line of input.lines) {
++        if (!existingLineIds.has(line.line_id)) {
++          return fail("One or more session lines are invalid.");
++        }
++      }
++
++      const { error: sessionError } = await supabase
++        .from("production_sessions")
++        .update({
++          notes: input.notes?.trim() ? input.notes.trim() : null,
++          updated_at: now,
++        })
++        .eq("id", sessionId);
++
++      if (sessionError) {
++        return fail(
++          toUserError(sessionError, "Failed to save production session"),
++        );
++      }
++
++      for (const line of input.lines) {
++        const { error: lineError } = await supabase
++          .from("production_session_lines")
++          .update({
++            actual_produced_quantity: line.actual_produced_quantity,
++            updated_at: now,
++          })
++          .eq("id", line.line_id)
++          .eq("production_session_id", sessionId);
++
++        if (lineError) {
++          return fail(
++            toUserError(lineError, "Failed to save produced quantities"),
++          );
++        }
++      }
++
++      return this.getSessionById(sessionId);
++    } catch (error) {
++      return fail(toUserError(error, "Failed to save production session"));
++    }
++  },
++
++  /**
++   * Atomically completes a Production Session (PRD-001 / DEV-015).
++   *
++   * Before the DB transaction:
++   *   load session тЖТ validate IN_PROGRESS тЖТ load recipes тЖТ
++   *   calculate actual consumption тЖТ validate inventory.
++   *
++   * Inside one DB transaction (complete_production_session RPC):
++   *   inventory transactions тЖТ production batches тЖТ Finished Goods
++   *   registration тЖТ session COMPLETED (completed_at / completed_by).
++   *
++   * Uses Actual Produced Quantity only. Never Planned Quantity.
++   */
++  async completeSession(
++    sessionId: string,
++    input: CompleteProductionSessionInput,
++  ): Promise<ServiceResult<ProductionSessionWithRelations>> {
++    try {
++      const existing = await this.getSessionById(sessionId);
++      if (existing.error || !existing.data) {
++        return fail(existing.error ?? "Production session was not found.");
++      }
++
++      const statusError = assertCanCompleteProductionSession(
++        existing.data.status,
++      );
++      if (statusError) {
++        return fail(statusError);
++      }
++
++      const {
++        data: { user },
++        error: authError,
++      } = await supabase.auth.getUser();
++
++      if (authError || !user) {
++        return fail("You must be signed in to finish production.");
++      }
++
++      const validationError = validateSessionLinesForComplete(input.lines);
++      if (validationError) {
++        return fail(validationError);
++      }
++
++      const existingLineIds = new Set(existing.data.lines.map((line) => line.id));
++      if (input.lines.length !== existing.data.lines.length) {
++        return fail(
++          "Enter an actual produced quantity for every product before finishing.",
++        );
++      }
++
++      for (const line of input.lines) {
++        if (!existingLineIds.has(line.line_id)) {
++          return fail("One or more session lines are invalid.");
++        }
++      }
++
++      const lineById = new Map(
++        existing.data.lines.map((line) => [line.id, line]),
++      );
++
++      const completionLines = input.lines.map((line) => {
++        const sessionLine = lineById.get(line.line_id)!;
++        return {
++          line_id: line.line_id,
++          recipe_id: sessionLine.recipe_id,
++          product_name: sessionLine.product_name,
++          actual_produced_quantity: line.actual_produced_quantity as number,
++        };
++      });
++
++      const bomsResult = await loadRecipeBomsForCompletion(
++        completionLines.map((line) => line.recipe_id),
++      );
++      if (bomsResult.error || !bomsResult.data) {
++        return fail(bomsResult.error ?? "Failed to load recipes");
++      }
++
++      const planResult = buildCompleteProductionPlan(
++        completionLines,
++        bomsResult.data,
++      );
++      if (!planResult.ok) {
++        return fail(planResult.error);
++      }
++
++      const inventoryError = validateInventoryForCompletion(
++        planResult.plan.consumptions,
++      );
++      if (inventoryError) {
++        return fail(inventoryError);
++      }
++
++      const { data, error } = await supabase.rpc("complete_production_session", {
++        p_session_id: sessionId,
++        p_notes: input.notes?.trim() ? input.notes.trim() : null,
++        p_lines: input.lines.map((line) => ({
++          line_id: line.line_id,
++          actual_produced_quantity: line.actual_produced_quantity,
++        })),
++        p_completed_by: user.id,
++      });
++
++      if (error) {
++        return fail(mapCompletionError(error, "Failed to finish production session"));
++      }
++
++      const rpcResult = mapRpcResult(data);
++      if (!rpcResult) {
++        return fail("Production completed but the response was invalid.");
++      }
++
++      logProductionCompleted({
++        session_id: rpcResult.session_id,
++        batch_ids: rpcResult.batch_ids,
++        product_ids: planResult.plan.batches.map(
++          (batch) => batch.finished_good_id,
++        ),
++        produced_quantity: planResult.plan.batches.reduce(
++          (sum, batch) => sum + batch.produced_quantity,
++          0,
++        ),
++        total_cost: rpcResult.total_cost,
++      });
++
++      return this.getSessionById(sessionId);
++    } catch (error) {
++      return fail(
++        mapCompletionError(error, "Failed to finish production session"),
++      );
++    }
++  },
++};
+diff --git a/src/features/production-execution/types/production-batch.ts b/src/features/production-execution/types/production-batch.ts
+new file mode 100644
+index 0000000..671962b
+--- /dev/null
++++ b/src/features/production-execution/types/production-batch.ts
+@@ -0,0 +1,41 @@
++/**
++ * Production Batch тАФ immutable finished-goods production event (DEV-015).
++ *
++ * Created only by Production Execution on session completion.
++ * Sales never updates these rows. remaining_quantity is never stored.
++ *
++ * Specs: docs/BATCH_CONSUMPTION.md, docs/ARCHITECTURE_FREEZE_V1.md
++ */
++
++export interface ProductionBatch {
++  id: string;
++  batch_number: number;
++  production_session_id: string;
++  production_session_line_id: string;
++  /**
++   * Sellable identity. Until Products master exists, equals recipe_id
++   * (same convention as Production Planning).
++   */
++  finished_good_id: string;
++  recipe_id: string;
++  produced_quantity: number;
++  /** Actual production unit cost frozen at creation. */
++  unit_cost: number;
++  produced_at: string;
++  created_at: string;
++}
++
++export interface ProductionBatchWithProduct extends ProductionBatch {
++  product_name: string;
++  yield_unit: string;
++}
++
++export interface CompleteProductionSessionResult {
++  session_id: string;
++  transaction_id: string;
++  batch_count: number;
++  batch_ids: string[];
++  total_cost: number;
++  completed_at: string;
++  completed_by: string | null;
++}
+diff --git a/src/features/production-execution/types/production-execution.ts b/src/features/production-execution/types/production-execution.ts
+new file mode 100644
+index 0000000..7b420b1
+--- /dev/null
++++ b/src/features/production-execution/types/production-execution.ts
+@@ -0,0 +1,68 @@
++/**
++ * Production Execution тАФ module contracts.
++ *
++ * DEV-013: read-only workspace for plans ready to execute.
++ * DEV-014: Production Session records actual produced quantities.
++ * PRD-001 / DEV-015: Complete Production atomically consumes raw materials,
++ * posts inventory transactions, creates immutable Production Batches, and
++ * marks the session COMPLETED.
++ *
++ * Specs: docs/ARCHITECTURE_FREEZE_V1.md, docs/BATCH_CONSUMPTION.md
++ */
++
++import type {
++  ProductionPlanIngredient,
++  ProductionPlanListItem,
++  ProductionPlanProduct,
++  ProductionPlanShoppingItem,
++  ProductionPlanWithRelations,
++} from "@/features/production/types/production";
++import type { ServiceResult } from "@/types/service";
++import type {
++  ProductionSession,
++  ProductionSessionStatus,
++  ProductionSessionWithRelations,
++} from "./production-session";
++
++/** Live Planning status that makes a plan eligible for execution. */
++export const EXECUTABLE_PLAN_STATUS = "ready_to_produce" as const;
++
++/** User-facing label for executable plans in this workspace. */
++export const EXECUTABLE_PLAN_STATUS_LABEL = "Ready for Production";
++
++export type ExecutableProductionPlan = ProductionPlanListItem & {
++  status: typeof EXECUTABLE_PLAN_STATUS;
++};
++
++export type ProductionExecutionPlanDetail = ProductionPlanWithRelations & {
++  status: typeof EXECUTABLE_PLAN_STATUS;
++  /** Open session for this plan, if one exists. */
++  open_session: Pick<
++    ProductionSession,
++    "id" | "session_number" | "status" | "started_at"
++  > | null;
++  /** Most recently completed session, if any (for reopen). */
++  latest_completed_session: Pick<
++    ProductionSession,
++    "id" | "session_number" | "status" | "started_at" | "completed_at"
++  > | null;
++};
++
++export type ProductionExecutionSortField =
++  | "name"
++  | "planning_date"
++  | "product_count"
++  | "status"
++  | "last_calculated_at";
++
++export type ProductionExecutionSortDirection = "asc" | "desc";
++
++export type {
++  ProductionPlanIngredient,
++  ProductionPlanProduct,
++  ProductionPlanShoppingItem,
++  ProductionSession,
++  ProductionSessionStatus,
++  ProductionSessionWithRelations,
++  ServiceResult,
++};
+diff --git a/src/features/production-execution/types/production-session.ts b/src/features/production-execution/types/production-session.ts
+new file mode 100644
+index 0000000..c6baf03
+--- /dev/null
++++ b/src/features/production-execution/types/production-session.ts
+@@ -0,0 +1,89 @@
++/**
++ * Production Session тАФ execution document contracts (DEV-014 / DEV-015).
++ *
++ * A session records actual production against a Production Plan.
++ * Completing a session atomically consumes raw materials, creates
++ * immutable Production Batches, and posts stock movements.
++ */
++
++import type { ProductionBatchWithProduct } from "./production-batch";
++
++export const PRODUCTION_SESSION_STATUSES = [
++  "ready",
++  "in_progress",
++  "completed",
++  "cancelled",
++] as const;
++
++export type ProductionSessionStatus =
++  (typeof PRODUCTION_SESSION_STATUSES)[number];
++
++export const OPEN_PRODUCTION_SESSION_STATUSES: readonly ProductionSessionStatus[] =
++  ["ready", "in_progress"];
++
++export interface ProductionSession {
++  id: string;
++  session_number: number;
++  production_plan_id: string;
++  status: ProductionSessionStatus;
++  started_at: string;
++  completed_at: string | null;
++  /** Auth user id set when the session is completed (PRD-001). */
++  completed_by: string | null;
++  /** Optional for now тАФ not required to finish a session. */
++  operator_name: string | null;
++  notes: string | null;
++  created_at: string;
++  updated_at?: string;
++}
++
++export interface ProductionSessionLine {
++  id: string;
++  production_session_id: string;
++  production_plan_product_id: string | null;
++  recipe_id: string;
++  product_name: string;
++  planned_quantity: number;
++  /**
++   * null = not yet entered.
++   * 0 is allowed. Negative is not allowed.
++   * May exceed planned quantity.
++   */
++  actual_produced_quantity: number | null;
++  yield_unit: string;
++  sort_order: number;
++}
++
++export interface ProductionSessionLineView extends ProductionSessionLine {
++  /** actual тИТ planned; null when actual is not entered. */
++  difference: number | null;
++}
++
++export interface ProductionSessionPlanSummary {
++  id: string;
++  plan_number: number;
++  name: string;
++}
++
++export interface ProductionSessionWithRelations extends ProductionSession {
++  lines: ProductionSessionLineView[];
++  plan: ProductionSessionPlanSummary;
++  /** Present after successful completion (DEV-015). */
++  batches?: ProductionBatchWithProduct[];
++}
++
++export interface ProductionSessionLineInput {
++  line_id: string;
++  /** null means empty / not entered. */
++  actual_produced_quantity: number | null;
++}
++
++export interface SaveProductionSessionInput {
++  notes: string | null;
++  lines: ProductionSessionLineInput[];
++}
++
++export interface CompleteProductionSessionInput {
++  notes: string | null;
++  lines: ProductionSessionLineInput[];
++}
+diff --git a/src/features/production-execution/utils/complete-production.integration.test.ts b/src/features/production-execution/utils/complete-production.integration.test.ts
+new file mode 100644
+index 0000000..ba367d4
+--- /dev/null
++++ b/src/features/production-execution/utils/complete-production.integration.test.ts
+@@ -0,0 +1,509 @@
++/**
++ * Integration tests for Complete Production (PRD-001).
++ *
++ * Covers the atomic completion workflow without a live database by using an
++ * in-memory ledger that mirrors sql/007_complete_production.sql:
++ *   inventory transactions тЖТ production batches тЖТ session update
++ * All steps commit together or roll back together.
++ */
++
++import { describe, expect, it } from "vitest";
++import {
++  assertCanCompleteProductionSession,
++  buildCompleteProductionPlan,
++  validateInventoryForCompletion,
++  type CompleteProductionPlan,
++  type CompleteProductionRecipeBom,
++} from "./complete-production";
++
++interface IngredientState {
++  id: string;
++  name: string;
++  current_stock: number;
++  cost_per_unit: number;
++}
++
++interface SessionState {
++  id: string;
++  status: "ready" | "in_progress" | "completed" | "cancelled";
++  completed_at: string | null;
++  completed_by: string | null;
++}
++
++interface InventoryTransaction {
++  id: string;
++  type: "production";
++  reference_id: string;
++  amount: number;
++}
++
++interface StockMovement {
++  id: string;
++  ingredient_id: string | null;
++  product_id: string | null;
++  movement_type: "production_out" | "production_in";
++  quantity: number;
++  unit_cost: number;
++  transaction_id: string;
++}
++
++interface ProductionBatchRecord {
++  id: string;
++  session_id: string;
++  finished_good_id: string;
++  produced_quantity: number;
++  unit_cost: number;
++  total_cost: number;
++}
++
++interface LedgerSnapshot {
++  ingredients: Map<string, IngredientState>;
++  session: SessionState;
++  transactions: InventoryTransaction[];
++  stock_movements: StockMovement[];
++  batches: ProductionBatchRecord[];
++}
++
++type FailAt =
++  | "inventory_transaction"
++  | "production_batch"
++  | "finished_goods"
++  | "session_update";
++
++interface CompleteArgs {
++  session: SessionState;
++  ingredients: Map<string, IngredientState>;
++  plan: CompleteProductionPlan;
++  completedBy: string;
++  now?: string;
++  /** Force a failure after earlier mutations to prove rollback. */
++  failAt?: FailAt;
++}
++
++type CompleteResult =
++  | {
++      ok: true;
++      ledger: LedgerSnapshot;
++      transaction_id: string;
++      batch_ids: string[];
++      total_cost: number;
++    }
++  | { ok: false; error: string; ledger: LedgerSnapshot };
++
++function cloneLedger(
++  session: SessionState,
++  ingredients: Map<string, IngredientState>,
++): LedgerSnapshot {
++  return {
++    session: { ...session },
++    ingredients: new Map(
++      [...ingredients.entries()].map(([id, row]) => [id, { ...row }]),
++    ),
++    transactions: [],
++    stock_movements: [],
++    batches: [],
++  };
++}
++
++/**
++ * Mirrors the SQL RPC body: mutate a working copy, commit only on success.
++ * Any thrown/failed step discards the working copy (full rollback).
++ */
++function completeProductionInOneTransaction(args: CompleteArgs): CompleteResult {
++  const baseline = cloneLedger(args.session, args.ingredients);
++  const working = cloneLedger(args.session, args.ingredients);
++  const now = args.now ?? "2026-07-21T12:00:00.000Z";
++
++  const statusError = assertCanCompleteProductionSession(working.session.status);
++  if (statusError) {
++    return { ok: false, error: statusError, ledger: baseline };
++  }
++
++  const inventoryError = validateInventoryForCompletion(args.plan.consumptions);
++  if (inventoryError) {
++    return { ok: false, error: inventoryError, ledger: baseline };
++  }
++
++  try {
++    if (args.failAt === "inventory_transaction") {
++      throw new Error("Forced failure during inventory transaction.");
++    }
++
++    const transactionId = "txn-1";
++    working.transactions.push({
++      id: transactionId,
++      type: "production",
++      reference_id: working.session.id,
++      amount: args.plan.total_cost,
++    });
++
++    for (const consumption of args.plan.consumptions) {
++      const ingredient = working.ingredients.get(consumption.ingredient_id);
++      if (!ingredient) {
++        throw new Error(`Ingredient not found: ${consumption.ingredient_id}`);
++      }
++
++      if (ingredient.current_stock < consumption.quantity) {
++        throw new Error(
++          `Insufficient stock for "${ingredient.name}". Required ${consumption.quantity}, available ${ingredient.current_stock}.`,
++        );
++      }
++
++      ingredient.current_stock -= consumption.quantity;
++
++      working.stock_movements.push({
++        id: `sm-out-${consumption.ingredient_id}`,
++        ingredient_id: consumption.ingredient_id,
++        product_id: null,
++        movement_type: "production_out",
++        quantity: consumption.quantity,
++        unit_cost: consumption.unit_cost,
++        transaction_id: transactionId,
++      });
++    }
++
++    if (args.failAt === "production_batch") {
++      throw new Error("Forced failure during production batch creation.");
++    }
++
++    const batchIds: string[] = [];
++
++    for (const [index, batch] of args.plan.batches.entries()) {
++      const batchId = `batch-${index + 1}`;
++      batchIds.push(batchId);
++
++      working.batches.push({
++        id: batchId,
++        session_id: working.session.id,
++        finished_good_id: batch.finished_good_id,
++        produced_quantity: batch.produced_quantity,
++        unit_cost: batch.unit_cost,
++        total_cost: batch.total_cost,
++      });
++
++      if (args.failAt === "finished_goods") {
++        throw new Error("Forced failure while registering finished goods.");
++      }
++
++      working.stock_movements.push({
++        id: `sm-in-${batchId}`,
++        ingredient_id: null,
++        product_id: batch.finished_good_id,
++        movement_type: "production_in",
++        quantity: batch.produced_quantity,
++        unit_cost: batch.unit_cost,
++        transaction_id: transactionId,
++      });
++    }
++
++    if (args.failAt === "session_update") {
++      throw new Error("Forced failure while updating production session.");
++    }
++
++    if (working.session.status !== "in_progress") {
++      throw new Error("This production session is already completed.");
++    }
++
++    working.session.status = "completed";
++    working.session.completed_at = now;
++    working.session.completed_by = args.completedBy;
++
++    return {
++      ok: true,
++      ledger: working,
++      transaction_id: transactionId,
++      batch_ids: batchIds,
++      total_cost: args.plan.total_cost,
++    };
++  } catch (error) {
++    return {
++      ok: false,
++      error: error instanceof Error ? error.message : "Completion failed.",
++      // Discard working copy тАФ full rollback.
++      ledger: baseline,
++    };
++  }
++}
++
++function recipeBom(): CompleteProductionRecipeBom {
++  return {
++    recipe_id: "recipe-1",
++    recipe_name: "Chicken Crepe",
++    yield_quantity: 10,
++    is_active: true,
++    ingredients: [
++      {
++        ingredient_id: "flour",
++        quantity_per_yield: 2,
++        unit: "kg",
++        cost_per_unit: 1.5,
++        name: "Flour",
++        current_stock: 100,
++      },
++      {
++        ingredient_id: "milk",
++        quantity_per_yield: 1,
++        unit: "l",
++        cost_per_unit: 2,
++        name: "Milk",
++        current_stock: 50,
++      },
++    ],
++  };
++}
++
++function buildHappyPlan(actual = 5) {
++  const plan = buildCompleteProductionPlan(
++    [
++      {
++        line_id: "line-1",
++        recipe_id: "recipe-1",
++        product_name: "Chicken Crepe",
++        actual_produced_quantity: actual,
++      },
++    ],
++    new Map([["recipe-1", recipeBom()]]),
++  );
++
++  if (!plan.ok) {
++    throw new Error(plan.error);
++  }
++
++  return plan.plan;
++}
++
++describe("Complete Production integration (PRD-001)", () => {
++  it("happy path: consumes inventory, creates batch, completes session", () => {
++    const plan = buildHappyPlan(5);
++    const ingredients = new Map<string, IngredientState>([
++      [
++        "flour",
++        { id: "flour", name: "Flour", current_stock: 100, cost_per_unit: 1.5 },
++      ],
++      [
++        "milk",
++        { id: "milk", name: "Milk", current_stock: 50, cost_per_unit: 2 },
++      ],
++    ]);
++
++    const result = completeProductionInOneTransaction({
++      session: {
++        id: "session-1",
++        status: "in_progress",
++        completed_at: null,
++        completed_by: null,
++      },
++      ingredients,
++      plan,
++      completedBy: "user-1",
++    });
++
++    expect(result.ok).toBe(true);
++    if (!result.ok) {
++      return;
++    }
++
++    expect(result.ledger.session).toMatchObject({
++      status: "completed",
++      completed_by: "user-1",
++      completed_at: "2026-07-21T12:00:00.000Z",
++    });
++
++    expect(result.ledger.ingredients.get("flour")?.current_stock).toBe(99);
++    expect(result.ledger.ingredients.get("milk")?.current_stock).toBe(49.5);
++
++    expect(result.ledger.transactions).toHaveLength(1);
++    expect(result.ledger.stock_movements).toEqual(
++      expect.arrayContaining([
++        expect.objectContaining({
++          movement_type: "production_out",
++          ingredient_id: "flour",
++          quantity: 1,
++        }),
++        expect.objectContaining({
++          movement_type: "production_out",
++          ingredient_id: "milk",
++          quantity: 0.5,
++        }),
++        expect.objectContaining({
++          movement_type: "production_in",
++          product_id: "recipe-1",
++          quantity: 5,
++          unit_cost: 0.5,
++        }),
++      ]),
++    );
++
++    expect(result.ledger.batches).toHaveLength(1);
++    expect(result.ledger.batches[0]).toMatchObject({
++      produced_quantity: 5,
++      unit_cost: 0.5,
++      total_cost: 2.5,
++    });
++    expect(result.total_cost).toBe(2.5);
++  });
++
++  it("insufficient inventory: no inventory transactions, batch, or session change", () => {
++    const shortBom: CompleteProductionRecipeBom = {
++      ...recipeBom(),
++      ingredients: recipeBom().ingredients.map((ingredient) =>
++        ingredient.ingredient_id === "flour"
++          ? { ...ingredient, current_stock: 0.25 }
++          : ingredient,
++      ),
++    };
++
++    const planResult = buildCompleteProductionPlan(
++      [
++        {
++          line_id: "line-1",
++          recipe_id: "recipe-1",
++          product_name: "Chicken Crepe",
++          actual_produced_quantity: 5,
++        },
++      ],
++      new Map([["recipe-1", shortBom]]),
++    );
++
++    expect(planResult.ok).toBe(true);
++    if (!planResult.ok) {
++      return;
++    }
++
++    const ingredients = new Map<string, IngredientState>([
++      [
++        "flour",
++        { id: "flour", name: "Flour", current_stock: 0.25, cost_per_unit: 1.5 },
++      ],
++      [
++        "milk",
++        { id: "milk", name: "Milk", current_stock: 50, cost_per_unit: 2 },
++      ],
++    ]);
++
++    const result = completeProductionInOneTransaction({
++      session: {
++        id: "session-1",
++        status: "in_progress",
++        completed_at: null,
++        completed_by: null,
++      },
++      ingredients,
++      plan: planResult.plan,
++      completedBy: "user-1",
++    });
++
++    expect(result.ok).toBe(false);
++    if (result.ok) {
++      return;
++    }
++
++    expect(result.error).toContain("Insufficient stock for \"Flour\"");
++    expect(result.ledger.session.status).toBe("in_progress");
++    expect(result.ledger.session.completed_at).toBeNull();
++    expect(result.ledger.transactions).toHaveLength(0);
++    expect(result.ledger.stock_movements).toHaveLength(0);
++    expect(result.ledger.batches).toHaveLength(0);
++    expect(result.ledger.ingredients.get("flour")?.current_stock).toBe(0.25);
++    expect(result.ledger.ingredients.get("milk")?.current_stock).toBe(50);
++  });
++
++  it("rollback on failure: inventory and session unchanged when batch creation fails", () => {
++    const plan = buildHappyPlan(5);
++    const ingredients = new Map<string, IngredientState>([
++      [
++        "flour",
++        { id: "flour", name: "Flour", current_stock: 100, cost_per_unit: 1.5 },
++      ],
++      [
++        "milk",
++        { id: "milk", name: "Milk", current_stock: 50, cost_per_unit: 2 },
++      ],
++    ]);
++
++    const result = completeProductionInOneTransaction({
++      session: {
++        id: "session-1",
++        status: "in_progress",
++        completed_at: null,
++        completed_by: null,
++      },
++      ingredients,
++      plan,
++      completedBy: "user-1",
++      failAt: "production_batch",
++    });
++
++    expect(result.ok).toBe(false);
++    if (result.ok) {
++      return;
++    }
++
++    expect(result.error).toContain("production batch");
++    expect(result.ledger.session.status).toBe("in_progress");
++    expect(result.ledger.transactions).toHaveLength(0);
++    expect(result.ledger.stock_movements).toHaveLength(0);
++    expect(result.ledger.batches).toHaveLength(0);
++    expect(result.ledger.ingredients.get("flour")?.current_stock).toBe(100);
++    expect(result.ledger.ingredients.get("milk")?.current_stock).toBe(50);
++  });
++
++  it("double completion returns a domain error and makes no changes", () => {
++    const plan = buildHappyPlan(5);
++    const ingredients = new Map<string, IngredientState>([
++      [
++        "flour",
++        { id: "flour", name: "Flour", current_stock: 100, cost_per_unit: 1.5 },
++      ],
++      [
++        "milk",
++        { id: "milk", name: "Milk", current_stock: 50, cost_per_unit: 2 },
++      ],
++    ]);
++
++    const first = completeProductionInOneTransaction({
++      session: {
++        id: "session-1",
++        status: "in_progress",
++        completed_at: null,
++        completed_by: null,
++      },
++      ingredients,
++      plan,
++      completedBy: "user-1",
++    });
++
++    expect(first.ok).toBe(true);
++    if (!first.ok) {
++      return;
++    }
++
++    const second = completeProductionInOneTransaction({
++      session: first.ledger.session,
++      ingredients: first.ledger.ingredients,
++      plan,
++      completedBy: "user-2",
++    });
++
++    expect(second.ok).toBe(false);
++    if (second.ok) {
++      return;
++    }
++
++    expect(second.error).toBe("This production session is already completed.");
++    expect(second.ledger.session.status).toBe("completed");
++    expect(second.ledger.session.completed_by).toBe("user-1");
++    expect(second.ledger.batches).toHaveLength(0);
++    expect(second.ledger.transactions).toHaveLength(0);
++    // Inventory remains at post-first-completion levels (no second consume).
++    expect(second.ledger.ingredients.get("flour")?.current_stock).toBe(99);
++  });
++
++  it("uses actual produced quantity only for costing (never planned)", () => {
++    // Planned would be 10; actual is 5 тЖТ half BOM and unit cost from actual.
++    const plan = buildHappyPlan(5);
++    expect(plan.batches[0]?.produced_quantity).toBe(5);
++    expect(plan.total_cost).toBe(2.5);
++    expect(plan.batches[0]?.unit_cost).toBe(0.5);
++  });
++});
+diff --git a/src/features/production-execution/utils/complete-production.test.ts b/src/features/production-execution/utils/complete-production.test.ts
+new file mode 100644
+index 0000000..d0e1933
+--- /dev/null
++++ b/src/features/production-execution/utils/complete-production.test.ts
+@@ -0,0 +1,275 @@
++import { afterEach, describe, expect, it, vi } from "vitest";
++import {
++  assertCanCompleteProductionSession,
++  buildCompleteProductionPlan,
++  logProductionCompleted,
++  mapCompleteProductionRpcError,
++  validateInventoryForCompletion,
++  type CompleteProductionRecipeBom,
++} from "./complete-production";
++
++function bom(
++  overrides?: Partial<CompleteProductionRecipeBom>,
++): CompleteProductionRecipeBom {
++  return {
++    recipe_id: "recipe-1",
++    recipe_name: "Chicken Crepe",
++    yield_quantity: 10,
++    is_active: true,
++    ingredients: [
++      {
++        ingredient_id: "flour",
++        quantity_per_yield: 2,
++        unit: "kg",
++        cost_per_unit: 1.5,
++        name: "Flour",
++        current_stock: 100,
++      },
++      {
++        ingredient_id: "milk",
++        quantity_per_yield: 1,
++        unit: "l",
++        cost_per_unit: 2,
++        name: "Milk",
++        current_stock: 50,
++      },
++    ],
++    ...overrides,
++  };
++}
++
++describe("assertCanCompleteProductionSession", () => {
++  it("allows only IN_PROGRESS sessions", () => {
++    expect(assertCanCompleteProductionSession("in_progress")).toBeNull();
++  });
++
++  it("rejects completed sessions (double completion)", () => {
++    expect(assertCanCompleteProductionSession("completed")).toBe(
++      "This production session is already completed.",
++    );
++  });
++
++  it("rejects cancelled and non-in-progress statuses", () => {
++    expect(assertCanCompleteProductionSession("cancelled")).toBe(
++      "This production session was cancelled.",
++    );
++    expect(assertCanCompleteProductionSession("ready")).toBe(
++      "Only in-progress production sessions can be completed.",
++    );
++  });
++});
++
++describe("buildCompleteProductionPlan", () => {
++  it("scales consumption by actual produced quantity, not planned", () => {
++    const result = buildCompleteProductionPlan(
++      [
++        {
++          line_id: "line-1",
++          recipe_id: "recipe-1",
++          product_name: "Chicken Crepe",
++          actual_produced_quantity: 5,
++        },
++      ],
++      new Map([["recipe-1", bom()]]),
++    );
++
++    expect(result.ok).toBe(true);
++    if (!result.ok) {
++      return;
++    }
++
++    // yield 10 тЖТ actual 5 тЖТ scale 0.5 тЖТ flour 1, milk 0.5
++    expect(result.plan.consumptions).toEqual(
++      expect.arrayContaining([
++        expect.objectContaining({
++          ingredient_id: "flour",
++          quantity: 1,
++        }),
++        expect.objectContaining({
++          ingredient_id: "milk",
++          quantity: 0.5,
++        }),
++      ]),
++    );
++
++    expect(result.plan.batches).toHaveLength(1);
++    expect(result.plan.batches[0]).toMatchObject({
++      produced_quantity: 5,
++      // (1 * 1.5) + (0.5 * 2) = 2.5 тЖТ unit cost 0.5
++      unit_cost: 0.5,
++      total_cost: 2.5,
++    });
++  });
++
++  it("computes unit cost as total cost / actual produced quantity", () => {
++    const result = buildCompleteProductionPlan(
++      [
++        {
++          line_id: "line-1",
++          recipe_id: "recipe-1",
++          product_name: "Chicken Crepe",
++          actual_produced_quantity: 10,
++        },
++      ],
++      new Map([["recipe-1", bom()]]),
++    );
++
++    expect(result.ok).toBe(true);
++    if (!result.ok) {
++      return;
++    }
++
++    // flour 2 * 1.5 + milk 1 * 2 = 5 тЖТ unit cost 0.5
++    expect(result.plan.total_cost).toBe(5);
++    expect(result.plan.batches[0]?.unit_cost).toBe(0.5);
++  });
++
++  it("skips zero actual lines and aggregates shared ingredients", () => {
++    const result = buildCompleteProductionPlan(
++      [
++        {
++          line_id: "line-1",
++          recipe_id: "recipe-1",
++          product_name: "Chicken Crepe",
++          actual_produced_quantity: 10,
++        },
++        {
++          line_id: "line-2",
++          recipe_id: "recipe-1",
++          product_name: "Chicken Crepe",
++          actual_produced_quantity: 0,
++        },
++      ],
++      new Map([["recipe-1", bom()]]),
++    );
++
++    expect(result.ok).toBe(true);
++    if (!result.ok) {
++      return;
++    }
++
++    expect(result.plan.batches).toHaveLength(1);
++    expect(
++      result.plan.consumptions.find((line) => line.ingredient_id === "flour")
++        ?.quantity,
++    ).toBe(2);
++  });
++
++  it("rejects inactive recipes and empty BOMs", () => {
++    expect(
++      buildCompleteProductionPlan(
++        [
++          {
++            line_id: "line-1",
++            recipe_id: "recipe-1",
++            product_name: "Chicken Crepe",
++            actual_produced_quantity: 5,
++          },
++        ],
++        new Map([["recipe-1", bom({ is_active: false })]]),
++      ),
++    ).toEqual({
++      ok: false,
++      error: 'Recipe "Chicken Crepe" is inactive and cannot be produced.',
++    });
++
++    expect(
++      buildCompleteProductionPlan(
++        [
++          {
++            line_id: "line-1",
++            recipe_id: "recipe-1",
++            product_name: "Chicken Crepe",
++            actual_produced_quantity: 5,
++          },
++        ],
++        new Map([["recipe-1", bom({ ingredients: [] })]]),
++      ),
++    ).toEqual({
++      ok: false,
++      error: 'Recipe "Chicken Crepe" has no ingredients.',
++    });
++  });
++});
++
++describe("validateInventoryForCompletion", () => {
++  it("returns a friendly message when stock is insufficient", () => {
++    expect(
++      validateInventoryForCompletion([
++        {
++          ingredient_id: "flour",
++          ingredient_name: "Flour",
++          quantity: 12,
++          unit: "kg",
++          unit_cost: 1.5,
++          total_cost: 18,
++          available_stock: 10,
++        },
++      ]),
++    ).toBe('Insufficient stock for "Flour". Required 12, available 10.');
++  });
++
++  it("passes when stock is sufficient", () => {
++    expect(
++      validateInventoryForCompletion([
++        {
++          ingredient_id: "flour",
++          ingredient_name: "Flour",
++          quantity: 10,
++          unit: "kg",
++          unit_cost: 1.5,
++          total_cost: 15,
++          available_stock: 10,
++        },
++      ]),
++    ).toBeNull();
++  });
++});
++
++describe("logProductionCompleted", () => {
++  afterEach(() => {
++    vi.restoreAllMocks();
++  });
++
++  it("emits a ProductionCompleted structured log", () => {
++    const spy = vi.spyOn(console, "info").mockImplementation(() => undefined);
++
++    logProductionCompleted({
++      session_id: "session-1",
++      batch_ids: ["batch-1"],
++      product_ids: ["recipe-1"],
++      produced_quantity: 5,
++      total_cost: 2.5,
++    });
++
++    expect(spy).toHaveBeenCalledWith("ProductionCompleted", {
++      session_id: "session-1",
++      batch_ids: ["batch-1"],
++      product_ids: ["recipe-1"],
++      produced_quantity: 5,
++      total_cost: 2.5,
++    });
++  });
++});
++
++describe("mapCompleteProductionRpcError", () => {
++  it("maps double-complete, status, and missing RPC errors", () => {
++    expect(
++      mapCompleteProductionRpcError(
++        "This production session is already completed.",
++      ),
++    ).toBe("This production session is already completed.");
++
++    expect(
++      mapCompleteProductionRpcError(
++        "Only in-progress production sessions can be completed.",
++      ),
++    ).toBe("Only in-progress production sessions can be completed.");
++
++    expect(
++      mapCompleteProductionRpcError(
++        "Could not find the function public.complete_production_session",
++      ),
++    ).toContain("complete-production database script");
++  });
++});
+diff --git a/src/features/production-execution/utils/complete-production.ts b/src/features/production-execution/utils/complete-production.ts
+new file mode 100644
+index 0000000..74f57af
+--- /dev/null
++++ b/src/features/production-execution/utils/complete-production.ts
+@@ -0,0 +1,304 @@
++/**
++ * Pure helpers for Complete Production (PRD-001 / DEV-015).
++ *
++ * Pre-transaction: load/validate session + recipe, scale BOM by actual
++ * produced quantity (never planned), validate inventory availability.
++ * Database mutation stays in the complete_production_session RPC
++ * (one DB transaction: inventory transactions тЖТ batches тЖТ session).
++ */
++
++import { roundMoney } from "@/lib/money";
++import { addQuantities, roundQuantity } from "@/lib/quantity";
++import { scaleRecipeIngredientNeed } from "@/features/production-planning";
++import type { ProductionSessionStatus } from "../types/production-session";
++
++export interface CompleteProductionRecipeIngredient {
++  ingredient_id: string;
++  quantity_per_yield: number;
++  unit: string;
++  cost_per_unit: number;
++  name: string;
++  current_stock: number;
++}
++
++export interface CompleteProductionRecipeBom {
++  recipe_id: string;
++  recipe_name: string;
++  yield_quantity: number;
++  is_active: boolean;
++  ingredients: CompleteProductionRecipeIngredient[];
++}
++
++export interface CompleteProductionLineInput {
++  line_id: string;
++  recipe_id: string;
++  product_name: string;
++  actual_produced_quantity: number;
++}
++
++export interface IngredientConsumptionLine {
++  ingredient_id: string;
++  ingredient_name: string;
++  quantity: number;
++  unit: string;
++  unit_cost: number;
++  total_cost: number;
++  available_stock: number;
++}
++
++export interface ProductionBatchPlan {
++  session_line_id: string;
++  finished_good_id: string;
++  recipe_id: string;
++  product_name: string;
++  produced_quantity: number;
++  unit_cost: number;
++  total_cost: number;
++}
++
++export interface CompleteProductionPlan {
++  consumptions: IngredientConsumptionLine[];
++  batches: ProductionBatchPlan[];
++  total_cost: number;
++}
++
++export interface ProductionCompletedLogPayload {
++  session_id: string;
++  batch_ids: string[];
++  product_ids: string[];
++  produced_quantity: number;
++  total_cost: number;
++}
++
++/**
++ * BR-001 / BR-002: completion allowed only when status = IN_PROGRESS.
++ * Completed sessions are immutable (double-complete тЖТ domain error).
++ */
++export function assertCanCompleteProductionSession(
++  status: ProductionSessionStatus,
++): string | null {
++  if (status === "completed") {
++    return "This production session is already completed.";
++  }
++
++  if (status === "cancelled") {
++    return "This production session was cancelled.";
++  }
++
++  if (status !== "in_progress") {
++    return "Only in-progress production sessions can be completed.";
++  }
++
++  return null;
++}
++
++export function roundUnitCost(value: number): number {
++  const factor = 10 ** 4;
++  return Math.round(value * factor) / factor;
++}
++
++/**
++ * Build consumption + batch plans from actual produced quantities.
++ * Returns an error string when recipes/inventory inputs are invalid.
++ */
++export function buildCompleteProductionPlan(
++  lines: readonly CompleteProductionLineInput[],
++  bomsByRecipeId: ReadonlyMap<string, CompleteProductionRecipeBom>,
++): { ok: true; plan: CompleteProductionPlan } | { ok: false; error: string } {
++  const consumptionByIngredient = new Map<
++    string,
++    {
++      ingredient_name: string;
++      quantity: number;
++      unit: string;
++      total_cost: number;
++      available_stock: number;
++      unit_cost: number;
++    }
++  >();
++  const batches: ProductionBatchPlan[] = [];
++
++  for (const line of lines) {
++    if (line.actual_produced_quantity < 0) {
++      return { ok: false, error: "Produced quantity cannot be negative." };
++    }
++
++    if (line.actual_produced_quantity === 0) {
++      continue;
++    }
++
++    const bom = bomsByRecipeId.get(line.recipe_id);
++    if (!bom) {
++      return {
++        ok: false,
++        error: `Recipe for "${line.product_name}" was not found.`,
++      };
++    }
++
++    if (!bom.is_active) {
++      return {
++        ok: false,
++        error: `Recipe "${bom.recipe_name}" is inactive and cannot be produced.`,
++      };
++    }
++
++    if (bom.yield_quantity <= 0) {
++      return {
++        ok: false,
++        error: `Recipe "${bom.recipe_name}" has an invalid yield.`,
++      };
++    }
++
++    if (bom.ingredients.length === 0) {
++      return {
++        ok: false,
++        error: `Recipe "${bom.recipe_name}" has no ingredients.`,
++      };
++    }
++
++    let lineTotalCost = 0;
++
++    for (const ingredient of bom.ingredients) {
++      const scaled = scaleRecipeIngredientNeed(
++        {
++          ingredientId: ingredient.ingredient_id,
++          quantityPerYield: ingredient.quantity_per_yield,
++          unit: ingredient.unit,
++        },
++        line.actual_produced_quantity,
++        bom.yield_quantity,
++      );
++
++      if (scaled <= 0) {
++        continue;
++      }
++
++      const lineCost = scaled * ingredient.cost_per_unit;
++      lineTotalCost += lineCost;
++
++      const existing = consumptionByIngredient.get(ingredient.ingredient_id);
++      if (existing) {
++        existing.quantity = addQuantities(existing.quantity, scaled);
++        existing.total_cost += lineCost;
++      } else {
++        consumptionByIngredient.set(ingredient.ingredient_id, {
++          ingredient_name: ingredient.name,
++          quantity: scaled,
++          unit: ingredient.unit,
++          total_cost: lineCost,
++          available_stock: ingredient.current_stock,
++          unit_cost: ingredient.cost_per_unit,
++        });
++      }
++    }
++
++    const unitCost = roundUnitCost(
++      lineTotalCost / line.actual_produced_quantity,
++    );
++
++    batches.push({
++      session_line_id: line.line_id,
++      finished_good_id: line.recipe_id,
++      recipe_id: line.recipe_id,
++      product_name: line.product_name,
++      produced_quantity: line.actual_produced_quantity,
++      unit_cost: unitCost,
++      total_cost: roundMoney(lineTotalCost),
++    });
++  }
++
++  const consumptions: IngredientConsumptionLine[] = [];
++
++  for (const [ingredientId, value] of consumptionByIngredient) {
++    const quantity = roundQuantity(value.quantity);
++    consumptions.push({
++      ingredient_id: ingredientId,
++      ingredient_name: value.ingredient_name,
++      quantity,
++      unit: value.unit,
++      unit_cost: roundUnitCost(value.unit_cost),
++      total_cost: roundMoney(value.total_cost),
++      available_stock: roundQuantity(value.available_stock),
++    });
++  }
++
++  consumptions.sort((a, b) =>
++    a.ingredient_name.localeCompare(b.ingredient_name),
++  );
++
++  return {
++    ok: true,
++    plan: {
++      consumptions,
++      batches,
++      total_cost: roundMoney(
++        batches.reduce((sum, batch) => sum + batch.total_cost, 0),
++      ),
++    },
++  };
++}
++
++/**
++ * Returns a user-facing error when any consumption exceeds available stock.
++ * BR-003: inventory must never become negative.
++ */
++export function validateInventoryForCompletion(
++  consumptions: readonly IngredientConsumptionLine[],
++): string | null {
++  for (const line of consumptions) {
++    if (line.quantity > line.available_stock) {
++      return `Insufficient stock for "${line.ingredient_name}". Required ${line.quantity}, available ${line.available_stock}.`;
++    }
++  }
++
++  return null;
++}
++
++/**
++ * Structured operational log required by PRD-001.
++ */
++export function logProductionCompleted(
++  payload: ProductionCompletedLogPayload,
++): void {
++  console.info("ProductionCompleted", payload);
++}
++
++export function mapCompleteProductionRpcError(message: string): string | null {
++  const normalized = message.toLowerCase();
++
++  if (normalized.includes("already completed")) {
++    return "This production session is already completed.";
++  }
++
++  if (normalized.includes("was cancelled")) {
++    return "This production session was cancelled.";
++  }
++
++  if (normalized.includes("only in-progress")) {
++    return "Only in-progress production sessions can be completed.";
++  }
++
++  if (normalized.includes("completed by user is required")) {
++    return "You must be signed in to finish production.";
++  }
++
++  if (normalized.includes("insufficient stock")) {
++    return message;
++  }
++
++  if (normalized.includes("actual produced quantity")) {
++    return "Enter an actual produced quantity for every product before finishing.";
++  }
++
++  if (
++    normalized.includes("could not find the function") ||
++    (normalized.includes("complete_production_session") &&
++      (normalized.includes("schema cache") ||
++        normalized.includes("does not exist") ||
++        normalized.includes("42883")))
++  ) {
++    return "Production completion is not available yet. Apply the complete-production database script and try again.";
++  }
++
++  return null;
++}

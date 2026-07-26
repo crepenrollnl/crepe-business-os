@@ -23,6 +23,7 @@ export type TransactionReferenceType =
   | "purchase"
   | "sale"
   | "production_order"
+  | "production_session"
   | "stock_movement"
   | "payment"
   | "manual"

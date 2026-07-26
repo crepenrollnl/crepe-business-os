@@ -39,4 +39,12 @@ export interface IngredientFormValues {
 export type CreateIngredientInput = IngredientFormValues;
 export type UpdateIngredientInput = IngredientFormValues;
 
+export type InventorySortField =
+  | "name"
+  | "current_stock"
+  | "minimum_stock"
+  | "cost_per_unit";
+
+export type InventorySortDirection = "asc" | "desc";
+
 export type { ServiceResult } from "@/types/service";
