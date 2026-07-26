@@ -8,10 +8,7 @@ type ProductionReportingWidgetProps = {
   data: ProductionDashboard;
 };
 
-/**
- * Presentational widget for the production Reporting API overview section.
- * Binds approved ProductionDashboard DTO fields as-is.
- */
+/** Binds ProductionDashboard DTO fields as-is. */
 export const ProductionReportingWidget = memo(function ProductionReportingWidget({
   title,
   data,

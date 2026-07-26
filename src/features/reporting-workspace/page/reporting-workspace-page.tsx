@@ -1,6 +1,5 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { ReportingDashboardCards } from "@/features/reporting-dashboard/components/reporting-dashboard-cards";
 import { ReportingDashboardEmptyOverview } from "@/features/reporting-dashboard/components/reporting-dashboard-empty-overview";
@@ -10,39 +9,18 @@ import { ReportingWorkspaceHeader } from "../components/reporting-workspace-head
 import { ReportingWorkspaceLoadingState } from "../components/reporting-workspace-loading-state";
 import { ReportingWorkspaceNavigation } from "../components/reporting-workspace-navigation";
 import { ReportingWorkspaceOverview } from "../components/reporting-workspace-overview";
-import { reportingWorkspaceService } from "../services/reporting-workspace-service";
-import type { ReportingWorkspace } from "../types/reporting-workspace";
+import { useReportingWorkspace } from "../hooks/use-reporting-workspace";
 
 export function ReportingWorkspacePage() {
-  const [workspace, setWorkspace] = useState<ReportingWorkspace | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const loadWorkspace = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-
-    const result = await reportingWorkspaceService.getReportingWorkspace();
-
-    if (result.error || !result.data) {
-      setWorkspace(null);
-      setError(result.error ?? "Failed to load reporting workspace");
-      setLoading(false);
-      return;
-    }
-
-    setWorkspace(result.data);
-    setError(null);
-    setLoading(false);
-  }, []);
-
-  useEffect(() => {
-    void loadWorkspace();
-  }, [loadWorkspace]);
-
-  const title = workspace?.workspace_title ?? "Reports";
-  const reportingVersion = workspace?.reporting_version ?? "-";
-  const generatedAt = workspace?.generated_at ?? null;
+  const {
+    workspace,
+    loading,
+    error,
+    title,
+    reportingVersion,
+    generatedAt,
+    retry,
+  } = useReportingWorkspace();
 
   return (
     <DashboardLayout activePath="/reports">
@@ -59,7 +37,7 @@ export function ReportingWorkspacePage() {
           <ReportingWorkspaceErrorState
             error={error}
             onRetry={() => {
-              void loadWorkspace();
+              void retry();
             }}
           />
         ) : null}

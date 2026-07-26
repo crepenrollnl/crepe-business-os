@@ -14,8 +14,7 @@ const GENERATED_AT_TIME_CLASS_NAME =
   "font-medium tabular-nums text-zinc-800";
 
 /**
- * Final presentational composition for Reporting Dashboard widgets.
- * Hosted by the approved Reporting Workspace page - no duplicate page shell.
+ * Presentational composition for Reporting Dashboard widgets.
  * Values come from approved overview DTOs - never recalculated.
  */
 export const ReportingDashboardComposition = memo(

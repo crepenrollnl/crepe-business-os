@@ -114,8 +114,8 @@ export const ERP_MODULES: readonly ErpModuleDefinition[] = [
   {
     id: "reports",
     label: "Reports",
-    featurePath: "src/features/reports",
-    status: "planned",
+    featurePath: "src/features/reporting-workspace",
+    status: "live",
     priority: 14,
   },
   {

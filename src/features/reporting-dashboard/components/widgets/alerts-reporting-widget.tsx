@@ -8,10 +8,7 @@ type AlertsReportingWidgetProps = {
   data: AlertsDashboard;
 };
 
-/**
- * Presentational widget for the alerts Reporting API overview section.
- * Binds approved AlertsDashboard DTO fields as-is.
- */
+/** Binds AlertsDashboard DTO fields as-is. */
 export const AlertsReportingWidget = memo(function AlertsReportingWidget({
   title,
   data,

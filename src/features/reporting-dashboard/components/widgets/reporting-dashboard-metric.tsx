@@ -10,7 +10,7 @@ const VALUE_CLASS_NAME =
   "text-2xl font-semibold leading-none tabular-nums break-all text-zinc-900 sm:text-3xl";
 
 /**
- * Presentational metric cell for Reporting Dashboard widgets.
+ * Metric cell for Reporting Dashboard widgets.
  * Displays DTO values as-is; null renders as "-".
  */
 export const ReportingDashboardMetric = memo(function ReportingDashboardMetric({

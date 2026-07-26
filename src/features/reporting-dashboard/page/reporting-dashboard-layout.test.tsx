@@ -1,8 +1,5 @@
 /**
- * UI coverage for Reporting Dashboard layout polish (DEV-080).
- *
- * Verifies the shared panel shell and Workspace-hosted composition layout.
- * Uses reportingWorkspaceService.getReportingWorkspace only.
+ * UI coverage for Reporting Dashboard layout polish.
  */
 
 import {
@@ -427,7 +424,12 @@ describe("Reporting Dashboard layout workspace integration (DEV-080 UI)", () => 
     cleanup();
 
     let resolveRequest:
-      | ((value: { data: ReportingWorkspace | null; error: string | null }) => void)
+      | ((
+          _payload: {
+            data: ReportingWorkspace | null;
+            error: string | null;
+          },
+        ) => void)
       | undefined;
 
     getReportingWorkspaceMock.mockImplementation(

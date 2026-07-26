@@ -1,8 +1,5 @@
 /**
- * UI coverage for Reporting Dashboard performance polish (DEV-081).
- *
- * Verifies memo boundaries, stable Composition identity, and equality helper.
- * Uses reportingWorkspaceService.getReportingWorkspace only for host integration.
+ * UI coverage for Reporting Dashboard performance polish.
  */
 
 import {

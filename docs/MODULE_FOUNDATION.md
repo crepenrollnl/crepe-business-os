@@ -75,10 +75,24 @@ Inventory is the reference implementation for quality and structure.
 | `customers` | `src/features/customers` | Planned |
 | `events` | `src/features/events` | Planned |
 | `accounting` | `src/features/accounting` | Planned |
-| `reports` | `src/features/reports` | Planned |
+| `reports` | `src/features/reporting-workspace` | Live (Reports nav host at `/reports`) |
 | `ai` | `src/features/ai` | Planned |
 
 Scaffolds for planned modules may contain types stubs and empty folders only. **No business logic** until the roadmap reaches that module.
+
+### Reporting packages
+
+Reports is a layered read-only stack. The registered nav module host is `reporting-workspace`; supporting packages are not separate nav modules:
+
+| Package | Folder | Role |
+|---|---|---|
+| Reporting Workspace | `src/features/reporting-workspace` | Live `/reports` host; `get_reporting_workspace` |
+| Reporting Dashboard | `src/features/reporting-dashboard` | Presentational composition / widgets |
+| Reporting API | `src/features/reporting-api` | `get_reporting_overview` / `get_reporting_section` |
+| Reporting Home | `src/features/reporting-home` | `get_reporting_home` |
+| Reports (summary views) | `src/features/reports` | Legacy `report_*_summary` view reads (DEV-041) |
+
+SQL composition: `reporting_workspace` aggregates `reporting_home`, `dashboard_navigation`, and `reporting_api`. UI reads the workspace RPC only.
 
 ### Production Planning domain package
 

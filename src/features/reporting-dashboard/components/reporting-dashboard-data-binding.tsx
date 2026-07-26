@@ -11,8 +11,8 @@ const REGION_ARIA_LABEL = "Bound reporting dashboard overview";
 const REGION_CLASS_NAME = "min-w-0";
 
 /**
- * Final UI integration for approved Reporting Dashboard data bindings.
- * Layout spacing is owned by ReportingDashboardPanel - this layer binds DTOs only.
+ * Binds approved overview DTOs to Reporting Dashboard widgets.
+ * Layout spacing is owned by ReportingDashboardPanel.
  */
 export const ReportingDashboardDataBinding = memo(
   function ReportingDashboardDataBinding({

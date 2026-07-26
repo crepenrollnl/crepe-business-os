@@ -1,8 +1,5 @@
 /**
- * UI coverage for Reporting Dashboard widgets composition (DEV-078).
- *
- * Verifies the final composition hosted by the approved Reporting Workspace.
- * Uses reportingWorkspaceService.getReportingWorkspace only.
+ * UI coverage for Reporting Dashboard widgets composition.
  */
 
 import {
@@ -384,7 +381,12 @@ describe("Reporting Dashboard widgets workspace integration (DEV-078 UI)", () =>
 
   it("shows loading state while the workspace request is pending", async () => {
     let resolveRequest:
-      | ((value: { data: ReportingWorkspace | null; error: string | null }) => void)
+      | ((
+          _payload: {
+            data: ReportingWorkspace | null;
+            error: string | null;
+          },
+        ) => void)
       | undefined;
 
     getReportingWorkspaceMock.mockImplementation(

@@ -5,8 +5,8 @@ type OverviewProps = {
 };
 
 /**
- * Memo boundary for Composition → DataBinding → Widgets.
- * Compares the approved overview object identity only - no field recalculation.
+ * Memo comparator for Composition → DataBinding → Widgets.
+ * Uses overview object identity only.
  */
 export function isSameOverviewProps(
   previous: OverviewProps,

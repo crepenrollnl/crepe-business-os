@@ -8,10 +8,7 @@ type KpiReportingWidgetProps = {
   data: KpiDashboard;
 };
 
-/**
- * Presentational widget for the KPI Reporting API overview section.
- * Binds approved KpiDashboard DTO fields as-is.
- */
+/** Binds KpiDashboard DTO fields as-is. */
 export const KpiReportingWidget = memo(function KpiReportingWidget({
   title,
   data,

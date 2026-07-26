@@ -13,8 +13,7 @@ const EMPTY_OVERVIEW_BODY = (
 );
 
 /**
- * Presentational empty state when Reporting API overview is unavailable.
- * Reuses the same panel shell as the bound composition - no duplicate containers.
+ * Empty state when Reporting API overview is unavailable.
  */
 export const ReportingDashboardEmptyOverview = memo(
   function ReportingDashboardEmptyOverview() {

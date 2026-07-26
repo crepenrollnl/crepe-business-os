@@ -1,8 +1,5 @@
 /**
- * UI coverage for Reporting Dashboard data binding (DEV-079).
- *
- * Verifies DTO → widget mapping in the final binding layer hosted by Workspace.
- * Uses reportingWorkspaceService.getReportingWorkspace only.
+ * UI coverage for Reporting Dashboard data binding.
  */
 
 import {

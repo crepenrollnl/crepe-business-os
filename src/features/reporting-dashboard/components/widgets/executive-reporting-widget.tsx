@@ -8,10 +8,7 @@ type ExecutiveReportingWidgetProps = {
   data: ExecutiveDashboard;
 };
 
-/**
- * Presentational widget for the executive Reporting API overview section.
- * Binds approved ExecutiveDashboard DTO fields as-is.
- */
+/** Binds ExecutiveDashboard DTO fields as-is. */
 export const ExecutiveReportingWidget = memo(function ExecutiveReportingWidget({
   title,
   data,

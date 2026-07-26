@@ -1,5 +1,5 @@
 /**
- * Workspace-compatible entry for the Reporting Dashboard composition.
- * Same component identity as ReportingDashboardComposition - no passthrough wrapper.
+ * Workspace entry for the Reporting Dashboard composition.
+ * Same component identity as ReportingDashboardComposition.
  */
 export { ReportingDashboardComposition as ReportingDashboardCards } from "./reporting-dashboard-composition";

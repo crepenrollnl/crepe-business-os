@@ -8,10 +8,7 @@ type CompanyReportingWidgetProps = {
   data: CompanyDashboard;
 };
 
-/**
- * Presentational widget for the company Reporting API overview section.
- * Binds approved CompanyDashboard DTO fields as-is.
- */
+/** Binds CompanyDashboard DTO fields as-is. */
 export const CompanyReportingWidget = memo(function CompanyReportingWidget({
   title,
   data,

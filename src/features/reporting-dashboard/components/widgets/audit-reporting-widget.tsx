@@ -8,10 +8,7 @@ type AuditReportingWidgetProps = {
   data: AuditDashboard;
 };
 
-/**
- * Presentational widget for the audit Reporting API overview section.
- * Binds approved AuditDashboard DTO fields as-is.
- */
+/** Binds AuditDashboard DTO fields as-is. */
 export const AuditReportingWidget = memo(function AuditReportingWidget({
   title,
   data,

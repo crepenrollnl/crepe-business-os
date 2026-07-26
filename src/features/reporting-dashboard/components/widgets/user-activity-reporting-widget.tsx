@@ -8,10 +8,7 @@ type UserActivityReportingWidgetProps = {
   data: UserActivityDashboard;
 };
 
-/**
- * Presentational widget for the user activity Reporting API overview section.
- * Binds approved UserActivityDashboard DTO fields as-is.
- */
+/** Binds UserActivityDashboard DTO fields as-is. */
 export const UserActivityReportingWidget = memo(
   function UserActivityReportingWidget({
     title,

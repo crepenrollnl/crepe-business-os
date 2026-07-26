@@ -30,8 +30,8 @@ const LIST_ARIA_LABEL = "Reporting dashboard section widgets";
 const LIST_ITEM_CLASS_NAME = "min-w-0";
 
 /**
- * Reusable presentational widgets for Reporting API overview sections.
- * Owns section list spacing only - outer panel spacing stays in ReportingDashboardPanel.
+ * Section widgets for Reporting API overview data.
+ * Owns section list spacing only.
  */
 export const ReportingDashboardWidgets = memo(function ReportingDashboardWidgets({
   overview,

@@ -8,10 +8,7 @@ type InventoryReportingWidgetProps = {
   data: InventoryDashboard;
 };
 
-/**
- * Presentational widget for the inventory Reporting API overview section.
- * Binds approved InventoryDashboard DTO fields as-is.
- */
+/** Binds InventoryDashboard DTO fields as-is. */
 export const InventoryReportingWidget = memo(function InventoryReportingWidget({
   title,
   data,

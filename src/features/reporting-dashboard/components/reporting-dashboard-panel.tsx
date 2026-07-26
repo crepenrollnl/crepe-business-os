@@ -16,8 +16,7 @@ const DESCRIPTION_CLASS_NAME = "mt-1 text-sm leading-relaxed text-zinc-600";
 const BODY_CLASS_NAME = "px-4 py-5 sm:px-6 sm:py-6";
 
 /**
- * Shared presentational panel shell for Reporting Dashboard composition states.
- * Owns the single outer container and spacing scale used by Workspace-hosted UI.
+ * Shared panel shell for Reporting Dashboard composition states.
  */
 export const ReportingDashboardPanel = memo(function ReportingDashboardPanel({
   headingId,

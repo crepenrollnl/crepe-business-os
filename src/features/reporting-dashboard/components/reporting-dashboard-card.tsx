@@ -22,7 +22,7 @@ const TITLE_CLASS_NAME =
 const BODY_CLASS_NAME = "mt-3 min-w-0 text-zinc-900 sm:mt-4";
 
 /**
- * Presentational metric card shell nested inside the dashboard panel.
+ * Metric card shell nested inside the dashboard panel.
  */
 export const ReportingDashboardCard = memo(function ReportingDashboardCard({
   title,
