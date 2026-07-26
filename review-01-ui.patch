@@ -1,0 +1,317 @@
+diff --git a/src/features/reporting-dashboard/components/reporting-dashboard-card.tsx b/src/features/reporting-dashboard/components/reporting-dashboard-card.tsx
+new file mode 100644
+index 0000000..926dfac
+--- /dev/null
++++ b/src/features/reporting-dashboard/components/reporting-dashboard-card.tsx
+@@ -0,0 +1,46 @@
++import { memo } from "react";
++
++type ReportingDashboardCardProps = {
++  title: string;
++  children: React.ReactNode;
++  /**
++   * Heading element for the card title.
++   * Metrics nested under section widgets use "p" to preserve heading order.
++   */
++  titleAs?: "h3" | "p";
++  /**
++   * Optional accessible name for the metric article.
++   * When set, the visible title is presentational to avoid duplicate announcements.
++   */
++  ariaLabel?: string;
++};
++
++const CARD_CLASS_NAME =
++  "min-w-0 rounded-xl border border-zinc-200 bg-zinc-50/80 p-5 shadow-sm transition-shadow hover:bg-white hover:shadow-md sm:p-6";
++const TITLE_CLASS_NAME =
++  "text-xs font-medium uppercase tracking-wide text-zinc-500 sm:text-sm";
++const BODY_CLASS_NAME = "mt-3 min-w-0 text-zinc-900 sm:mt-4";
++
++/**
++ * Presentational metric card shell nested inside the dashboard panel.
++ */
++export const ReportingDashboardCard = memo(function ReportingDashboardCard({
++  title,
++  children,
++  titleAs = "h3",
++  ariaLabel,
++}: ReportingDashboardCardProps) {
++  const TitleTag = titleAs;
++
++  return (
++    <article aria-label={ariaLabel} className={CARD_CLASS_NAME}>
++      <TitleTag
++        className={TITLE_CLASS_NAME}
++        aria-hidden={ariaLabel ? true : undefined}
++      >
++        {title}
++      </TitleTag>
++      <div className={BODY_CLASS_NAME}>{children}</div>
++    </article>
++  );
++});
+diff --git a/src/features/reporting-dashboard/components/reporting-dashboard-empty-overview.tsx b/src/features/reporting-dashboard/components/reporting-dashboard-empty-overview.tsx
+new file mode 100644
+index 0000000..46b51f1
+--- /dev/null
++++ b/src/features/reporting-dashboard/components/reporting-dashboard-empty-overview.tsx
+@@ -0,0 +1,27 @@
++import { memo } from "react";
++import { ReportingDashboardPanel } from "./reporting-dashboard-panel";
++
++const EMPTY_HEADING_ID = "reporting-dashboards-empty-heading";
++const PANEL_TITLE = "Reporting dashboards";
++const EMPTY_MESSAGE_CLASS_NAME = "text-sm leading-relaxed text-zinc-600";
++const EMPTY_MESSAGE = "No reporting dashboard cards are available yet.";
++
++const EMPTY_OVERVIEW_BODY = (
++  <p className={EMPTY_MESSAGE_CLASS_NAME} role="status">
++    {EMPTY_MESSAGE}
++  </p>
++);
++
++/**
++ * Presentational empty state when Reporting API overview is unavailable.
++ * Reuses the same panel shell as the bound composition - no duplicate containers.
++ */
++export const ReportingDashboardEmptyOverview = memo(
++  function ReportingDashboardEmptyOverview() {
++    return (
++      <ReportingDashboardPanel headingId={EMPTY_HEADING_ID} title={PANEL_TITLE}>
++        {EMPTY_OVERVIEW_BODY}
++      </ReportingDashboardPanel>
++    );
++  },
++);
+diff --git a/src/features/reporting-dashboard/components/reporting-dashboard-panel.tsx b/src/features/reporting-dashboard/components/reporting-dashboard-panel.tsx
+new file mode 100644
+index 0000000..7968058
+--- /dev/null
++++ b/src/features/reporting-dashboard/components/reporting-dashboard-panel.tsx
+@@ -0,0 +1,50 @@
++import { memo } from "react";
++
++type ReportingDashboardPanelProps = {
++  headingId: string;
++  title: string;
++  description?: React.ReactNode;
++  children: React.ReactNode;
++};
++
++const PANEL_CLASS_NAME =
++  "rounded-xl border border-zinc-200 bg-white shadow-sm";
++const HEADER_CLASS_NAME = "border-b border-zinc-200 px-4 py-4 sm:px-6";
++const TITLE_CLASS_NAME =
++  "text-lg font-semibold tracking-tight text-zinc-900";
++const DESCRIPTION_CLASS_NAME = "mt-1 text-sm leading-relaxed text-zinc-600";
++const BODY_CLASS_NAME = "px-4 py-5 sm:px-6 sm:py-6";
++
++/**
++ * Shared presentational panel shell for Reporting Dashboard composition states.
++ * Owns the single outer container and spacing scale used by Workspace-hosted UI.
++ */
++export const ReportingDashboardPanel = memo(function ReportingDashboardPanel({
++  headingId,
++  title,
++  description,
++  children,
++}: ReportingDashboardPanelProps) {
++  const descriptionId = `${headingId}-description`;
++
++  return (
++    <section
++      aria-labelledby={headingId}
++      aria-describedby={description ? descriptionId : undefined}
++      className={PANEL_CLASS_NAME}
++    >
++      <div className={HEADER_CLASS_NAME}>
++        <h3 id={headingId} className={TITLE_CLASS_NAME}>
++          {title}
++        </h3>
++        {description ? (
++          <p id={descriptionId} className={DESCRIPTION_CLASS_NAME}>
++            {description}
++          </p>
++        ) : null}
++      </div>
++
++      <div className={BODY_CLASS_NAME}>{children}</div>
++    </section>
++  );
++});
+diff --git a/src/features/reporting-dashboard/components/widgets/reporting-dashboard-metric.tsx b/src/features/reporting-dashboard/components/widgets/reporting-dashboard-metric.tsx
+new file mode 100644
+index 0000000..940766c
+--- /dev/null
++++ b/src/features/reporting-dashboard/components/widgets/reporting-dashboard-metric.tsx
+@@ -0,0 +1,34 @@
++import { memo } from "react";
++import { ReportingDashboardCard } from "../reporting-dashboard-card";
++
++type ReportingDashboardMetricProps = {
++  label: string;
++  value: string | number | boolean | null;
++};
++
++const VALUE_CLASS_NAME =
++  "text-2xl font-semibold leading-none tabular-nums break-all text-zinc-900 sm:text-3xl";
++
++/**
++ * Presentational metric cell for Reporting Dashboard widgets.
++ * Displays DTO values as-is; null renders as "-".
++ */
++export const ReportingDashboardMetric = memo(function ReportingDashboardMetric({
++  label,
++  value,
++}: ReportingDashboardMetricProps) {
++  const displayValue = value === null ? "-" : String(value);
++  const accessibleName = `${label}: ${displayValue}`;
++
++  return (
++    <ReportingDashboardCard
++      title={label}
++      titleAs="p"
++      ariaLabel={accessibleName}
++    >
++      <p className={VALUE_CLASS_NAME} aria-hidden="true">
++        {displayValue}
++      </p>
++    </ReportingDashboardCard>
++  );
++});
+diff --git a/src/features/reporting-dashboard/components/widgets/reporting-dashboard-widgets.tsx b/src/features/reporting-dashboard/components/widgets/reporting-dashboard-widgets.tsx
+new file mode 100644
+index 0000000..c8d4337
+--- /dev/null
++++ b/src/features/reporting-dashboard/components/widgets/reporting-dashboard-widgets.tsx
+@@ -0,0 +1,88 @@
++import { memo } from "react";
++import type { ReportingOverview } from "@/features/reporting-api/types/reporting-api";
++import { isSameOverviewProps } from "../reporting-dashboard-overview-equality";
++import { AlertsReportingWidget } from "./alerts-reporting-widget";
++import { AuditReportingWidget } from "./audit-reporting-widget";
++import { CompanyReportingWidget } from "./company-reporting-widget";
++import { ExecutiveReportingWidget } from "./executive-reporting-widget";
++import { InventoryReportingWidget } from "./inventory-reporting-widget";
++import { KpiReportingWidget } from "./kpi-reporting-widget";
++import { ProductionReportingWidget } from "./production-reporting-widget";
++import { UserActivityReportingWidget } from "./user-activity-reporting-widget";
++
++type ReportingDashboardWidgetsProps = {
++  overview: ReportingOverview;
++};
++
++const SECTION_TITLES = {
++  executive: "Executive Dashboard",
++  kpi: "KPI Dashboard",
++  company: "Company Dashboard",
++  inventory: "Inventory Dashboard",
++  production: "Production Dashboard",
++  alerts: "Alerts Dashboard",
++  audit: "Audit Dashboard",
++  user_activity: "User Activity Dashboard",
++} as const;
++
++const LIST_CLASS_NAME = "m-0 list-none space-y-6 p-0 sm:space-y-8";
++const LIST_ARIA_LABEL = "Reporting dashboard section widgets";
++const LIST_ITEM_CLASS_NAME = "min-w-0";
++
++/**
++ * Reusable presentational widgets for Reporting API overview sections.
++ * Owns section list spacing only - outer panel spacing stays in ReportingDashboardPanel.
++ */
++export const ReportingDashboardWidgets = memo(function ReportingDashboardWidgets({
++  overview,
++}: ReportingDashboardWidgetsProps) {
++  return (
++    <ul className={LIST_CLASS_NAME} aria-label={LIST_ARIA_LABEL}>
++      <li className={LIST_ITEM_CLASS_NAME}>
++        <ExecutiveReportingWidget
++          title={SECTION_TITLES.executive}
++          data={overview.executive}
++        />
++      </li>
++      <li className={LIST_ITEM_CLASS_NAME}>
++        <KpiReportingWidget title={SECTION_TITLES.kpi} data={overview.kpi} />
++      </li>
++      <li className={LIST_ITEM_CLASS_NAME}>
++        <CompanyReportingWidget
++          title={SECTION_TITLES.company}
++          data={overview.company}
++        />
++      </li>
++      <li className={LIST_ITEM_CLASS_NAME}>
++        <InventoryReportingWidget
++          title={SECTION_TITLES.inventory}
++          data={overview.inventory}
++        />
++      </li>
++      <li className={LIST_ITEM_CLASS_NAME}>
++        <ProductionReportingWidget
++          title={SECTION_TITLES.production}
++          data={overview.production}
++        />
++      </li>
++      <li className={LIST_ITEM_CLASS_NAME}>
++        <AlertsReportingWidget
++          title={SECTION_TITLES.alerts}
++          data={overview.alerts}
++        />
++      </li>
++      <li className={LIST_ITEM_CLASS_NAME}>
++        <AuditReportingWidget
++          title={SECTION_TITLES.audit}
++          data={overview.audit}
++        />
++      </li>
++      <li className={LIST_ITEM_CLASS_NAME}>
++        <UserActivityReportingWidget
++          title={SECTION_TITLES.user_activity}
++          data={overview.user_activity}
++        />
++      </li>
++    </ul>
++  );
++}, isSameOverviewProps);
+diff --git a/src/features/reporting-dashboard/components/widgets/reporting-section-widget.tsx b/src/features/reporting-dashboard/components/widgets/reporting-section-widget.tsx
+new file mode 100644
+index 0000000..9dd4ca4
+--- /dev/null
++++ b/src/features/reporting-dashboard/components/widgets/reporting-section-widget.tsx
+@@ -0,0 +1,36 @@
++import { memo } from "react";
++
++type ReportingSectionWidgetProps = {
++  title: string;
++  children: React.ReactNode;
++};
++
++const SECTION_CLASS_NAME = "space-y-3 sm:space-y-4";
++const HEADER_CLASS_NAME = "border-b border-zinc-100 pb-2";
++const TITLE_CLASS_NAME =
++  "text-sm font-semibold tracking-tight text-zinc-900 sm:text-base";
++const GRID_CLASS_NAME =
++  "grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-5 lg:grid-cols-3 xl:grid-cols-4";
++
++/**
++ * Presentational shell for one Reporting API overview section widget.
++ */
++export const ReportingSectionWidget = memo(function ReportingSectionWidget({
++  title,
++  children,
++}: ReportingSectionWidgetProps) {
++  return (
++    <section aria-label={title} className={SECTION_CLASS_NAME}>
++      <div className={HEADER_CLASS_NAME}>
++        <h4 className={TITLE_CLASS_NAME}>{title}</h4>
++      </div>
++      <div
++        className={GRID_CLASS_NAME}
++        role="group"
++        aria-label={`${title} metrics`}
++      >
++        {children}
++      </div>
++    </section>
++  );
++});
