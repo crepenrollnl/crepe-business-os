@@ -66,9 +66,11 @@ function balancedExpenseRule(overrides?: Partial<PostingRule>): PostingRule {
     id: "rule-1",
     event_type: "expense_recognized",
     version: 1,
+    priority: 100,
     effective_from: "2026-01-01",
     effective_to: null,
     is_active: true,
+    description: "Generic expense recognition",
     created_at: "2026-01-01T00:00:00.000Z",
     lines: [
       {
@@ -78,7 +80,10 @@ function balancedExpenseRule(overrides?: Partial<PostingRule>): PostingRule {
         account_role: "other",
         side: "debit",
         amount_field: "net_amount",
+        currency_source: "event_transaction",
+        tax_behaviour: "none",
         tax_code: null,
+        description: "Expense debit",
       },
       {
         id: "rule-line-2",
@@ -87,7 +92,10 @@ function balancedExpenseRule(overrides?: Partial<PostingRule>): PostingRule {
         account_role: "bank",
         side: "credit",
         amount_field: "other_amount",
+        currency_source: "event_transaction",
+        tax_behaviour: "none",
         tax_code: null,
+        description: "Bank credit",
       },
     ],
     ...overrides,
@@ -315,15 +323,16 @@ describe("postingEngineService (DEV-088 generic foundation)", () => {
     expect(result.error.code).toBe("ALREADY_POSTED");
   });
 
-  it("selects the highest active rule version", () => {
+  it("selects the highest priority rule, then highest version", () => {
     const result = postingEngineService.runPipeline(
       event(),
       context({
         postingRules: [
-          balancedExpenseRule({ id: "rule-v1", version: 1 }),
+          balancedExpenseRule({ id: "rule-v1", version: 1, priority: 10 }),
           balancedExpenseRule({
             id: "rule-v2",
             version: 2,
+            priority: 50,
             lines: [
               {
                 id: "v2-1",
@@ -332,7 +341,10 @@ describe("postingEngineService (DEV-088 generic foundation)", () => {
                 account_role: "other",
                 side: "debit",
                 amount_field: "net_amount",
+                currency_source: "event_transaction",
+                tax_behaviour: "pass_through",
                 tax_code: "VAT-TEST",
+                description: null,
               },
               {
                 id: "v2-2",
@@ -341,7 +353,10 @@ describe("postingEngineService (DEV-088 generic foundation)", () => {
                 account_role: "bank",
                 side: "credit",
                 amount_field: "other_amount",
+                currency_source: "event_transaction",
+                tax_behaviour: "none",
                 tax_code: null,
+                description: null,
               },
             ],
           }),
@@ -355,6 +370,7 @@ describe("postingEngineService (DEV-088 generic foundation)", () => {
     }
     expect(result.data.rule_id).toBe("rule-v2");
     expect(result.data.rule_version).toBe(2);
+    expect(result.data.rule_priority).toBe(50);
     expect(result.data.journal_lines[0]?.tax_code).toBe("VAT-TEST");
   });
 

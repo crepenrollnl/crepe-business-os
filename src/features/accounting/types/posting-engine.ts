@@ -24,6 +24,9 @@ export type PostingErrorCode =
   | "PERIOD_NOT_OPEN"
   | "EVENT_DATE_OUTSIDE_PERIOD"
   | "RULE_NOT_FOUND"
+  | "INVALID_RULE"
+  | "DUPLICATE_RULE"
+  | "OVERLAPPING_RULE"
   | "ACCOUNT_ROLE_UNBOUND"
   | "ACCOUNT_NOT_POSTABLE"
   | "NO_POSTING_LINES"
@@ -66,6 +69,7 @@ export interface PostingResult {
   event_id: string;
   rule_id: string;
   rule_version: number;
+  rule_priority: number;
   journal_entry: JournalEntry;
   journal_lines: JournalLine[];
   ledger_entries: LedgerEntry[];

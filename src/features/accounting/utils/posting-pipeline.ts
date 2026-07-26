@@ -64,8 +64,8 @@ function buildProposedLines(input: {
   let outputLineNo = 1;
 
   for (const ruleLine of sortedRuleLines) {
-    const amountTransaction = readAmount(event, ruleLine.amount_field);
-    if (amountTransaction === null) {
+    const sourceAmount = readAmount(event, ruleLine.amount_field);
+    if (sourceAmount === null) {
       continue;
     }
 
@@ -102,24 +102,34 @@ function buildProposedLines(input: {
       }
     }
 
-    const amountBase = roundMoney(amountTransaction * event.exchange_rate);
-    if (amountBase <= 0) {
+    const usesTransactionCurrency =
+      ruleLine.currency_source === "event_transaction";
+    const amountTransaction = usesTransactionCurrency
+      ? sourceAmount
+      : roundMoney(sourceAmount / event.exchange_rate);
+    const amountBase = usesTransactionCurrency
+      ? roundMoney(sourceAmount * event.exchange_rate)
+      : sourceAmount;
+
+    if (amountTransaction <= 0 || amountBase <= 0) {
       continue;
     }
 
     const isDebit = ruleLine.side === "debit";
+    const taxCode =
+      ruleLine.tax_behaviour === "pass_through" ? ruleLine.tax_code : null;
 
     lines.push({
       id: createId(),
       journal_entry_id: journalEntryId,
       line_no: outputLineNo,
       account_id: accountIdOrError,
-      description: null,
+      description: ruleLine.description,
       debit_transaction: isDebit ? amountTransaction : 0,
       credit_transaction: isDebit ? 0 : amountTransaction,
       debit_base: isDebit ? amountBase : 0,
       credit_base: isDebit ? 0 : amountBase,
-      tax_code: ruleLine.tax_code,
+      tax_code: taxCode,
     });
 
     outputLineNo += 1;
@@ -243,8 +253,10 @@ export function runPostingPipeline(
     transaction_id: event.transaction_id,
     fiscal_period_id: context.fiscalPeriod.id,
     entry_date: entryDate,
-    memo: null,
+    memo: rule.description,
+    // Proposal is validated as postable; persistence assigns posting_number.
     status: "posted",
+    posting_number: null,
     transaction_currency: event.transaction_currency,
     base_currency: event.base_currency,
     exchange_rate: event.exchange_rate,
@@ -266,6 +278,7 @@ export function runPostingPipeline(
     event_id: event.id,
     rule_id: rule.id,
     rule_version: rule.version,
+    rule_priority: rule.priority,
     journal_entry: journalEntry,
     journal_lines: journalLines,
     ledger_entries: ledgerEntries,

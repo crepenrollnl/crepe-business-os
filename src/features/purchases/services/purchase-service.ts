@@ -17,6 +17,11 @@ import type {
   PurchaseWithRelations,
   SavePurchaseInput,
 } from "../types/purchase";
+import type {
+  PurchaseAccountingContext,
+  PurchaseJournalProposal,
+} from "../types/purchase-accounting";
+import { purchaseAccountingService } from "./purchase-accounting-service";
 
 interface PurchaseRow {
   id: string;
@@ -847,5 +852,31 @@ export const purchaseService = {
         error: toUserError(error, "Failed to receive purchase"),
       };
     }
+  },
+
+  /**
+   * Confirm/receive a purchase, then propose an Accounting journal.
+   *
+   * Emits purchase_received and runs the Posting Engine.
+   * Does not persist journal_entries or ledger_entries.
+   * Existing receivePurchase (hooks/UI) remains unchanged.
+   */
+  async receivePurchaseAndProposeJournal(
+    input: SavePurchaseInput,
+    accounting: PurchaseAccountingContext,
+  ): Promise<ServiceResult<PurchaseJournalProposal>> {
+    const received = await purchaseService.receivePurchase(input);
+
+    if (received.error || !received.data) {
+      return {
+        data: null,
+        error: received.error ?? "Failed to receive purchase",
+      };
+    }
+
+    return purchaseAccountingService.proposeJournalForPurchaseReceived(
+      received.data,
+      accounting,
+    );
   },
 };

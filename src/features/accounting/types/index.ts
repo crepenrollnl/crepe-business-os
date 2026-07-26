@@ -27,8 +27,11 @@ export type {
   PaymentMethod,
   PostingAccountRole,
   PostingAmountField,
+  PostingAmountSource,
+  PostingCurrencySource,
   PostingRule,
   PostingRuleLine,
+  PostingTaxBehaviour,
   TaxRate,
   VatPeriod,
   VatPeriodStatus,
@@ -41,3 +44,27 @@ export type {
   PostingPipelineResult,
   PostingResult,
 } from "./posting-engine";
+
+export type {
+  PostingRuleError,
+  PostingRuleErrorCode,
+  PostingRuleResolveResult,
+  PostingRuleValidationResult,
+} from "./posting-rules";
+
+export type {
+  JournalProposal,
+  PostedJournalRecord,
+  PostingPersistenceError,
+  PostingPersistenceErrorCode,
+  PostingPersistenceValidationResult,
+} from "./posting-persistence";
+
+export type {
+  OperationalBusinessEvent,
+  OperationalPostingContext,
+  OperationalPostingMetadata,
+  OperationalPostingMode,
+  OperationalPostingRequest,
+  OperationalPostingResult,
+} from "./operational-integration";

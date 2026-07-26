@@ -13,6 +13,7 @@ import type {
 } from "@/types/accounting";
 import type { PostingContext, PostingError } from "../types/posting-engine";
 import { postingError } from "./posting-errors";
+import { resolvePostingRule } from "./posting-rules";
 
 const AMOUNT_FIELDS: readonly (keyof AccountingEventAmounts)[] = [
   "gross_amount",
@@ -173,44 +174,23 @@ export function validateFiscalPeriodForEvent(
   return null;
 }
 
+/**
+ * Resolve rule via Posting Rules framework:
+ * Active → Effective Date → Highest Priority → Rule
+ */
 export function resolveActivePostingRule(
   event: AccountingBusinessEvent,
   rules: readonly PostingRule[],
 ): PostingRule | PostingError {
-  const eventDate = toDateOnly(event.occurred_at);
-
-  const matches = rules.filter((rule) => {
-    if (!rule.is_active) {
-      return false;
-    }
-    if (rule.event_type !== event.event_type) {
-      return false;
-    }
-    if (rule.effective_from > eventDate) {
-      return false;
-    }
-    if (rule.effective_to !== null && rule.effective_to < eventDate) {
-      return false;
-    }
-    return Array.isArray(rule.lines) && rule.lines.length > 0;
-  });
-
-  if (matches.length === 0) {
+  const resolved = resolvePostingRule(event, rules);
+  if (!resolved.ok) {
     return postingError(
       "RULE_NOT_FOUND",
-      "No active posting rule matches the business event.",
-      { event_type: event.event_type, event_date: eventDate },
+      resolved.error.message,
+      resolved.error.details,
     );
   }
-
-  matches.sort((a, b) => {
-    if (b.version !== a.version) {
-      return b.version - a.version;
-    }
-    return b.effective_from.localeCompare(a.effective_from);
-  });
-
-  return matches[0];
+  return resolved.rule;
 }
 
 export function resolveAccountIdForRole(

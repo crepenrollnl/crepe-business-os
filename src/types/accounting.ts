@@ -86,6 +86,7 @@ export type AccountingBusinessEventType =
   | "sale_refunded"
   | "cogs_recognized"
   | "production_completed"
+  | "production_adjusted"
   | "inventory_adjusted"
   | "waste_recognized"
   | "expense_recognized"
@@ -130,6 +131,7 @@ export type PostingAccountRole =
   | "revenue"
   | "cogs"
   | "inventory_asset"
+  | "finished_goods_inventory"
   | "vat_output"
   | "vat_input"
   | "cash"
@@ -141,23 +143,91 @@ export type PostingAccountRole =
 
 export type PostingAmountField = keyof AccountingEventAmounts;
 
+/** Amount source on a posting rule line (alias of event amount field). */
+export type PostingAmountSource = PostingAmountField;
+
+/**
+ * Which currency domain the rule line amount is expressed in.
+ * - event_transaction: amount is in event.transaction_currency (convert via exchange_rate)
+ * - event_base / company_base: amount is already in base currency
+ */
+export type PostingCurrencySource =
+  | "event_transaction"
+  | "event_base"
+  | "company_base";
+
+/**
+ * Tax behaviour reserved for future VAT posting.
+ * - none: do not carry tax_code onto journal lines
+ * - pass_through: copy rule line tax_code
+ * - deferred: reserved; treated as none until VAT sprint
+ */
+export type PostingTaxBehaviour = "none" | "pass_through" | "deferred";
+
+export const POSTING_ACCOUNT_ROLES: readonly PostingAccountRole[] = [
+  "accounts_receivable",
+  "accounts_payable",
+  "revenue",
+  "cogs",
+  "inventory_asset",
+  "finished_goods_inventory",
+  "vat_output",
+  "vat_input",
+  "cash",
+  "bank",
+  "waste_expense",
+  "fx_gain",
+  "fx_loss",
+  "other",
+] as const;
+
+export const POSTING_AMOUNT_SOURCES: readonly PostingAmountSource[] = [
+  "gross_amount",
+  "net_amount",
+  "tax_amount",
+  "cogs_amount",
+  "discount_amount",
+  "shipping_amount",
+  "other_amount",
+] as const;
+
+export const POSTING_CURRENCY_SOURCES: readonly PostingCurrencySource[] = [
+  "event_transaction",
+  "event_base",
+  "company_base",
+] as const;
+
+export const POSTING_TAX_BEHAVIOURS: readonly PostingTaxBehaviour[] = [
+  "none",
+  "pass_through",
+  "deferred",
+] as const;
+
 export interface PostingRuleLine {
   id: string;
   posting_rule_id: string;
   line_no: number;
+  /** Debit or credit account role for this line. */
   account_role: PostingAccountRole;
   side: "debit" | "credit";
-  amount_field: PostingAmountField;
+  /** Amount source field on the business event. */
+  amount_field: PostingAmountSource;
+  currency_source: PostingCurrencySource;
+  tax_behaviour: PostingTaxBehaviour;
   tax_code: string | null;
+  description: string | null;
 }
 
 export interface PostingRule {
   id: string;
   event_type: AccountingBusinessEventType;
   version: number;
+  /** Higher priority wins when multiple rules match. */
+  priority: number;
   effective_from: string;
   effective_to: string | null;
   is_active: boolean;
+  description: string | null;
   lines: PostingRuleLine[];
   created_at: string;
 }
@@ -186,6 +256,8 @@ export interface JournalEntry {
   entry_date: string;
   memo: string | null;
   status: JournalEntryStatus;
+  /** Assigned by Posting Service when the journal is posted. */
+  posting_number: string | null;
   transaction_currency: string;
   base_currency: string;
   exchange_rate: number;

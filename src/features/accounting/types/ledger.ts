@@ -33,8 +33,11 @@ export type {
   PaymentMethod,
   PostingAccountRole,
   PostingAmountField,
+  PostingAmountSource,
+  PostingCurrencySource,
   PostingRule,
   PostingRuleLine,
+  PostingTaxBehaviour,
   TaxRate,
   VatPeriod,
   VatPeriodStatus,
@@ -47,3 +50,10 @@ export type {
   PostingPipelineResult,
   PostingResult,
 } from "./posting-engine";
+
+export type {
+  PostingRuleError,
+  PostingRuleErrorCode,
+  PostingRuleResolveResult,
+  PostingRuleValidationResult,
+} from "./posting-rules";
