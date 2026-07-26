@@ -370,6 +370,7 @@ export type FinancialStatementType =
 export type AccountingCapability =
   | "vat"
   | "taxes"
+  | "tax_engine"
   | "bank_accounts"
   | "general_ledger"
   | "journal_entries"

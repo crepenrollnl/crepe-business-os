@@ -1,10 +1,11 @@
 /**
- * Purchases → Accounting integration contracts (DEV-090 / DEV-092).
+ * Purchases → Accounting integration contracts (DEV-090 / DEV-092 / DEV-100).
  *
  * Purchase Confirmed (received) emits purchase_received via the generic
- * Operational Accounting Integration framework.
+ * Operational Accounting Integration framework, using a precomputed TaxResult.
  *
  * Purchases supplies money facts + opaque source refs only.
+ * Accounting never recalculates taxes.
  * Ledger persistence remains Accounting-owned (propose mode today).
  */
 
@@ -16,6 +17,7 @@ import type {
 } from "@/types/accounting";
 import type { PostingResult } from "@/features/accounting/types/posting-engine";
 import type { PurchaseWithRelations } from "./purchase";
+import type { PurchaseTaxResult } from "./purchase-tax";
 
 /**
  * Accounting inputs required to propose a journal for a confirmed purchase.
@@ -45,6 +47,8 @@ export interface PurchaseJournalProposal {
   purchase: PurchaseWithRelations;
   business_event_id: string;
   journalProposal: PostingResult;
+  /** Tax facts used for the proposal (never recalculated by Accounting). */
+  tax: PurchaseTaxResult;
 }
 
-export type { PostingResult };
+export type { PostingResult, PurchaseTaxResult };

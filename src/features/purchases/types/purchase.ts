@@ -71,6 +71,12 @@ export interface PurchaseLineInput {
   ingredient_id: string;
   quantity: number;
   unit_cost: number;
+  /** Absolute discount in document currency (tax preview / calculation). */
+  discount?: number;
+  /** Opaque tax category for Tax Integration (e.g. goods, food). */
+  tax_category?: string;
+  /** Optional regime override hint for Country Pack matching. */
+  tax_regime?: string | null;
 }
 
 export interface PurchaseFormValues {
@@ -78,11 +84,20 @@ export interface PurchaseFormValues {
   invoice_number: string;
   purchased_at: string;
   notes: string;
+  /**
+   * Supplier country for tax calculation (ISO).
+   * Form-level until supplier master stores country.
+   */
+  supplier_country?: string;
+  /** Company/tax pack country (ISO). Defaults to NL when omitted. */
+  tax_country?: string;
   lines: PurchaseLineInput[];
 }
 
 export interface SavePurchaseInput extends PurchaseFormValues {
   id?: string;
+  /** Optional tax total from Purchase Tax Service (persisted on header). */
+  tax_total?: number;
 }
 
 export type PurchaseSortField = "purchased_at" | "total" | "invoice_number" | "status";

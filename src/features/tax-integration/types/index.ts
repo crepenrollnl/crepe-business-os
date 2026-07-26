@@ -1,0 +1,16 @@
+export type {
+  TaxAppliedDefinition,
+  TaxCompanyRef,
+  TaxDocumentType,
+  TaxIntegrationError,
+  TaxIntegrationErrorCode,
+  TaxIntegrationLineItem,
+  TaxIntegrationMode,
+  TaxLineResult,
+  TaxPartyMetadata,
+  TaxRequest,
+  TaxResult,
+  TaxRoundingInfo,
+  TaxValidationWarning,
+  TaxValidationWarningCode,
+} from "./tax-integration";

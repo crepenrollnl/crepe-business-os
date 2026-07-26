@@ -58,6 +58,15 @@ function bindings(): AccountRoleBinding[] {
       created_at: "2020-01-01T00:00:00.000Z",
     },
     {
+      id: "bind-vat-input",
+      role: "vat_input",
+      account_id: "acct-vat-input",
+      effective_from: "2020-01-01",
+      effective_to: null,
+      is_active: true,
+      created_at: "2020-01-01T00:00:00.000Z",
+    },
+    {
       id: "bind-ap",
       role: "accounts_payable",
       account_id: "acct-ap",
@@ -127,6 +136,11 @@ function buildPurchaseReceivedRequest(
           is_postable: true,
           is_active: true,
         },
+        "acct-vat-input": {
+          id: "acct-vat-input",
+          is_postable: true,
+          is_active: true,
+        },
         "acct-ap": {
           id: "acct-ap",
           is_postable: true,
@@ -155,18 +169,20 @@ describe("operationalAccountingIntegrationService (DEV-092)", () => {
     expect(result.data?.event_type).toBe("purchase_received");
     expect(result.data?.metadata.source_module).toBe("purchases");
     expect(result.data?.posted_journal).toBeNull();
-    expect(result.data?.journal_proposal.journal_lines).toHaveLength(2);
+    expect(result.data?.journal_proposal.journal_lines).toHaveLength(3);
 
-    const debit = result.data?.journal_proposal.journal_lines.find(
-      (line) => line.debit_base > 0,
+    const inventory = result.data?.journal_proposal.journal_lines.find(
+      (line) => line.account_id === "acct-inventory",
     );
-    const credit = result.data?.journal_proposal.journal_lines.find(
-      (line) => line.credit_base > 0,
+    const vat = result.data?.journal_proposal.journal_lines.find(
+      (line) => line.account_id === "acct-vat-input",
     );
-    expect(debit?.account_id).toBe("acct-inventory");
-    expect(credit?.account_id).toBe("acct-ap");
-    expect(debit?.debit_base).toBe(200);
-    expect(credit?.credit_base).toBe(200);
+    const ap = result.data?.journal_proposal.journal_lines.find(
+      (line) => line.account_id === "acct-ap",
+    );
+    expect(inventory?.debit_base).toBe(200);
+    expect(vat?.debit_base).toBe(40);
+    expect(ap?.credit_base).toBe(240);
     expect(postJournalProposalMock).not.toHaveBeenCalled();
   });
 

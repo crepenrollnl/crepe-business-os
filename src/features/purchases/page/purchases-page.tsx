@@ -30,6 +30,7 @@ export function PurchasesPage() {
     isLoadingPurchase,
     isSaving,
     actionError,
+    accountingPreview,
     openCreateModal,
     openPurchaseModal,
     closeModal,
@@ -84,6 +85,7 @@ export function PurchasesPage() {
           isLoading={isLoadingPurchase}
           isSaving={isSaving}
           error={actionError}
+          accountingPreview={accountingPreview}
           onClose={closeModal}
           onSaveDraft={saveDraft}
           onReceiveGoods={receiveGoods}

@@ -6,6 +6,8 @@ import {
   formatNumericInput,
   parseNumericInput,
 } from "@/components/ui/numeric-input";
+import { PurchaseAccountingPreview } from "./purchase-accounting-preview";
+import { purchaseTaxService } from "../services/purchase-tax-service";
 import type {
   PurchaseFormValues,
   PurchaseIngredientOption,
@@ -14,6 +16,12 @@ import type {
   PurchaseSupplier,
   PurchaseWithRelations,
 } from "../types/purchase";
+import type { PurchaseAccountingPreviewData } from "../types/purchase-accounting-preview";
+import {
+  PURCHASE_TAX_CATEGORY_OPTIONS,
+  PURCHASE_TAX_REGIME_OPTIONS,
+} from "../types/purchase-tax";
+import { buildPurchaseTaxDocument } from "../utils/build-purchase-tax-document";
 
 type PurchaseDocumentModalProps = {
   isOpen: boolean;
@@ -24,6 +32,8 @@ type PurchaseDocumentModalProps = {
   isLoading: boolean;
   isSaving: boolean;
   error: string | null;
+  /** Existing in-memory / document-derived accounting preview (display only). */
+  accountingPreview?: PurchaseAccountingPreviewData | null;
   onClose: () => void;
   onSaveDraft: (values: PurchaseFormValues) => Promise<boolean>;
   onReceiveGoods: (values: PurchaseFormValues) => Promise<boolean>;
@@ -31,12 +41,20 @@ type PurchaseDocumentModalProps = {
 
 type NumericLineField = "quantity" | "unit_cost";
 
-type LineDraft = Omit<PurchaseLineInput, NumericLineField> & {
+type LineDraft = Omit<
+  PurchaseLineInput,
+  NumericLineField | "discount" | "tax_category" | "tax_regime"
+> & {
   quantity: string;
   unit_cost: string;
+  discount: string;
+  tax_category: string;
+  tax_regime: string;
 };
 
 type FormDraft = Omit<PurchaseFormValues, "lines"> & {
+  supplier_country: string;
+  tax_country: string;
   lines: LineDraft[];
 };
 
@@ -65,6 +83,8 @@ function valuesToDraft(
 ): FormDraft {
   return {
     ...values,
+    supplier_country: values.supplier_country ?? "NL",
+    tax_country: values.tax_country ?? "NL",
     lines: values.lines.map((line) => ({
       ingredient_id: line.ingredient_id,
       quantity: options?.emptyNumericDefaults
@@ -73,6 +93,11 @@ function valuesToDraft(
       unit_cost: options?.emptyNumericDefaults
         ? ""
         : formatNumericInput(line.unit_cost),
+      discount: options?.emptyNumericDefaults
+        ? ""
+        : formatNumericInput(line.discount ?? 0),
+      tax_category: line.tax_category ?? "goods",
+      tax_regime: line.tax_regime ?? "standard_vat",
     })),
   };
 }
@@ -83,10 +108,15 @@ function draftToValues(draft: FormDraft): PurchaseFormValues {
     invoice_number: draft.invoice_number,
     purchased_at: draft.purchased_at,
     notes: draft.notes,
+    supplier_country: draft.supplier_country,
+    tax_country: draft.tax_country,
     lines: draft.lines.map((line) => ({
       ingredient_id: line.ingredient_id,
       quantity: coerceNumericField(line.quantity),
       unit_cost: coerceNumericField(line.unit_cost),
+      discount: coerceNumericField(line.discount),
+      tax_category: line.tax_category,
+      tax_regime: line.tax_regime,
     })),
   };
 }
@@ -171,6 +201,7 @@ function PurchaseDocumentForm({
   isLoading,
   isSaving,
   error,
+  accountingPreview = null,
   onClose,
   onSaveDraft,
   onReceiveGoods,
@@ -189,15 +220,51 @@ function PurchaseDocumentForm({
   const isDraftValid = Object.keys(draftFieldErrors).length === 0;
   const isReceiveValid = Object.keys(receiveFieldErrors).length === 0;
 
-  const grandTotal = useMemo(() => {
+  const taxPreview = useMemo(() => {
+    const values = draftToValues(formValues);
+    if (values.lines.length === 0 || !values.purchased_at) {
+      return null;
+    }
+
+    const document = buildPurchaseTaxDocument({
+      values,
+      suppliers,
+      documentId: purchase?.id,
+    });
+    const result = purchaseTaxService.previewPurchaseTaxes(document);
+    if (result.error || !result.data) {
+      return { error: result.error ?? "Tax preview unavailable.", data: null };
+    }
+    return { error: null, data: result.data };
+  }, [formValues, purchase?.id, suppliers]);
+
+  const subtotal = useMemo(() => {
     return roundMoney(
       formValues.lines.reduce((sum, line) => {
         const quantity = coerceNumericField(line.quantity);
         const unitCost = coerceNumericField(line.unit_cost);
-        return sum + quantity * unitCost;
+        const discount = coerceNumericField(line.discount);
+        return sum + quantity * unitCost - discount;
       }, 0),
     );
   }, [formValues.lines]);
+
+  const taxTotal =
+    accountingPreview?.tax_total ?? taxPreview?.data?.tax_total ?? 0;
+  const netAmount = accountingPreview?.net_amount ?? subtotal;
+  const grandTotal =
+    accountingPreview?.grand_total ?? roundMoney(subtotal + taxTotal);
+  const previewCurrency = accountingPreview?.currency ?? "EUR";
+
+  const previewForDisplay: PurchaseAccountingPreviewData = accountingPreview ?? {
+    net_amount: netAmount,
+    tax_total: taxTotal,
+    grand_total: grandTotal,
+    currency: previewCurrency,
+    status: "draft_proposal",
+    has_proposal: false,
+    lines: [],
+  };
 
   const updateHeader = <K extends keyof Omit<FormDraft, "lines">>(
     field: K,
@@ -224,7 +291,14 @@ function PurchaseDocumentForm({
       ...current,
       lines: [
         ...current.lines,
-        { ingredient_id: "", quantity: "", unit_cost: "" },
+        {
+          ingredient_id: "",
+          quantity: "",
+          unit_cost: "",
+          discount: "",
+          tax_category: "goods",
+          tax_regime: "standard_vat",
+        },
       ],
     }));
   };
@@ -257,7 +331,7 @@ function PurchaseDocumentForm({
 
   if (isLoading) {
     return (
-      <div className="relative max-h-[90vh] w-full max-w-4xl overflow-y-auto rounded-xl border border-zinc-200 bg-white p-6 shadow-xl">
+      <div className="relative max-h-[90vh] w-full max-w-6xl overflow-y-auto rounded-xl border border-zinc-200 bg-white p-6 shadow-xl">
         <div className="space-y-4">
           <div className="h-7 w-48 animate-pulse rounded bg-zinc-200" />
           <div className="h-4 w-72 animate-pulse rounded bg-zinc-200" />
@@ -273,7 +347,7 @@ function PurchaseDocumentForm({
   }
 
   return (
-    <div className="relative max-h-[90vh] w-full max-w-4xl overflow-y-auto rounded-xl border border-zinc-200 bg-white p-6 shadow-xl">
+    <div className="relative max-h-[90vh] w-full max-w-6xl overflow-y-auto rounded-xl border border-zinc-200 bg-white p-6 shadow-xl">
       <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h2 className="text-xl font-semibold text-zinc-900">
@@ -403,6 +477,48 @@ function PurchaseDocumentForm({
               className={inputClassName}
             />
           </div>
+
+          <div className="space-y-2">
+            <label
+              htmlFor="supplier_country"
+              className="block text-sm font-medium text-zinc-700"
+            >
+              Supplier country
+            </label>
+            <input
+              id="supplier_country"
+              type="text"
+              value={formValues.supplier_country}
+              onChange={(event) =>
+                updateHeader("supplier_country", event.target.value.toUpperCase())
+              }
+              disabled={isReadOnly || isSaving}
+              className={inputClassName}
+              placeholder="NL"
+              maxLength={2}
+            />
+          </div>
+
+          <div className="space-y-2">
+            <label
+              htmlFor="tax_country"
+              className="block text-sm font-medium text-zinc-700"
+            >
+              Tax country
+            </label>
+            <input
+              id="tax_country"
+              type="text"
+              value={formValues.tax_country}
+              onChange={(event) =>
+                updateHeader("tax_country", event.target.value.toUpperCase())
+              }
+              disabled={isReadOnly || isSaving}
+              className={inputClassName}
+              placeholder="NL"
+              maxLength={2}
+            />
+          </div>
         </div>
 
         <div className="space-y-2">
@@ -456,6 +572,21 @@ function PurchaseDocumentForm({
                     <th className="px-3 py-3 text-right text-sm font-semibold text-zinc-700">
                       Unit price
                     </th>
+                    <th className="px-3 py-3 text-left text-sm font-semibold text-zinc-700">
+                      Tax category
+                    </th>
+                    <th className="px-3 py-3 text-left text-sm font-semibold text-zinc-700">
+                      Tax regime
+                    </th>
+                    <th className="px-3 py-3 text-left text-sm font-semibold text-zinc-700">
+                      Tax code
+                    </th>
+                    <th className="px-3 py-3 text-right text-sm font-semibold text-zinc-700">
+                      Tax %
+                    </th>
+                    <th className="px-3 py-3 text-right text-sm font-semibold text-zinc-700">
+                      Tax amount
+                    </th>
                     <th className="px-3 py-3 text-right text-sm font-semibold text-zinc-700">
                       Line total
                     </th>
@@ -470,9 +601,13 @@ function PurchaseDocumentForm({
                   {formValues.lines.map((line, index) => {
                     const lineTotal = roundMoney(
                       coerceNumericField(line.quantity) *
-                        coerceNumericField(line.unit_cost),
+                        coerceNumericField(line.unit_cost) -
+                        coerceNumericField(line.discount),
                     );
                     const lineError = fieldErrors.lineErrors?.[index];
+                    const taxLine = taxPreview?.data?.lines.find(
+                      (row) => row.line_id === `line-${index + 1}`,
+                    );
 
                     return (
                       <tr key={index} className="border-t border-zinc-200">
@@ -539,6 +674,50 @@ function PurchaseDocumentForm({
                             </p>
                           )}
                         </td>
+                        <td className="px-3 py-3 align-top">
+                          <select
+                            value={line.tax_category}
+                            onChange={(event) =>
+                              updateLine(index, "tax_category", event.target.value)
+                            }
+                            disabled={isReadOnly || isSaving}
+                            className={inputClassName}
+                          >
+                            {PURCHASE_TAX_CATEGORY_OPTIONS.map((category) => (
+                              <option key={category} value={category}>
+                                {category}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+                        <td className="px-3 py-3 align-top">
+                          <select
+                            value={line.tax_regime}
+                            onChange={(event) =>
+                              updateLine(index, "tax_regime", event.target.value)
+                            }
+                            disabled={isReadOnly || isSaving}
+                            className={inputClassName}
+                          >
+                            {PURCHASE_TAX_REGIME_OPTIONS.map((regime) => (
+                              <option key={regime} value={regime}>
+                                {regime}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+                        <td className="px-3 py-3 align-top text-sm text-zinc-700">
+                          {taxLine?.tax_code ?? "—"}
+                        </td>
+                        <td className="px-3 py-3 text-right align-top text-sm text-zinc-700">
+                          {taxLine?.tax_rate_percent !== null &&
+                          taxLine?.tax_rate_percent !== undefined
+                            ? `${taxLine.tax_rate_percent}%`
+                            : "—"}
+                        </td>
+                        <td className="px-3 py-3 text-right align-top text-sm text-zinc-700">
+                          €{(taxLine?.tax_amount ?? 0).toFixed(2)}
+                        </td>
                         <td className="px-3 py-3 text-right align-top text-sm font-medium text-zinc-900">
                           €{lineTotal.toFixed(2)}
                         </td>
@@ -561,10 +740,27 @@ function PurchaseDocumentForm({
               </table>
             </div>
           </div>
+          {taxPreview?.error && (
+            <p className="text-sm text-amber-700">{taxPreview.error}</p>
+          )}
         </div>
 
+        <PurchaseAccountingPreview preview={previewForDisplay} />
+
         <div className="flex items-center justify-end border-t border-zinc-200 pt-4">
-          <div className="text-right">
+          <div className="space-y-1 text-right">
+            <p className="text-sm text-zinc-500">
+              Subtotal{" "}
+              <span className="font-medium text-zinc-800">
+                €{netAmount.toFixed(2)}
+              </span>
+            </p>
+            <p className="text-sm text-zinc-500">
+              Tax total{" "}
+              <span className="font-medium text-zinc-800">
+                €{taxTotal.toFixed(2)}
+              </span>
+            </p>
             <p className="text-sm text-zinc-500">Grand total</p>
             <p className="text-2xl font-semibold text-zinc-900">
               €{grandTotal.toFixed(2)}
@@ -619,6 +815,7 @@ export function PurchaseDocumentModal({
   isLoading,
   isSaving,
   error,
+  accountingPreview = null,
   onClose,
   onSaveDraft,
   onReceiveGoods,
@@ -646,6 +843,7 @@ export function PurchaseDocumentModal({
         isLoading={isLoading}
         isSaving={isSaving}
         error={error}
+        accountingPreview={accountingPreview}
         onClose={onClose}
         onSaveDraft={onSaveDraft}
         onReceiveGoods={onReceiveGoods}

@@ -21,6 +21,7 @@ import type {
   PurchaseAccountingContext,
   PurchaseJournalProposal,
 } from "../types/purchase-accounting";
+import type { PurchaseTaxResult } from "../types/purchase-tax";
 import { purchaseAccountingService } from "./purchase-accounting-service";
 
 interface PurchaseRow {
@@ -146,11 +147,14 @@ function validatePurchaseInput(
   return validateLines(input.lines);
 }
 
-function buildTotals(lines: PurchaseLineInput[]) {
+function buildTotals(lines: PurchaseLineInput[], taxTotal = 0) {
   const preparedLines = lines.map((line) => {
     const quantity = line.quantity;
     const unit_cost = line.unit_cost;
-    const line_total = calculateLineTotal(quantity, unit_cost);
+    const discount = line.discount ?? 0;
+    const line_total = roundMoney(
+      calculateLineTotal(quantity, unit_cost) - discount,
+    );
 
     return {
       ingredient_id: line.ingredient_id,
@@ -163,12 +167,13 @@ function buildTotals(lines: PurchaseLineInput[]) {
   const subtotal = roundMoney(
     preparedLines.reduce((sum, line) => sum + line.line_total, 0),
   );
+  const tax_total = roundMoney(taxTotal);
 
   return {
     preparedLines,
     subtotal,
-    tax_total: 0,
-    total: subtotal,
+    tax_total,
+    total: roundMoney(subtotal + tax_total),
   };
 }
 
@@ -465,7 +470,7 @@ async function persistPurchase(
     return { data: null, error: validationError };
   }
 
-  const totals = buildTotals(input.lines);
+  const totals = buildTotals(input.lines, input.tax_total ?? 0);
   const payload = toPurchasePayload(input, status, totals);
 
   if (input.id) {
@@ -857,13 +862,15 @@ export const purchaseService = {
   /**
    * Confirm/receive a purchase, then propose an Accounting journal.
    *
-   * Emits purchase_received and runs the Posting Engine.
+   * Requires a precomputed PurchaseTaxResult (DEV-100).
+   * Accounting never recalculates taxes.
    * Does not persist journal_entries or ledger_entries.
    * Existing receivePurchase (hooks/UI) remains unchanged.
    */
   async receivePurchaseAndProposeJournal(
     input: SavePurchaseInput,
     accounting: PurchaseAccountingContext,
+    tax: PurchaseTaxResult,
   ): Promise<ServiceResult<PurchaseJournalProposal>> {
     const received = await purchaseService.receivePurchase(input);
 
@@ -877,6 +884,7 @@ export const purchaseService = {
     return purchaseAccountingService.proposeJournalForPurchaseReceived(
       received.data,
       accounting,
+      tax,
     );
   },
 };

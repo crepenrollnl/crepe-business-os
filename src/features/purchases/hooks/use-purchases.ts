@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { purchaseService } from "../services/purchase-service";
+import { purchaseTaxService } from "../services/purchase-tax-service";
 import type {
   PurchaseFormValues,
   PurchaseIngredientOption,
@@ -12,6 +13,14 @@ import type {
   PurchaseSupplier,
   PurchaseWithRelations,
 } from "../types/purchase";
+import type { PurchaseAccountingPreviewData } from "../types/purchase-accounting-preview";
+import type { PurchaseTaxResult } from "../types/purchase-tax";
+import { buildPurchaseTaxDocument } from "../utils/build-purchase-tax-document";
+import { createPurchaseAccountingPreviewContext } from "../utils/create-purchase-accounting-preview-context";
+import {
+  mapPurchaseJournalProposalToPreview,
+  mapPurchaseTotalsToAccountingPreview,
+} from "../utils/map-purchase-accounting-preview";
 
 function comparePurchases(
   a: PurchaseListItem,
@@ -68,7 +77,18 @@ function emptyFormValues(): PurchaseFormValues {
     invoice_number: "",
     purchased_at: new Date().toISOString().slice(0, 10),
     notes: "",
-    lines: [{ ingredient_id: "", quantity: 1, unit_cost: 0 }],
+    supplier_country: "NL",
+    tax_country: "NL",
+    lines: [
+      {
+        ingredient_id: "",
+        quantity: 1,
+        unit_cost: 0,
+        discount: 0,
+        tax_category: "goods",
+        tax_regime: "standard_vat",
+      },
+    ],
   };
 }
 
@@ -78,14 +98,28 @@ function purchaseToFormValues(purchase: PurchaseWithRelations): PurchaseFormValu
     invoice_number: purchase.invoice_number ?? "",
     purchased_at: purchase.purchased_at.slice(0, 10),
     notes: purchase.notes ?? "",
+    supplier_country: "NL",
+    tax_country: "NL",
     lines:
       purchase.items.length > 0
         ? purchase.items.map((item) => ({
             ingredient_id: item.ingredient_id,
             quantity: item.quantity,
             unit_cost: item.unit_cost,
+            discount: 0,
+            tax_category: "goods",
+            tax_regime: "standard_vat",
           }))
-        : [{ ingredient_id: "", quantity: 1, unit_cost: 0 }],
+        : [
+            {
+              ingredient_id: "",
+              quantity: 1,
+              unit_cost: 0,
+              discount: 0,
+              tax_category: "goods",
+              tax_regime: "standard_vat",
+            },
+          ],
   };
 }
 
@@ -109,6 +143,8 @@ export function usePurchases() {
   const [isLoadingPurchase, setIsLoadingPurchase] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [accountingPreview, setAccountingPreview] =
+    useState<PurchaseAccountingPreviewData | null>(null);
   const openedFromQueryRef = useRef(false);
 
   const applyState = useCallback(
@@ -198,6 +234,7 @@ export function usePurchases() {
 
   const openCreateModal = useCallback(() => {
     setEditingPurchase(null);
+    setAccountingPreview(null);
     setActionError(null);
     setIsModalOpen(true);
   }, []);
@@ -205,6 +242,7 @@ export function usePurchases() {
   const openPurchaseById = useCallback(async (purchaseId: string) => {
     setActionError(null);
     setEditingPurchase(null);
+    setAccountingPreview(null);
     setIsLoadingPurchase(true);
     setIsModalOpen(true);
 
@@ -218,6 +256,8 @@ export function usePurchases() {
     }
 
     setEditingPurchase(result.data);
+    // Document totals only — journal proposals are not persisted.
+    setAccountingPreview(mapPurchaseTotalsToAccountingPreview(result.data));
     setIsLoadingPurchase(false);
   }, []);
 
@@ -258,18 +298,48 @@ export function usePurchases() {
 
     setIsModalOpen(false);
     setEditingPurchase(null);
+    setAccountingPreview(null);
     setActionError(null);
     setIsLoadingPurchase(false);
   }, [isSaving]);
+
+  const resolvePurchaseTax = useCallback(
+    (
+      values: PurchaseFormValues,
+    ): { tax: PurchaseTaxResult | null; error: string | null } => {
+      const taxDocument = buildPurchaseTaxDocument({
+        values,
+        suppliers,
+        documentId: editingPurchase?.id,
+      });
+      const taxResult = purchaseTaxService.calculatePurchaseTaxes(taxDocument);
+      if (taxResult.error || !taxResult.data) {
+        return {
+          tax: null,
+          error: taxResult.error ?? "Failed to calculate purchase taxes.",
+        };
+      }
+      return { tax: taxResult.data, error: null };
+    },
+    [editingPurchase?.id, suppliers],
+  );
 
   const saveDraft = useCallback(
     async (values: PurchaseFormValues) => {
       setIsSaving(true);
       setActionError(null);
 
+      const resolved = resolvePurchaseTax(values);
+      if (resolved.error || !resolved.tax) {
+        setActionError(resolved.error ?? "Failed to calculate purchase taxes.");
+        setIsSaving(false);
+        return false;
+      }
+
       const result = await purchaseService.saveDraft({
         ...values,
         id: editingPurchase?.id,
+        tax_total: resolved.tax.tax_total,
       });
 
       if (result.error) {
@@ -283,7 +353,7 @@ export function usePurchases() {
       closeModal();
       return true;
     },
-    [closeModal, editingPurchase?.id, loadPurchases],
+    [closeModal, editingPurchase?.id, loadPurchases, resolvePurchaseTax],
   );
 
   const receiveGoods = useCallback(
@@ -291,23 +361,45 @@ export function usePurchases() {
       setIsSaving(true);
       setActionError(null);
 
-      const result = await purchaseService.receivePurchase({
-        ...values,
-        id: editingPurchase?.id,
-      });
-
-      if (result.error) {
-        setActionError(result.error);
+      const resolved = resolvePurchaseTax(values);
+      if (resolved.error || !resolved.tax) {
+        setActionError(resolved.error ?? "Failed to calculate purchase taxes.");
         setIsSaving(false);
         return false;
       }
 
+      const tax = resolved.tax;
+      const accountingContext = createPurchaseAccountingPreviewContext({
+        currency: tax.tax_result.currency || "EUR",
+        purchasedAt: values.purchased_at,
+        baseCurrency: tax.tax_result.currency || "EUR",
+        exchangeRate: 1,
+      });
+
+      const result = await purchaseService.receivePurchaseAndProposeJournal(
+        {
+          ...values,
+          id: editingPurchase?.id,
+          tax_total: tax.tax_total,
+        },
+        accountingContext,
+        tax,
+      );
+
+      if (result.error || !result.data) {
+        setActionError(result.error ?? "Failed to receive purchase");
+        setIsSaving(false);
+        return false;
+      }
+
+      // Keep modal open so the owner can verify totals + journal proposal.
+      setEditingPurchase(result.data.purchase);
+      setAccountingPreview(mapPurchaseJournalProposalToPreview(result.data));
       await loadPurchases({ silent: true });
       setIsSaving(false);
-      closeModal();
       return true;
     },
-    [closeModal, editingPurchase?.id, loadPurchases],
+    [editingPurchase?.id, loadPurchases, resolvePurchaseTax],
   );
 
   return {
@@ -335,6 +427,7 @@ export function usePurchases() {
     isLoadingPurchase,
     isSaving,
     actionError,
+    accountingPreview,
     openCreateModal,
     openPurchaseModal,
     closeModal,
