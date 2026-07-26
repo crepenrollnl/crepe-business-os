@@ -65,11 +65,19 @@ export interface ProductionSessionPlanSummary {
   name: string;
 }
 
+/** Session-level production accounting status (DEV-105 / DEV-106). */
+export type ProductionAccountingPostingStatus = "posted" | "pending";
+
 export interface ProductionSessionWithRelations extends ProductionSession {
   lines: ProductionSessionLineView[];
   plan: ProductionSessionPlanSummary;
   /** Present after successful completion (DEV-015). */
   batches?: ProductionBatchWithProduct[];
+  /**
+   * Accounting journal status for production_completed (DEV-106).
+   * Read-only display of existing journal_entries — never computed in UI.
+   */
+  accounting_posting_status?: ProductionAccountingPostingStatus;
 }
 
 export interface ProductionSessionLineInput {

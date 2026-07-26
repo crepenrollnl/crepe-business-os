@@ -1,11 +1,14 @@
 /**
- * Production Batch — immutable finished-goods production event (DEV-015).
+ * Production Batch — immutable finished-goods production event (DEV-015 / DEV-103).
  *
  * Created only by Production Execution on session completion.
  * Sales never updates these rows. remaining_quantity is never stored.
+ * Costs are frozen at completion (unit_cost); total_cost is derived.
  *
  * Specs: docs/BATCH_CONSUMPTION.md, docs/ARCHITECTURE_FREEZE_V1.md
  */
+
+import type { ProductionCostLine } from "../utils/production-cost-calculator";
 
 export interface ProductionBatch {
   id: string;
@@ -28,6 +31,24 @@ export interface ProductionBatch {
 export interface ProductionBatchWithProduct extends ProductionBatch {
   product_name: string;
   yield_unit: string;
+  /**
+   * Official batch total = produced_quantity × unit_cost (derived, not recalculated).
+   */
+  total_cost: number;
+  /** Ingredient cost breakdown when reconstructable from completion facts. */
+  cost_breakdown: readonly ProductionCostLine[];
+  /**
+   * Finished Goods remaining quantity (calculated). Null when availability
+   * is unavailable.
+   */
+  remaining_quantity: number | null;
+  /** Remaining value = remaining_quantity × frozen unit_cost. */
+  remaining_value: number | null;
+  /**
+   * True when frozen unit_cost / total_cost are present for display (DEV-106).
+   * False when valuation data is missing.
+   */
+  has_valuation: boolean;
 }
 
 export interface CompleteProductionSessionResult {

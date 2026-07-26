@@ -1,5 +1,5 @@
 /**
- * Production → Accounting integration (DEV-094).
+ * Production → Accounting integration (DEV-094 / DEV-105).
  *
  * Maps Production Execution outcomes into Accounting Business Events and
  * submits them through the generic Operational Accounting Integration framework:
@@ -7,14 +7,16 @@
  *   production_completed → Dr Finished Goods / Cr Raw Materials
  *   production_adjusted  → configurable adjustment (no variance P&L yet)
  *
+ * DEV-105 adds post mode (persist journal + ledger) using frozen batch cost.
+ *
  * Production may only:
  *   - emit Business Events (via Event Factory)
  *   - receive Posting Results
  *
  * Does NOT:
- *   - create Journal Entries / Ledger Entries
+ *   - write journal_entries / ledger_entries directly
  *   - resolve Posting Rules (except pass optional test overrides)
- *   - access Accounting SQL
+ *   - recalculate production costs
  *   - implement variance accounting
  *   - change Production UI / hooks
  */
@@ -27,6 +29,8 @@ import {
   createBusinessEvent,
   createPostingMetadata,
 } from "@/features/accounting/utils/business-event-factory";
+import { toUserError } from "@/lib/service-errors";
+import { supabase } from "@/lib/supabase";
 import type {
   AccountingBusinessEvent,
   PostingRule,
@@ -36,8 +40,11 @@ import type {
   ProductionAccountingContext,
   ProductionAdjustedAccountingSource,
   ProductionCompletedAccountingSource,
+  ProductionJournalPosting,
   ProductionJournalProposal,
 } from "../types/production-accounting";
+import type { ProductionAccountingPostingStatus } from "../types/production-session";
+import { stableBusinessEventId } from "../utils/stable-business-event-id";
 
 function productionCompletedIdempotencyKey(sessionId: string): string {
   return `production_completed:${sessionId}`;
@@ -62,6 +69,37 @@ function assertNotDuplicate(
   return ok(true);
 }
 
+function assertCompletedProductionSource(
+  source: ProductionCompletedAccountingSource,
+): ServiceResult<true> {
+  if (source.session_status !== "completed") {
+    return fail(
+      "Production accounting posting requires a completed production session.",
+    );
+  }
+
+  if (!(source.total_produced_quantity > 0)) {
+    return fail(
+      "Production completed accounting requires a produced quantity greater than zero.",
+    );
+  }
+
+  if (!Number.isFinite(source.total_cost) || source.total_cost <= 0) {
+    return fail(
+      "Production completed accounting requires a total cost greater than zero.",
+    );
+  }
+
+  const batchIds = source.batch_ids ?? [];
+  if (batchIds.length === 0) {
+    return fail(
+      "Production completed accounting requires at least one production batch.",
+    );
+  }
+
+  return ok(true);
+}
+
 function resolveRules(
   accounting: ProductionAccountingContext,
   eventType: "production_completed" | "production_adjusted",
@@ -69,17 +107,20 @@ function resolveRules(
   return accounting.postingRulesByEvent?.[eventType];
 }
 
-function proposeFromEvent(input: {
+function submitFromEvent(input: {
   event: AccountingBusinessEvent;
   accounting: ProductionAccountingContext;
   postingRules: readonly PostingRule[] | undefined;
   correlationId: string | null;
   tags: Record<string, string>;
-}): ServiceResult<OperationalPostingResult> {
-  const { event, accounting, postingRules, correlationId, tags } = input;
+  mode: "propose" | "post";
+}):
+  | ServiceResult<OperationalPostingResult>
+  | Promise<ServiceResult<OperationalPostingResult>> {
+  const { event, accounting, postingRules, correlationId, tags, mode } = input;
   const requestedAt = accounting.nowIso ?? new Date().toISOString();
 
-  return operationalAccountingIntegrationService.propose({
+  const request = {
     event,
     metadata: createPostingMetadata({
       event,
@@ -95,8 +136,14 @@ function proposeFromEvent(input: {
       nowIso: accounting.nowIso,
       createId: accounting.createId,
     },
-    mode: "propose",
-  });
+    mode,
+  } as const;
+
+  if (mode === "post") {
+    return operationalAccountingIntegrationService.post(request);
+  }
+
+  return operationalAccountingIntegrationService.propose(request);
 }
 
 /**
@@ -114,16 +161,9 @@ export function buildProductionCompletedBusinessEvent(
     | "createId"
   >,
 ): ServiceResult<AccountingBusinessEvent> {
-  if (!(source.total_produced_quantity > 0)) {
-    return fail(
-      "Production completed accounting requires a produced quantity greater than zero.",
-    );
-  }
-
-  if (!(source.total_cost > 0) || !Number.isFinite(source.total_cost)) {
-    return fail(
-      "Production completed accounting requires a total cost greater than zero.",
-    );
+  const sourceCheck = assertCompletedProductionSource(source);
+  if (sourceCheck.error) {
+    return fail(sourceCheck.error);
   }
 
   if (
@@ -134,6 +174,8 @@ export function buildProductionCompletedBusinessEvent(
       "Production transaction currency is required for accounting.",
     );
   }
+
+  const idempotencyKey = productionCompletedIdempotencyKey(source.session_id);
 
   return createBusinessEvent({
     event_type: "production_completed",
@@ -156,7 +198,8 @@ export function buildProductionCompletedBusinessEvent(
       other_amount: source.total_cost,
     },
     tax_lines: [],
-    idempotency_key: productionCompletedIdempotencyKey(source.session_id),
+    idempotency_key: idempotencyKey,
+    event_id: stableBusinessEventId(idempotencyKey),
     nowIso: accounting.nowIso,
     createId: accounting.createId,
   });
@@ -199,6 +242,11 @@ export function buildProductionAdjustedBusinessEvent(
     );
   }
 
+  const idempotencyKey = productionAdjustedIdempotencyKey(
+    source.session_id,
+    source.adjustment_id,
+  );
+
   return createBusinessEvent({
     event_type: "production_adjusted",
     source_module: "production-execution",
@@ -220,12 +268,75 @@ export function buildProductionAdjustedBusinessEvent(
       other_amount: source.adjustment_amount,
     },
     tax_lines: [],
-    idempotency_key: productionAdjustedIdempotencyKey(
-      source.session_id,
-      source.adjustment_id,
-    ),
+    idempotency_key: idempotencyKey,
+    event_id: stableBusinessEventId(idempotencyKey),
     nowIso: accounting.nowIso,
     createId: accounting.createId,
+  });
+}
+
+function completedTags(
+  source: ProductionCompletedAccountingSource,
+): Record<string, string> {
+  const batchIds = source.batch_ids ?? [];
+  return {
+    module: "production-execution",
+    document: "production_session",
+    journal: "production_completed",
+    batch_count: String(source.batch_count ?? batchIds.length),
+    batch_ids: batchIds.join(","),
+  };
+}
+
+async function runProductionCompleted(input: {
+  source: ProductionCompletedAccountingSource;
+  accounting: ProductionAccountingContext;
+  mode: "propose" | "post";
+}): Promise<ServiceResult<ProductionJournalProposal>> {
+  const { source, accounting, mode } = input;
+
+  const sourceCheck = assertCompletedProductionSource(source);
+  if (sourceCheck.error) {
+    return fail(sourceCheck.error);
+  }
+
+  const dup = assertNotDuplicate(
+    productionCompletedIdempotencyKey(source.session_id),
+    accounting.alreadyPostedIdempotencyKeys,
+  );
+  if (dup.error) {
+    return fail(dup.error);
+  }
+
+  const eventResult = buildProductionCompletedBusinessEvent(source, accounting);
+  if (eventResult.error || !eventResult.data) {
+    return fail(
+      eventResult.error ??
+        "Failed to build production_completed business event",
+    );
+  }
+
+  const submitted = await submitFromEvent({
+    event: eventResult.data,
+    accounting,
+    postingRules: resolveRules(accounting, "production_completed"),
+    correlationId: source.transaction_id,
+    tags: completedTags(source),
+    mode,
+  });
+
+  if (submitted.error || !submitted.data) {
+    return fail(
+      submitted.error ??
+        `Failed to ${mode} journal for production_completed`,
+    );
+  }
+
+  return ok({
+    source_document_id: source.session_id,
+    event_type: "production_completed",
+    postingResult: submitted.data,
+    batch_ids: [...(source.batch_ids ?? [])],
   });
 }
 
@@ -236,6 +347,55 @@ export const productionAccountingService = {
   createProductionAdjustedPostingRule,
 
   /**
+   * Read-only posting status for a completed production session (DEV-106).
+   * Looks up existing journal_entries by stable business_event_id.
+   * Does not propose, post, or change Accounting logic.
+   */
+  async getProductionCompletedPostingStatus(
+    sessionId: string,
+  ): Promise<ServiceResult<ProductionAccountingPostingStatus>> {
+    try {
+      const trimmed = sessionId?.trim() ?? "";
+      if (!trimmed) {
+        return fail("Production session id is required.");
+      }
+
+      const businessEventId = stableBusinessEventId(
+        productionCompletedIdempotencyKey(trimmed),
+      );
+
+      const { data, error } = await supabase
+        .from("journal_entries")
+        .select("id, status")
+        .eq("business_event_id", businessEventId)
+        .eq("status", "posted")
+        .maybeSingle();
+
+      if (error) {
+        const message = error.message?.toLowerCase() ?? "";
+        if (
+          message.includes("journal_entries") &&
+          (message.includes("does not exist") ||
+            message.includes("schema cache") ||
+            message.includes("42p01"))
+        ) {
+          return ok("pending");
+        }
+
+        return fail(
+          toUserError(error, "Failed to load production accounting status"),
+        );
+      }
+
+      return ok(data ? "posted" : "pending");
+    } catch (error) {
+      return fail(
+        toUserError(error, "Failed to load production accounting status"),
+      );
+    }
+  },
+
+  /**
    * Emit production_completed through the generic Accounting integration framework.
    * Propose-only — does not write journal_entries or ledger_entries.
    */
@@ -243,10 +403,10 @@ export const productionAccountingService = {
     source: ProductionCompletedAccountingSource,
     accounting: ProductionAccountingContext,
   ): ServiceResult<ProductionJournalProposal> {
-    if (!(source.total_produced_quantity > 0)) {
-      return fail(
-        "Production completed accounting requires a produced quantity greater than zero.",
-      );
+    // Synchronous path keeps DEV-094 callers unchanged.
+    const sourceCheck = assertCompletedProductionSource(source);
+    if (sourceCheck.error) {
+      return fail(sourceCheck.error);
     }
 
     const dup = assertNotDuplicate(
@@ -268,16 +428,23 @@ export const productionAccountingService = {
       );
     }
 
-    const proposed = proposeFromEvent({
+    const proposed = operationalAccountingIntegrationService.propose({
       event: eventResult.data,
-      accounting,
-      postingRules: resolveRules(accounting, "production_completed"),
-      correlationId: source.transaction_id,
-      tags: {
-        module: "production-execution",
-        document: "production_session",
-        journal: "production_completed",
+      metadata: createPostingMetadata({
+        event: eventResult.data,
+        requested_at: accounting.nowIso ?? new Date().toISOString(),
+        correlation_id: source.transaction_id,
+        tags: completedTags(source),
+      }),
+      context: {
+        fiscalPeriod: accounting.fiscalPeriod,
+        accountRoleBindings: accounting.accountRoleBindings,
+        accountsById: accounting.accountsById,
+        postingRules: resolveRules(accounting, "production_completed"),
+        nowIso: accounting.nowIso,
+        createId: accounting.createId,
       },
+      mode: "propose",
     });
 
     if (proposed.error || !proposed.data) {
@@ -291,7 +458,20 @@ export const productionAccountingService = {
       source_document_id: source.session_id,
       event_type: "production_completed",
       postingResult: proposed.data,
+      batch_ids: [...(source.batch_ids ?? [])],
     });
+  },
+
+  /**
+   * Post production_completed: propose then persist journal + ledger.
+   * Uses frozen Production Batch cost — never recalculates.
+   * Idempotent via stable business_event_id + Posting Service ALREADY_POSTED.
+   */
+  async postJournalForProductionCompleted(
+    source: ProductionCompletedAccountingSource,
+    accounting: ProductionAccountingContext,
+  ): Promise<ServiceResult<ProductionJournalPosting>> {
+    return runProductionCompleted({ source, accounting, mode: "post" });
   },
 
   /**
@@ -324,16 +504,27 @@ export const productionAccountingService = {
       );
     }
 
-    const proposed = proposeFromEvent({
+    const proposed = operationalAccountingIntegrationService.propose({
       event: eventResult.data,
-      accounting,
-      postingRules: resolveRules(accounting, "production_adjusted"),
-      correlationId: source.transaction_id ?? source.session_id,
-      tags: {
-        module: "production-execution",
-        document: "production_adjustment",
-        journal: "production_adjusted",
+      metadata: createPostingMetadata({
+        event: eventResult.data,
+        requested_at: accounting.nowIso ?? new Date().toISOString(),
+        correlation_id: source.transaction_id ?? source.session_id,
+        tags: {
+          module: "production-execution",
+          document: "production_adjustment",
+          journal: "production_adjusted",
+        },
+      }),
+      context: {
+        fiscalPeriod: accounting.fiscalPeriod,
+        accountRoleBindings: accounting.accountRoleBindings,
+        accountsById: accounting.accountsById,
+        postingRules: resolveRules(accounting, "production_adjusted"),
+        nowIso: accounting.nowIso,
+        createId: accounting.createId,
       },
+      mode: "propose",
     });
 
     if (proposed.error || !proposed.data) {
@@ -347,6 +538,7 @@ export const productionAccountingService = {
       source_document_id: source.adjustment_id,
       event_type: "production_adjusted",
       postingResult: proposed.data,
+      batch_ids: [],
     });
   },
 };

@@ -1,11 +1,17 @@
 /**
- * Finished Goods — module contracts (DEV-023 / DEV-024).
+ * Finished Goods — module contracts (DEV-023 / DEV-024 / DEV-104).
  *
  * Write path: allocate via allocate_finished_goods_fifo (SQL owns FIFO / remaining).
  * Read path: finished_goods_batch_availability view (SQL owns available_quantity).
+ * Valuation: frozen unit_cost from Production Batch; remaining value calculated.
  *
  * Specs: docs/FINISHED_GOODS.md, docs/BATCH_CONSUMPTION.md, DEV-020 architecture
  */
+
+export type {
+  FinishedGoodsBatchValuation,
+  FinishedGoodsValuationSource,
+} from "../utils/finished-goods-valuation";
 
 /** Outflow reasons accepted by allocate_finished_goods_fifo. */
 export const FINISHED_GOODS_ALLOCATION_REASONS = [
@@ -81,8 +87,9 @@ export interface AllocateFinishedGoodsResult {
 }
 
 /**
- * Row from finished_goods_batch_availability (DEV-024).
- * available_quantity is calculated in SQL — never recomputed in TypeScript.
+ * Row from finished_goods_batch_availability (DEV-024 / DEV-104).
+ * available_quantity / remaining_value are calculated in SQL.
+ * unit_cost / total_batch_cost are frozen from the production batch.
  */
 export interface FinishedGoodsAvailableBatch {
   production_batch_id: string;
@@ -90,6 +97,11 @@ export interface FinishedGoodsAvailableBatch {
   batch_number: number;
   produced_at: string;
   produced_quantity: number;
+  /** Calculated remaining — never stored on the batch. */
   available_quantity: number;
   unit_cost: number;
+  /** Frozen lot value: produced_quantity × unit_cost. */
+  total_batch_cost: number;
+  /** Calculated: available_quantity × unit_cost. */
+  remaining_value: number;
 }

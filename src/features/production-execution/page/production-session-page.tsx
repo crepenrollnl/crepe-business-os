@@ -87,6 +87,10 @@ export function ProductionSessionPage({ sessionId }: ProductionSessionPageProps)
                 </div>
                 <ProductionSessionBatchesSection
                   batches={session.batches ?? []}
+                  completionDate={session.completed_at}
+                  accountingPostingStatus={
+                    session.accounting_posting_status ?? "pending"
+                  }
                 />
               </>
             ) : null}

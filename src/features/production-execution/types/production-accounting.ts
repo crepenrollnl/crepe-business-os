@@ -1,12 +1,12 @@
 /**
- * Production → Accounting integration contracts (DEV-094).
+ * Production → Accounting integration contracts (DEV-094 / DEV-105).
  *
  * Production Completed / Adjusted emit accounting events through the generic
  * Operational Accounting Integration framework.
  *
- * Production supplies money facts + opaque source refs only.
- * Ledger persistence remains Accounting-owned (propose mode by default).
- * Variance accounting is not implemented yet.
+ * Production supplies frozen money facts + opaque source refs only.
+ * Costs come from Production Batch valuation (DEV-103) — never recalculated.
+ * Ledger persistence is Accounting-owned via post mode (DEV-105).
  */
 
 import type {
@@ -19,7 +19,7 @@ import type { OperationalPostingResult } from "@/features/accounting/types/opera
 import type { CompleteProductionSessionResult } from "./production-batch";
 
 /**
- * Accounting inputs required to propose journals for production events.
+ * Accounting inputs required to propose / post journals for production events.
  * Posting rules default inside Accounting when omitted.
  */
 export interface ProductionAccountingContext {
@@ -51,10 +51,17 @@ export interface ProductionCompletedAccountingSource {
   session_id: string;
   transaction_id: string | null;
   completed_at: string;
+  /** Frozen session production cost (Σ batch costs). */
   total_cost: number;
   /** Sum of actual produced quantities across session lines / batches. */
   total_produced_quantity: number;
   batch_count?: number;
+  /** Production batch ids linked to this posting. */
+  batch_ids?: readonly string[];
+  /**
+   * Session status gate — posting requires completed sessions only.
+   */
+  session_status: "completed";
 }
 
 /**
@@ -74,7 +81,11 @@ export interface ProductionJournalProposal {
   source_document_id: string;
   event_type: "production_completed" | "production_adjusted";
   postingResult: OperationalPostingResult;
+  /** Linked production batch ids when provided on the source. */
+  batch_ids: readonly string[];
 }
+
+export type ProductionJournalPosting = ProductionJournalProposal;
 
 export type ProductionCompletedFromSession = Pick<
   CompleteProductionSessionResult,
@@ -83,6 +94,8 @@ export type ProductionCompletedFromSession = Pick<
   | "total_cost"
   | "completed_at"
   | "batch_count"
+  | "batch_ids"
 > & {
   total_produced_quantity: number;
+  session_status: "completed";
 };

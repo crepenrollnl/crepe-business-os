@@ -1,8 +1,9 @@
 /**
- * Pure helpers for Complete Production (PRD-001 / DEV-015).
+ * Pure helpers for Complete Production (PRD-001 / DEV-015 / DEV-103).
  *
  * Pre-transaction: load/validate session + recipe, scale BOM by actual
- * produced quantity (never planned), validate inventory availability.
+ * produced quantity (never planned), validate inventory availability,
+ * calculate batch costs via Production Cost Calculator.
  * Database mutation stays in the complete_production_session RPC
  * (one DB transaction: inventory transactions → batches → session).
  */
@@ -11,14 +12,25 @@ import { roundMoney } from "@/lib/money";
 import { addQuantities, roundQuantity } from "@/lib/quantity";
 import { scaleRecipeIngredientNeed } from "@/features/production-planning";
 import type { ProductionSessionStatus } from "../types/production-session";
+import {
+  calculateBatchCostSummary,
+  roundProductionUnitCost,
+  type ProductionCostLine,
+  type ProductionCostLineInput,
+} from "./production-cost-calculator";
 
 export interface CompleteProductionRecipeIngredient {
   ingredient_id: string;
   quantity_per_yield: number;
   unit: string;
-  cost_per_unit: number;
+  /**
+   * Actual inventory unit cost. null = missing valuation (rejected).
+   */
+  cost_per_unit: number | null;
   name: string;
   current_stock: number;
+  /** True when the recipe references an ingredient row that does not exist. */
+  is_missing?: boolean;
 }
 
 export interface CompleteProductionRecipeBom {
@@ -54,6 +66,8 @@ export interface ProductionBatchPlan {
   produced_quantity: number;
   unit_cost: number;
   total_cost: number;
+  /** Per-ingredient cost breakdown for this batch (DEV-103). */
+  cost_breakdown: readonly ProductionCostLine[];
 }
 
 export interface CompleteProductionPlan {
@@ -69,6 +83,19 @@ export interface ProductionCompletedLogPayload {
   produced_quantity: number;
   total_cost: number;
 }
+
+export {
+  assignFinishedGoodsCostFromBatch,
+  calculateBatchCostSummary,
+  deriveBatchTotalCost,
+  roundProductionUnitCost,
+} from "./production-cost-calculator";
+
+export type {
+  BatchCostSummary,
+  FinishedGoodsCostAssignment,
+  ProductionCostLine,
+} from "./production-cost-calculator";
 
 /**
  * BR-001 / BR-002: completion allowed only when status = IN_PROGRESS.
@@ -92,14 +119,14 @@ export function assertCanCompleteProductionSession(
   return null;
 }
 
+/** @deprecated Prefer roundProductionUnitCost from Production Cost Calculator. */
 export function roundUnitCost(value: number): number {
-  const factor = 10 ** 4;
-  return Math.round(value * factor) / factor;
+  return roundProductionUnitCost(value);
 }
 
 /**
  * Build consumption + batch plans from actual produced quantities.
- * Returns an error string when recipes/inventory inputs are invalid.
+ * Batch costs come only from Production Cost Calculator.
  */
 export function buildCompleteProductionPlan(
   lines: readonly CompleteProductionLineInput[],
@@ -156,9 +183,16 @@ export function buildCompleteProductionPlan(
       };
     }
 
-    let lineTotalCost = 0;
+    const costLineInputs: ProductionCostLineInput[] = [];
 
     for (const ingredient of bom.ingredients) {
+      if (ingredient.is_missing) {
+        return {
+          ok: false,
+          error: `Recipe "${bom.recipe_name}" references a missing ingredient.`,
+        };
+      }
+
       const scaled = scaleRecipeIngredientNeed(
         {
           ingredientId: ingredient.ingredient_id,
@@ -173,37 +207,58 @@ export function buildCompleteProductionPlan(
         continue;
       }
 
-      const lineCost = scaled * ingredient.cost_per_unit;
-      lineTotalCost += lineCost;
+      costLineInputs.push({
+        ingredient_id: ingredient.ingredient_id,
+        ingredient_name: ingredient.name,
+        consumed_quantity: scaled,
+        unit: ingredient.unit,
+        inventory_unit_cost: ingredient.cost_per_unit as number,
+      });
+    }
 
-      const existing = consumptionByIngredient.get(ingredient.ingredient_id);
+    const costResult = calculateBatchCostSummary({
+      produced_quantity: line.actual_produced_quantity,
+      cost_lines: costLineInputs,
+    });
+
+    if (!costResult.ok) {
+      return { ok: false, error: costResult.error };
+    }
+
+    const { summary } = costResult;
+
+    for (const costLine of summary.cost_breakdown) {
+      const existing = consumptionByIngredient.get(costLine.ingredient_id);
       if (existing) {
-        existing.quantity = addQuantities(existing.quantity, scaled);
-        existing.total_cost += lineCost;
+        existing.quantity = addQuantities(
+          existing.quantity,
+          costLine.consumed_quantity,
+        );
+        existing.total_cost += costLine.line_cost;
       } else {
-        consumptionByIngredient.set(ingredient.ingredient_id, {
-          ingredient_name: ingredient.name,
-          quantity: scaled,
-          unit: ingredient.unit,
-          total_cost: lineCost,
-          available_stock: ingredient.current_stock,
-          unit_cost: ingredient.cost_per_unit,
+        const bomIngredient = bom.ingredients.find(
+          (row) => row.ingredient_id === costLine.ingredient_id,
+        );
+        consumptionByIngredient.set(costLine.ingredient_id, {
+          ingredient_name: costLine.ingredient_name,
+          quantity: costLine.consumed_quantity,
+          unit: costLine.unit,
+          total_cost: costLine.line_cost,
+          available_stock: bomIngredient?.current_stock ?? 0,
+          unit_cost: costLine.inventory_unit_cost,
         });
       }
     }
-
-    const unitCost = roundUnitCost(
-      lineTotalCost / line.actual_produced_quantity,
-    );
 
     batches.push({
       session_line_id: line.line_id,
       finished_good_id: line.recipe_id,
       recipe_id: line.recipe_id,
       product_name: line.product_name,
-      produced_quantity: line.actual_produced_quantity,
-      unit_cost: unitCost,
-      total_cost: roundMoney(lineTotalCost),
+      produced_quantity: summary.produced_quantity,
+      unit_cost: summary.unit_cost,
+      total_cost: summary.batch_cost,
+      cost_breakdown: summary.cost_breakdown,
     });
   }
 
@@ -216,7 +271,7 @@ export function buildCompleteProductionPlan(
       ingredient_name: value.ingredient_name,
       quantity,
       unit: value.unit,
-      unit_cost: roundUnitCost(value.unit_cost),
+      unit_cost: roundProductionUnitCost(value.unit_cost),
       total_cost: roundMoney(value.total_cost),
       available_stock: roundQuantity(value.available_stock),
     });
@@ -287,6 +342,10 @@ export function mapCompleteProductionRpcError(message: string): string | null {
   }
 
   if (normalized.includes("missing ingredient")) {
+    return message;
+  }
+
+  if (normalized.includes("missing inventory valuation")) {
     return message;
   }
 

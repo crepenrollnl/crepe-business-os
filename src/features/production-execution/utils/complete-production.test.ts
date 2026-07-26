@@ -190,6 +190,115 @@ describe("buildCompleteProductionPlan", () => {
       error: 'Recipe "Chicken Crepe" has no ingredients.',
     });
   });
+
+  it("includes ingredient cost breakdown on each batch plan", () => {
+    const result = buildCompleteProductionPlan(
+      [
+        {
+          line_id: "line-1",
+          recipe_id: "recipe-1",
+          product_name: "Chicken Crepe",
+          actual_produced_quantity: 10,
+        },
+      ],
+      new Map([["recipe-1", bom()]]),
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) {
+      return;
+    }
+
+    expect(result.plan.batches[0]?.cost_breakdown).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          ingredient_id: "flour",
+          consumed_quantity: 2,
+          inventory_unit_cost: 1.5,
+          line_cost: 3,
+        }),
+        expect.objectContaining({
+          ingredient_id: "milk",
+          consumed_quantity: 1,
+          inventory_unit_cost: 2,
+          line_cost: 2,
+        }),
+      ]),
+    );
+  });
+
+  it("rejects missing inventory valuation", () => {
+    const result = buildCompleteProductionPlan(
+      [
+        {
+          line_id: "line-1",
+          recipe_id: "recipe-1",
+          product_name: "Chicken Crepe",
+          actual_produced_quantity: 10,
+        },
+      ],
+      new Map([
+        [
+          "recipe-1",
+          bom({
+            ingredients: [
+              {
+                ingredient_id: "flour",
+                quantity_per_yield: 2,
+                unit: "kg",
+                cost_per_unit: null,
+                name: "Flour",
+                current_stock: 100,
+              },
+            ],
+          }),
+        ],
+      ]),
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) {
+      return;
+    }
+    expect(result.error).toMatch(/missing inventory valuation/i);
+  });
+
+  it("rejects missing ingredients on the recipe BOM", () => {
+    const result = buildCompleteProductionPlan(
+      [
+        {
+          line_id: "line-1",
+          recipe_id: "recipe-1",
+          product_name: "Chicken Crepe",
+          actual_produced_quantity: 10,
+        },
+      ],
+      new Map([
+        [
+          "recipe-1",
+          bom({
+            ingredients: [
+              {
+                ingredient_id: "gone",
+                quantity_per_yield: 1,
+                unit: "kg",
+                cost_per_unit: null,
+                name: "Missing ingredient",
+                current_stock: 0,
+                is_missing: true,
+              },
+            ],
+          }),
+        ],
+      ]),
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) {
+      return;
+    }
+    expect(result.error).toMatch(/missing ingredient/i);
+  });
 });
 
 describe("validateInventoryForCompletion", () => {

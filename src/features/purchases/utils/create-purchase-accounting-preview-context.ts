@@ -19,7 +19,7 @@ function openPeriodForDate(dateIso: string): FiscalPeriod {
     end_date: `${year}-12-31`,
     status: "open",
     closed_at: null,
-    created_at: `${year}-01-01T00:00:00.000Z",
+    created_at: `${year}-01-01T00:00:00.000Z`,
   };
 }
 

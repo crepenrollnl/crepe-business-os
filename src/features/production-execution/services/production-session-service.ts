@@ -20,6 +20,11 @@ import type {
 } from "../types/production-session";
 import { OPEN_PRODUCTION_SESSION_STATUSES } from "../types/production-session";
 import type { CompleteProductionSessionResult } from "../types/production-batch";
+import type {
+  ProductionAccountingContext,
+  ProductionJournalPosting,
+} from "../types/production-accounting";
+import { productionAccountingService } from "./production-accounting-service";
 import { productionBatchService } from "./production-batch-service";
 import {
   assertCanCompleteProductionSession,
@@ -89,7 +94,7 @@ interface IngredientCostRow {
   name: string;
   unit: string;
   current_stock: number | string;
-  cost_per_unit: number | string;
+  cost_per_unit: number | string | null;
 }
 
 function toNumber(value: number | string): number {
@@ -206,7 +211,11 @@ async function buildSessionWithRelations(
     return ok(base);
   }
 
-  const batchesResult = await productionBatchService.listBySessionId(session.id);
+  const [batchesResult, postingStatusResult] = await Promise.all([
+    productionBatchService.listBySessionId(session.id),
+    productionAccountingService.getProductionCompletedPostingStatus(session.id),
+  ]);
+
   if (batchesResult.error) {
     // Batches table may not exist yet before SQL 007 is applied.
     const message = batchesResult.error.toLowerCase();
@@ -215,7 +224,11 @@ async function buildSessionWithRelations(
       message.includes("does not exist") ||
       message.includes("schema cache")
     ) {
-      return ok({ ...base, batches: [] });
+      return ok({
+        ...base,
+        batches: [],
+        accounting_posting_status: postingStatusResult.data ?? "pending",
+      });
     }
     return fail(batchesResult.error);
   }
@@ -223,6 +236,8 @@ async function buildSessionWithRelations(
   return ok({
     ...base,
     batches: batchesResult.data ?? [],
+    // Read-only display; soft-fail to Pending when journal lookup is unavailable.
+    accounting_posting_status: postingStatusResult.data ?? "pending",
   });
 }
 
@@ -298,7 +313,7 @@ async function loadRecipeBomsForCompletion(
         name: row.name,
         unit: row.unit,
         current_stock: toNumber(row.current_stock),
-        cost_per_unit: toNumber(row.cost_per_unit),
+        cost_per_unit: toNullableNumber(row.cost_per_unit),
       },
     ]),
   );
@@ -321,13 +336,26 @@ async function loadRecipeBomsForCompletion(
       is_active: recipe.is_active,
       ingredients: items.map((item) => {
         const ingredient = ingredientMap.get(item.ingredient_id);
+        if (!ingredient) {
+          return {
+            ingredient_id: item.ingredient_id,
+            quantity_per_yield: toNumber(item.quantity),
+            unit: item.unit,
+            cost_per_unit: null,
+            name: "Missing ingredient",
+            current_stock: 0,
+            is_missing: true,
+          };
+        }
+
         return {
           ingredient_id: item.ingredient_id,
           quantity_per_yield: toNumber(item.quantity),
-          unit: ingredient?.unit ?? item.unit,
-          cost_per_unit: ingredient?.cost_per_unit ?? 0,
-          name: ingredient?.name ?? "Unknown ingredient",
-          current_stock: ingredient?.current_stock ?? 0,
+          unit: ingredient.unit || item.unit,
+          cost_per_unit: ingredient.cost_per_unit,
+          name: ingredient.name,
+          current_stock: ingredient.current_stock,
+          is_missing: false,
         };
       }),
     });
@@ -805,5 +833,66 @@ export const productionSessionService = {
         mapCompletionError(error, "Failed to finish production session"),
       );
     }
+  },
+
+  /**
+   * Complete production then post the Accounting journal (DEV-105).
+   *
+   * Uses frozen RPC / plan total_cost — never recalculates.
+   * Existing completeSession (hooks/UI) remains unchanged.
+   */
+  async completeSessionAndPostJournal(
+    sessionId: string,
+    input: CompleteProductionSessionInput,
+    accounting: ProductionAccountingContext,
+  ): Promise<
+    ServiceResult<{
+      session: ProductionSessionWithRelations;
+      posting: ProductionJournalPosting;
+    }>
+  > {
+    const completed = await this.completeSession(sessionId, input);
+    if (completed.error || !completed.data) {
+      return fail(completed.error ?? "Failed to finish production session");
+    }
+
+    const producedQuantity = completed.data.batches?.reduce(
+      (sum, batch) => sum + batch.produced_quantity,
+      0,
+    );
+    const batchIds =
+      completed.data.batches?.map((batch) => batch.id) ?? [];
+    const totalCost =
+      completed.data.batches?.reduce(
+        (sum, batch) => sum + batch.total_cost,
+        0,
+      ) ?? 0;
+
+    const posting = await productionAccountingService.postJournalForProductionCompleted(
+      {
+        session_id: sessionId,
+        transaction_id: null,
+        completed_at:
+          completed.data.completed_at ?? new Date().toISOString(),
+        total_cost: totalCost,
+        total_produced_quantity: producedQuantity ?? 0,
+        batch_count: batchIds.length,
+        batch_ids: batchIds,
+        session_status: "completed",
+      },
+      accounting,
+    );
+
+    if (posting.error || !posting.data) {
+      return fail(
+        posting.error ??
+          "Production completed but accounting posting failed.",
+      );
+    }
+
+    return ok({
+      session: completed.data,
+      posting: posting.data,
+    });
   },
 };

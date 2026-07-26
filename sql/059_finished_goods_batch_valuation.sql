@@ -1,19 +1,15 @@
--- Finished Goods Batch Availability Read Model (DEV-024 / DEV-104)
--- Run in Supabase SQL editor after sql/010_finished_goods_batch_consumptions.sql
--- (and sql/011_allocate_finished_goods_fifo.sql if already applied).
+-- Finished Goods Batch Valuation (DEV-104)
+-- Run in Supabase SQL editor after sql/012_finished_goods_availability.sql.
 --
--- Read-only view of per-batch finished-goods availability + valuation.
--- Remaining / available quantity is CALCULATED only:
---   available_quantity = produced_quantity − Σ(out) + Σ(in)
---   remaining_value    = available_quantity × unit_cost
---   total_batch_cost   = produced_quantity × unit_cost
+-- Extends finished_goods_batch_availability with freeze-compliant valuation fields:
+--   total_batch_cost  = produced_quantity × unit_cost          (frozen lot value)
+--   remaining_value   = available_quantity × unit_cost         (calculated)
 --
 -- Does NOT:
 --   - store remaining_quantity
 --   - update production_batches
---   - modify ledger schema
---   - create triggers
---   - implement FIFO / Sales / write RPCs
+--   - create a product-level FG stock ledger
+--   - recalculate unit_cost after completion
 
 CREATE OR REPLACE VIEW finished_goods_batch_availability AS
 SELECT
@@ -49,6 +45,6 @@ LEFT JOIN LATERAL (
 ) movements ON true;
 
 COMMENT ON VIEW finished_goods_batch_availability IS
-  'Read-only Finished Goods batch availability + valuation. available_quantity and remaining_value are calculated. unit_cost is frozen from the production batch. Never stores remaining_quantity.';
+  'Read-only Finished Goods batch availability + valuation. available_quantity and remaining_value are calculated. unit_cost / total_batch_cost are frozen from the production batch. Never stores remaining_quantity.';
 
 GRANT SELECT ON finished_goods_batch_availability TO authenticated;
