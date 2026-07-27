@@ -1,11 +1,11 @@
 /**
- * Sales → Accounting integration contracts (DEV-093).
+ * Sales → Accounting integration contracts (DEV-093 / DEV-109).
  *
  * Sale Completed emits sale_completed (+ companion cogs_recognized) through
  * the generic Operational Accounting Integration framework.
  *
- * Sales supplies money facts + opaque source refs only.
- * Ledger persistence remains Accounting-owned (propose mode by default).
+ * Sales supplies frozen money facts + opaque source refs only.
+ * Propose mode builds journals; post mode persists via Posting Engine.
  */
 
 import type {
@@ -19,7 +19,7 @@ import type { SaleRevenueDebitRole } from "@/features/accounting/rules/sale-comp
 import type { ConfirmSaleResult, SaleWithLines } from "./sale";
 
 /**
- * Accounting inputs required to propose journals for a completed sale.
+ * Accounting inputs required to propose / post journals for a completed sale.
  * Posting rules default inside Accounting when omitted.
  */
 export interface SaleAccountingContext {
@@ -54,7 +54,7 @@ export interface SaleAccountingContext {
 }
 
 /**
- * Combined Sales accounting result: revenue + COGS proposals.
+ * Combined Sales accounting result: revenue + COGS proposals/postings.
  * Either side may be null when amount is zero and skipped.
  */
 export interface SaleJournalProposals {
@@ -64,6 +64,12 @@ export interface SaleJournalProposals {
   cogs: OperationalPostingResult | null;
 }
 
+/** Persisted posting result (DEV-109). Same shape; mode is "post". */
+export type SaleJournalPostings = SaleJournalProposals;
+
 export type SaleAccountingSource = ConfirmSaleResult;
+
+/** Sale-level accounting journal status (DEV-109 / DEV-111). */
+export type SaleAccountingPostingStatus = "posted" | "pending";
 
 export type { SaleRevenueDebitRole };

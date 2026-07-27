@@ -1,7 +1,8 @@
 /**
- * Finished Goods — module contracts (DEV-023 / DEV-024 / DEV-104).
+ * Finished Goods — module contracts (DEV-023 / DEV-024 / DEV-104 / DEV-107).
  *
  * Write path: allocate via allocate_finished_goods_fifo (SQL owns FIFO / remaining).
+ * Sale consumption: finishedGoodsConsumptionService.consumeForSale (inventory only).
  * Read path: finished_goods_batch_availability view (SQL owns available_quantity).
  * Valuation: frozen unit_cost from Production Batch; remaining value calculated.
  *
@@ -84,6 +85,22 @@ export interface AllocateFinishedGoodsResult {
   allocation: FinishedGoodsAllocation;
   /** Reloaded batches for the product after allocation (no remaining calc). */
   batches: FinishedGoodsBatchReadModel[];
+}
+
+/**
+ * Stored Finished Goods consumption ledger row for a sale line (DEV-107 / DEV-108).
+ * Costs are frozen at allocation — Sales COGS reads these values as-is.
+ */
+export interface FinishedGoodsSaleConsumptionRow {
+  consumption_id: string;
+  sale_line_id: string;
+  production_batch_id: string;
+  batch_number: number | null;
+  quantity: number;
+  unit_cost: number;
+  total_cost: number;
+  produced_at: string | null;
+  created_at: string;
 }
 
 /**

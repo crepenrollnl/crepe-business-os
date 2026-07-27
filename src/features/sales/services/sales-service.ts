@@ -10,6 +10,10 @@ import { toUserError } from "@/lib/service-errors";
 import { supabase } from "@/lib/supabase";
 import { fail, ok, type ServiceResult } from "@/types/service";
 import type {
+  SaleAccountingContext,
+  SaleJournalPostings,
+} from "../types/sale-accounting";
+import type {
   AddSaleLineInput,
   ConfirmSaleResult,
   CreateDraftSaleInput,
@@ -24,6 +28,7 @@ import type {
   UpdateSaleLineInput,
 } from "../types/sale";
 import { SALE_STATUSES } from "../types/sale";
+import { saleAccountingService } from "./sale-accounting-service";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -764,7 +769,10 @@ export const salesService = {
 
   /**
    * Confirm a draft sale via confirm_sale RPC, then reload the sale read model.
-   * SQL owns status transition, FIFO allocation, and COGS.
+   * SQL owns status transition and per-line FIFO Finished Goods consumption
+   * (finished_goods_batch_consumptions). Remaining qty/value are calculated
+   * from the ledger — never stored on production_batches (DEV-107).
+   * Atomic multi-line confirm stays in SQL; do not call TS consumeForSale here.
    */
   async confirmSale(saleId: string): Promise<ServiceResult<ConfirmSaleResult>> {
     try {
@@ -807,5 +815,44 @@ export const salesService = {
     } catch (error) {
       return fail(mapConfirmSaleError(error, "Failed to confirm sale."));
     }
+  },
+
+  /**
+   * Confirm a sale then post Accounting journals (DEV-109).
+   *
+   * Uses frozen confirm_sale COGS + sale commercial totals — never recalculates.
+   * Existing confirmSale (hooks/UI) remains unchanged.
+   */
+  async confirmSaleAndPostJournals(
+    saleId: string,
+    accounting: SaleAccountingContext,
+  ): Promise<
+    ServiceResult<{
+      sale: SaleWithLines;
+      total_cogs: number;
+      posting: SaleJournalPostings;
+    }>
+  > {
+    const confirmed = await this.confirmSale(saleId);
+    if (confirmed.error || !confirmed.data) {
+      return fail(confirmed.error ?? "Failed to confirm sale.");
+    }
+
+    const posting = await saleAccountingService.postJournalsForSaleCompleted(
+      confirmed.data,
+      accounting,
+    );
+
+    if (posting.error || !posting.data) {
+      return fail(
+        posting.error ?? "Sale confirmed but accounting posting failed.",
+      );
+    }
+
+    return ok({
+      sale: confirmed.data.sale,
+      total_cogs: confirmed.data.total_cogs,
+      posting: posting.data,
+    });
   },
 };

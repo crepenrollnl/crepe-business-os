@@ -1,10 +1,12 @@
 /**
- * Sales domain contracts (DEV-026 / DEV-027 / DEV-029 / DEV-034 / DEV-035).
+ * Sales domain contracts (DEV-026 / DEV-027 / DEV-029 / DEV-034 / DEV-035 / DEV-108).
  *
  * Draft path: SQL create_draft_sale owns header insert + sale_number.
  * Line path: SQL add/update/delete_sale_line owns line mutations + commercial totals.
- * Confirm path: SQL confirm_sale owns status, FIFO allocation, and COGS.
- * Read path: sales_list_view / sale_details_view (SQL owns shape; no FIFO / COGS).
+ * Confirm path: SQL confirm_sale owns status + FIFO allocation (ledger COGS layers).
+ * COGS path: saleCogsService assembles frozen valuation from consumptions (DEV-108).
+ * Profit path: saleProfitService freezes net revenue − COGS (DEV-110).
+ * Read path: sales_list_view / sale_details_view (SQL owns commercial shape).
  * Specs: docs/SALES.md, docs/BATCH_CONSUMPTION.md
  */
 

@@ -1,12 +1,12 @@
 /**
- * COGS Recognized posting rule (DEV-093).
+ * COGS Recognized posting rule (DEV-093 / DEV-109).
  *
  * Owned by Accounting. Companion to sale_completed for Sales completion.
  *
  * Business Event: cogs_recognized
- * Proposed entry:
+ * Proposed entry (frozen COGS from Finished Goods consumptions):
  *   Dr Cost of Goods Sold
- *   Cr Inventory Asset
+ *   Cr Finished Goods Inventory
  */
 
 import type { PostingRule } from "@/types/accounting";
@@ -38,16 +38,16 @@ export function createCogsRecognizedPostingRule(
       description: "Cost of Goods Sold",
     },
     {
-      id: `${id}-credit-inventory`,
+      id: `${id}-credit-finished-goods`,
       posting_rule_id: id,
       line_no: 2,
-      account_role: "inventory_asset",
+      account_role: "finished_goods_inventory",
       side: "credit",
       amount_field: "cogs_amount",
       currency_source: "event_transaction",
       tax_behaviour: "none",
       tax_code: null,
-      description: "Inventory Asset",
+      description: "Finished Goods Inventory",
     },
   ];
 
@@ -59,12 +59,13 @@ export function createCogsRecognizedPostingRule(
   return {
     id,
     event_type: "cogs_recognized",
-    version: 1,
+    version: 2,
     priority: 100,
     effective_from: "2020-01-01",
     effective_to: null,
     is_active: true,
-    description: "COGS recognized: Dr cogs / Cr inventory_asset",
+    description:
+      "COGS recognized: Dr cogs / Cr finished_goods_inventory",
     created_at: "2020-01-01T00:00:00.000Z",
     ...overrides,
     lines,

@@ -9,7 +9,10 @@ import { roundMoney } from "@/lib/money";
 import { toUserError } from "@/lib/service-errors";
 import { supabase } from "@/lib/supabase";
 import { fail, ok, type ServiceResult } from "@/types/service";
-import type { FinishedGoodsAvailableBatch } from "../types/finished-good";
+import type {
+  FinishedGoodsAvailableBatch,
+  FinishedGoodsSaleConsumptionRow,
+} from "../types/finished-good";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -312,6 +315,89 @@ export const finishedGoodsReadService = {
     } catch (error) {
       return fail(
         mapReadError(error, "Failed to load finished goods batch"),
+      );
+    }
+  },
+
+  /**
+   * Read stored sale consumption ledger rows for COGS (DEV-108).
+   * Does not allocate, recalculate unit costs, or mutate the ledger.
+   */
+  async listConsumptionsForSaleLines(
+    saleLineIds: readonly string[],
+  ): Promise<ServiceResult<FinishedGoodsSaleConsumptionRow[]>> {
+    try {
+      const ids = [
+        ...new Set(saleLineIds.map((id) => id.trim()).filter(Boolean)),
+      ];
+      if (ids.length === 0) {
+        return ok([]);
+      }
+
+      if (ids.some((id) => !UUID_RE.test(id))) {
+        return fail("One or more sale line ids are invalid.");
+      }
+
+      const { data, error } = await supabase
+        .from("finished_goods_batch_consumptions")
+        .select(
+          "id, production_batch_id, quantity, unit_cost, total_cost, source_id, created_at, production_batches ( batch_number, produced_at )",
+        )
+        .eq("source_type", "sale_line")
+        .eq("direction", "out")
+        .eq("reason", "sale")
+        .in("source_id", ids)
+        .order("created_at", { ascending: true })
+        .order("id", { ascending: true });
+
+      if (error) {
+        return fail(
+          mapReadError(
+            error,
+            "Failed to load finished goods sale consumptions",
+          ),
+        );
+      }
+
+      type ConsumptionJoinRow = {
+        id: string;
+        production_batch_id: string;
+        quantity: number | string;
+        unit_cost: number | string;
+        total_cost: number | string;
+        source_id: string;
+        created_at: string;
+        production_batches:
+          | { batch_number: number; produced_at: string }
+          | { batch_number: number; produced_at: string }[]
+          | null;
+      };
+
+      const rows = ((data as ConsumptionJoinRow[] | null) ?? []).map((row) => {
+        const batchRelation = Array.isArray(row.production_batches)
+          ? row.production_batches[0]
+          : row.production_batches;
+
+        return {
+          consumption_id: row.id,
+          sale_line_id: row.source_id,
+          production_batch_id: row.production_batch_id,
+          batch_number: batchRelation?.batch_number ?? null,
+          quantity: toNumber(row.quantity),
+          unit_cost: roundUnitCost(toNumber(row.unit_cost)),
+          total_cost: roundMoney(toNumber(row.total_cost)),
+          produced_at: batchRelation?.produced_at ?? null,
+          created_at: row.created_at,
+        } satisfies FinishedGoodsSaleConsumptionRow;
+      });
+
+      return ok(rows);
+    } catch (error) {
+      return fail(
+        mapReadError(
+          error,
+          "Failed to load finished goods sale consumptions",
+        ),
       );
     }
   },

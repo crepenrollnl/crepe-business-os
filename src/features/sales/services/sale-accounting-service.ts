@@ -1,21 +1,22 @@
 /**
- * Sales → Accounting integration (DEV-093).
+ * Sales → Accounting integration (DEV-093 / DEV-109).
  *
  * Maps Sale Completed into Accounting Business Events and submits them
  * through the generic Operational Accounting Integration framework:
  *
- *   sale_completed   → Revenue journal proposal
- *   cogs_recognized  → COGS journal proposal
+ *   sale_completed   → Revenue + VAT Output + Cash/AR
+ *   cogs_recognized  → COGS + Finished Goods Inventory reduction
+ *
+ * Uses frozen sale totals and frozen COGS — never recalculates VAT or COGS.
  *
  * Sales may only:
  *   - emit Business Events (via Event Factory)
  *   - receive Posting Results
  *
  * Does NOT:
- *   - create Journal Entries / Ledger Entries
  *   - resolve Posting Rules (except pass optional test overrides)
- *   - access Accounting SQL
  *   - change Sales UI / hooks
+ *   - recalculate tax or COGS
  */
 
 import { createCogsRecognizedPostingRule } from "@/features/accounting/rules/cogs-recognized-posting-rule";
@@ -29,6 +30,8 @@ import {
   createBusinessEvent,
   createPostingMetadata,
 } from "@/features/accounting/utils/business-event-factory";
+import { toUserError } from "@/lib/service-errors";
+import { supabase } from "@/lib/supabase";
 import type {
   AccountingBusinessEvent,
   PostingRule,
@@ -36,10 +39,13 @@ import type {
 import { fail, ok, type ServiceResult } from "@/types/service";
 import type {
   SaleAccountingContext,
+  SaleAccountingPostingStatus,
   SaleAccountingSource,
+  SaleJournalPostings,
   SaleJournalProposals,
 } from "../types/sale-accounting";
 import type { SaleWithLines } from "../types/sale";
+import { stableBusinessEventId } from "../utils/stable-business-event-id";
 
 function saleRevenueIdempotencyKey(saleId: string): string {
   return `sale_completed:${saleId}`;
@@ -84,7 +90,7 @@ function resolveCogsRules(
 }
 
 /**
- * Build the sale_completed Business Event (revenue facts).
+ * Build the sale_completed Business Event (frozen revenue + VAT facts).
  */
 export function buildSaleCompletedBusinessEvent(
   sale: SaleWithLines,
@@ -108,12 +114,22 @@ export function buildSaleCompletedBusinessEvent(
     return fail("Sale subtotal is invalid for accounting.");
   }
 
+  if (!(sale.tax_total >= 0) || !Number.isFinite(sale.tax_total)) {
+    return fail("Sale tax total is invalid for accounting.");
+  }
+
+  if (!(sale.total >= 0) || !Number.isFinite(sale.total)) {
+    return fail("Sale total is invalid for accounting.");
+  }
+
   if (
     !accounting.transactionCurrency ||
     accounting.transactionCurrency.trim().length === 0
   ) {
     return fail("Sale transaction currency is required for accounting.");
   }
+
+  const idempotencyKey = saleRevenueIdempotencyKey(sale.id);
 
   return createBusinessEvent({
     event_type: "sale_completed",
@@ -136,14 +152,15 @@ export function buildSaleCompletedBusinessEvent(
       other_amount: null,
     },
     tax_lines: [],
-    idempotency_key: saleRevenueIdempotencyKey(sale.id),
+    idempotency_key: idempotencyKey,
+    event_id: stableBusinessEventId(idempotencyKey),
     nowIso: accounting.nowIso,
     createId: accounting.createId,
   });
 }
 
 /**
- * Build the cogs_recognized Business Event (COGS facts from confirm_sale).
+ * Build the cogs_recognized Business Event (frozen COGS from DEV-108).
  */
 export function buildCogsRecognizedBusinessEvent(
   sale: SaleWithLines,
@@ -175,6 +192,8 @@ export function buildCogsRecognizedBusinessEvent(
     return fail("Sale transaction currency is required for accounting.");
   }
 
+  const idempotencyKey = saleCogsIdempotencyKey(sale.id);
+
   return createBusinessEvent({
     event_type: "cogs_recognized",
     source_module: "sales",
@@ -196,23 +215,27 @@ export function buildCogsRecognizedBusinessEvent(
       other_amount: null,
     },
     tax_lines: [],
-    idempotency_key: saleCogsIdempotencyKey(sale.id),
+    idempotency_key: idempotencyKey,
+    event_id: stableBusinessEventId(idempotencyKey),
     nowIso: accounting.nowIso,
     createId: accounting.createId,
   });
 }
 
-function proposeFromEvent(input: {
+function submitFromEvent(input: {
   event: AccountingBusinessEvent;
   accounting: SaleAccountingContext;
   postingRules: readonly PostingRule[] | undefined;
   correlationId: string | null;
   tags: Record<string, string>;
-}): ServiceResult<OperationalPostingResult> {
-  const { event, accounting, postingRules, correlationId, tags } = input;
+  mode: "propose" | "post";
+}):
+  | ServiceResult<OperationalPostingResult>
+  | Promise<ServiceResult<OperationalPostingResult>> {
+  const { event, accounting, postingRules, correlationId, tags, mode } = input;
   const requestedAt = accounting.nowIso ?? new Date().toISOString();
 
-  return operationalAccountingIntegrationService.propose({
+  const request = {
     event,
     metadata: createPostingMetadata({
       event,
@@ -228,7 +251,139 @@ function proposeFromEvent(input: {
       nowIso: accounting.nowIso,
       createId: accounting.createId,
     },
-    mode: "propose",
+    mode,
+  } as const;
+
+  if (mode === "post") {
+    return operationalAccountingIntegrationService.post(request);
+  }
+
+  return operationalAccountingIntegrationService.propose(request);
+}
+
+async function runSaleCompleted(input: {
+  source: SaleAccountingSource;
+  accounting: SaleAccountingContext;
+  mode: "propose" | "post";
+}): Promise<ServiceResult<SaleJournalProposals>> {
+  const { source, accounting, mode } = input;
+  const { sale, total_cogs: totalCogs } = source;
+
+  if (sale.status !== "confirmed" && sale.status !== "paid") {
+    return fail(
+      mode === "post"
+        ? "Only confirmed or paid sales can post accounting journals."
+        : "Only confirmed or paid sales can propose accounting journals.",
+    );
+  }
+
+  const revenueAmount = sale.subtotal;
+  const cogsAmount = totalCogs;
+
+  if (
+    !Number.isFinite(revenueAmount) ||
+    revenueAmount < 0 ||
+    !Number.isFinite(cogsAmount) ||
+    cogsAmount < 0
+  ) {
+    return fail("Sale revenue and COGS must be finite non-negative amounts.");
+  }
+
+  if (revenueAmount === 0 && cogsAmount === 0) {
+    return fail(
+      "Sale has zero revenue and zero COGS; nothing to post to Accounting.",
+    );
+  }
+
+  let revenue: OperationalPostingResult | null = null;
+  let cogs: OperationalPostingResult | null = null;
+
+  if (revenueAmount > 0) {
+    const dup = assertNotDuplicate(
+      saleRevenueIdempotencyKey(sale.id),
+      accounting.alreadyPostedIdempotencyKeys,
+    );
+    if (dup.error) {
+      return fail(dup.error);
+    }
+
+    const eventResult = buildSaleCompletedBusinessEvent(sale, accounting);
+    if (eventResult.error || !eventResult.data) {
+      return fail(
+        eventResult.error ?? "Failed to build sale_completed business event",
+      );
+    }
+
+    const submitted = await submitFromEvent({
+      event: eventResult.data,
+      accounting,
+      postingRules: resolveRevenueRules(accounting),
+      correlationId: sale.id,
+      tags: {
+        module: "sales",
+        document: "sale",
+        journal: "revenue",
+        sale_id: sale.id,
+      },
+      mode,
+    });
+
+    if (submitted.error || !submitted.data) {
+      return fail(
+        submitted.error ??
+          `Failed to ${mode} revenue journal for sale`,
+      );
+    }
+    revenue = submitted.data;
+  }
+
+  if (cogsAmount > 0) {
+    const dup = assertNotDuplicate(
+      saleCogsIdempotencyKey(sale.id),
+      accounting.alreadyPostedIdempotencyKeys,
+    );
+    if (dup.error) {
+      return fail(dup.error);
+    }
+
+    const eventResult = buildCogsRecognizedBusinessEvent(
+      sale,
+      cogsAmount,
+      accounting,
+    );
+    if (eventResult.error || !eventResult.data) {
+      return fail(
+        eventResult.error ?? "Failed to build cogs_recognized business event",
+      );
+    }
+
+    const submitted = await submitFromEvent({
+      event: eventResult.data,
+      accounting,
+      postingRules: resolveCogsRules(accounting),
+      correlationId: sale.id,
+      tags: {
+        module: "sales",
+        document: "sale",
+        journal: "cogs",
+        sale_id: sale.id,
+      },
+      mode,
+    });
+
+    if (submitted.error || !submitted.data) {
+      return fail(
+        submitted.error ?? `Failed to ${mode} COGS journal for sale`,
+      );
+    }
+    cogs = submitted.data;
+  }
+
+  return ok({
+    sale,
+    total_cogs: totalCogs,
+    revenue,
+    cogs,
   });
 }
 
@@ -239,6 +394,57 @@ export const saleAccountingService = {
   createCogsRecognizedPostingRule,
 
   /**
+   * Read-only posting status for a completed sale (DEV-111).
+   * Looks up existing journal_entries by stable business_event_id
+   * for sale_completed and/or cogs_recognized.
+   * Does not propose, post, or change Accounting logic.
+   */
+  async getSaleCompletedPostingStatus(
+    saleId: string,
+  ): Promise<ServiceResult<SaleAccountingPostingStatus>> {
+    try {
+      const trimmed = saleId?.trim() ?? "";
+      if (!trimmed) {
+        return fail("Sale id is required.");
+      }
+
+      const eventIds = [
+        stableBusinessEventId(saleRevenueIdempotencyKey(trimmed)),
+        stableBusinessEventId(saleCogsIdempotencyKey(trimmed)),
+      ];
+
+      const { data, error } = await supabase
+        .from("journal_entries")
+        .select("id, status, business_event_id")
+        .in("business_event_id", eventIds)
+        .eq("status", "posted")
+        .limit(1);
+
+      if (error) {
+        const message = error.message?.toLowerCase() ?? "";
+        if (
+          message.includes("journal_entries") &&
+          (message.includes("does not exist") ||
+            message.includes("schema cache") ||
+            message.includes("42p01"))
+        ) {
+          return ok("pending");
+        }
+
+        return fail(
+          toUserError(error, "Failed to load sale accounting status"),
+        );
+      }
+
+      return ok(data && data.length > 0 ? "posted" : "pending");
+    } catch (error) {
+      return fail(
+        toUserError(error, "Failed to load sale accounting status"),
+      );
+    }
+  },
+
+  /**
    * Emit sale_completed + cogs_recognized through the generic framework.
    * Returns two journal proposals (revenue + COGS). Propose-only.
    */
@@ -246,6 +452,7 @@ export const saleAccountingService = {
     source: SaleAccountingSource,
     accounting: SaleAccountingContext,
   ): ServiceResult<SaleJournalProposals> {
+    // Sync propose path (DEV-093) — post mode is async via postJournalsForSaleCompleted.
     const { sale, total_cogs: totalCogs } = source;
 
     if (sale.status !== "confirmed" && sale.status !== "paid") {
@@ -258,8 +465,10 @@ export const saleAccountingService = {
     const cogsAmount = totalCogs;
 
     if (
-      (!Number.isFinite(revenueAmount) || revenueAmount < 0) ||
-      (!Number.isFinite(cogsAmount) || cogsAmount < 0)
+      !Number.isFinite(revenueAmount) ||
+      revenueAmount < 0 ||
+      !Number.isFinite(cogsAmount) ||
+      cogsAmount < 0
     ) {
       return fail("Sale revenue and COGS must be finite non-negative amounts.");
     }
@@ -289,7 +498,7 @@ export const saleAccountingService = {
         );
       }
 
-      const proposed = proposeFromEvent({
+      const proposed = submitFromEvent({
         event: eventResult.data,
         accounting,
         postingRules: resolveRevenueRules(accounting),
@@ -298,8 +507,14 @@ export const saleAccountingService = {
           module: "sales",
           document: "sale",
           journal: "revenue",
+          sale_id: sale.id,
         },
+        mode: "propose",
       });
+
+      if (proposed instanceof Promise) {
+        return fail("Failed to propose revenue journal for sale");
+      }
 
       if (proposed.error || !proposed.data) {
         return fail(
@@ -325,11 +540,12 @@ export const saleAccountingService = {
       );
       if (eventResult.error || !eventResult.data) {
         return fail(
-          eventResult.error ?? "Failed to build cogs_recognized business event",
+          eventResult.error ??
+            "Failed to build cogs_recognized business event",
         );
       }
 
-      const proposed = proposeFromEvent({
+      const proposed = submitFromEvent({
         event: eventResult.data,
         accounting,
         postingRules: resolveCogsRules(accounting),
@@ -338,8 +554,14 @@ export const saleAccountingService = {
           module: "sales",
           document: "sale",
           journal: "cogs",
+          sale_id: sale.id,
         },
+        mode: "propose",
       });
+
+      if (proposed instanceof Promise) {
+        return fail("Failed to propose COGS journal for sale");
+      }
 
       if (proposed.error || !proposed.data) {
         return fail(
@@ -355,5 +577,17 @@ export const saleAccountingService = {
       revenue,
       cogs,
     });
+  },
+
+  /**
+   * Post sale_completed + cogs_recognized: propose then persist journals.
+   * Uses frozen sale totals and frozen COGS — never recalculates.
+   * Idempotent via stable business_event_id + Posting Service ALREADY_POSTED.
+   */
+  async postJournalsForSaleCompleted(
+    source: SaleAccountingSource,
+    accounting: SaleAccountingContext,
+  ): Promise<ServiceResult<SaleJournalPostings>> {
+    return runSaleCompleted({ source, accounting, mode: "post" });
   },
 };

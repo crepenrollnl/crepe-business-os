@@ -5,11 +5,14 @@ import Link from "next/link";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { recipeService } from "@/features/recipes/services/recipe-service";
 import { ConfirmSaleDialog } from "../components/confirm-sale-dialog";
+import { SaleCogsSection } from "../components/sale-cogs-section";
 import { SaleHeader } from "../components/sale-header";
 import {
   SaleLinesSection,
   type SaleProductOption,
 } from "../components/sale-lines-section";
+import { SaleProfitSection } from "../components/sale-profit-section";
+import { SaleReviewSection } from "../components/sale-review-section";
 import { SaleTotals } from "../components/sale-totals";
 import { useSale } from "../hooks/use-sale";
 
@@ -33,6 +36,14 @@ export function SaleDetailPage({ saleId }: SaleDetailPageProps) {
     confirming,
     mutating,
     actionError,
+    cogsSummary,
+    cogsLoading,
+    cogsError,
+    profitSummary,
+    profitLoading,
+    profitError,
+    accountingPostingStatus,
+    reviewLoading,
     addSaleLine,
     updateSaleLine,
     deleteSaleLine,
@@ -156,11 +167,41 @@ export function SaleDetailPage({ saleId }: SaleDetailPageProps) {
             />
             <SaleTotals sale={sale} />
 
+            {sale.status === "draft" ||
+            sale.status === "confirmed" ||
+            sale.status === "paid" ? (
+              <SaleReviewSection
+                sale={sale}
+                cogsSummary={cogsSummary}
+                profitSummary={profitSummary}
+                accountingPostingStatus={accountingPostingStatus}
+                cogsError={cogsError}
+                profitError={profitError}
+                loading={
+                  sale.status === "draft"
+                    ? false
+                    : reviewLoading || cogsLoading || profitLoading
+                }
+              />
+            ) : null}
+
             {sale.status === "confirmed" || sale.status === "paid" ? (
-              <div className="rounded-xl border border-green-200 bg-green-50 px-4 py-4 text-sm text-green-800">
-                This sale is locked. Line items and commercial totals cannot be
-                changed.
-              </div>
+              <>
+                <div className="rounded-xl border border-green-200 bg-green-50 px-4 py-4 text-sm text-green-800">
+                  This sale is locked. Line items and commercial totals cannot be
+                  changed.
+                </div>
+                <SaleCogsSection
+                  summary={cogsSummary}
+                  loading={cogsLoading}
+                  error={cogsError}
+                />
+                <SaleProfitSection
+                  summary={profitSummary}
+                  loading={profitLoading}
+                  error={profitError}
+                />
+              </>
             ) : null}
 
             {sale.status === "cancelled" ? (
