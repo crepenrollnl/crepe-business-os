@@ -22,6 +22,10 @@ export const LIVE_TABLES = {
   productionBatches: "production_batches",
   stockMovements: "stock_movements",
   transactions: "transactions",
+  shifts: "shifts",
+  shiftCashReconciliations: "shift_cash_reconciliations",
+  shiftDailySalesSummaries: "shift_daily_sales_summaries",
+  shiftDailyProfitSummaries: "shift_daily_profit_summaries",
 } as const;
 
 export const PLANNED_TABLES = {

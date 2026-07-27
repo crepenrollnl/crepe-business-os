@@ -1,11 +1,28 @@
 "use client";
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
+import { ShiftStatusPanel } from "@/features/shifts/components/shift-status-panel";
+import { useShift } from "@/features/shifts/hooks/use-shift";
 import { DashboardKpiCards } from "../components/dashboard-kpi-cards";
 import { useDashboard } from "../hooks/use-dashboard";
 
 export function DashboardPage() {
   const { summary, loading, error, retry } = useDashboard();
+  const {
+    activeShift,
+    closedShift,
+    reconciliation,
+    dailySalesSummary,
+    dailyProfitSummary,
+    loading: shiftLoading,
+    mutating: shiftMutating,
+    error: shiftError,
+    actionError: shiftActionError,
+    openShift,
+    closeShift,
+    reconcileCash,
+    retry: retryShift,
+  } = useShift();
 
   return (
     <DashboardLayout activePath="/">
@@ -17,6 +34,32 @@ export function DashboardPage() {
           <p className="mt-2 text-base text-zinc-600 sm:text-lg">
             Operational overview from the dashboard summary.
           </p>
+        </div>
+
+        <div className="mb-8">
+          <ShiftStatusPanel
+            activeShift={activeShift}
+            closedShift={closedShift}
+            reconciliation={reconciliation}
+            dailySalesSummary={dailySalesSummary}
+            dailyProfitSummary={dailyProfitSummary}
+            loading={shiftLoading}
+            mutating={shiftMutating}
+            error={shiftError}
+            actionError={shiftActionError}
+            onOpenShift={() => {
+              void openShift();
+            }}
+            onCloseShift={() => {
+              void closeShift();
+            }}
+            onReconcileCash={(countedCash) => {
+              void reconcileCash(countedCash);
+            }}
+            onRetry={() => {
+              void retryShift();
+            }}
+          />
         </div>
 
         {loading ? (
