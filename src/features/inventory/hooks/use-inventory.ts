@@ -1,7 +1,17 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { inventoryForecastService } from "../services/inventory-forecast-service";
 import { inventoryService } from "../services/inventory-service";
+import { lowStockAlertService } from "../services/low-stock-alert-service";
+import { purchaseRecommendationService } from "../services/purchase-recommendation-service";
+import { purchasingReviewService } from "../services/purchasing-review-service";
+import { supplierInsightService } from "../services/supplier-insight-service";
+import type { InventoryForecast } from "../types/inventory-forecast";
+import type { LowStockAlert } from "../types/low-stock-alert";
+import type { PurchaseRecommendation } from "../types/purchase-recommendation";
+import type { PurchasingReviewRow } from "../types/purchasing-review";
+import type { SupplierInsight } from "../types/supplier-insight";
 import type {
   IngredientCategory,
   IngredientFormValues,
@@ -27,16 +37,80 @@ function compareInventoryItems(
 }
 
 async function fetchInventoryState() {
-  const [inventoryResult, categoriesResult, suppliersResult] = await Promise.all([
-    inventoryService.getInventory(),
-    inventoryService.getCategories(),
-    inventoryService.getSuppliers(),
-  ]);
+  const [inventoryResult, categoriesResult, suppliersResult, forecastResult] =
+    await Promise.all([
+      inventoryService.getInventory(),
+      inventoryService.getCategories(),
+      inventoryService.getSuppliers(),
+      inventoryForecastService.getInventoryForecastMap(),
+    ]);
 
+  const items = inventoryResult.error ? [] : (inventoryResult.data ?? []);
+  const forecasts = forecastResult.error
+    ? new Map<string, InventoryForecast>()
+    : (forecastResult.data ?? new Map<string, InventoryForecast>());
+
+  const minimumStockByIngredientId = new Map(
+    items.map((item) => [item.id, item.minimum_stock]),
+  );
+  const recommendationResult =
+    purchaseRecommendationService.buildRecommendationMap({
+      forecasts: forecasts.values(),
+      minimumStockByIngredientId,
+    });
+
+  const insightResult = await supplierInsightService.getSupplierInsightMap(
+    items.map((item) => item.id),
+  );
+
+  const recommendations = recommendationResult.error
+    ? new Map<string, PurchaseRecommendation>()
+    : (recommendationResult.data ??
+      new Map<string, PurchaseRecommendation>());
+
+  const supplierInsights = insightResult.error
+    ? new Map<string, SupplierInsight>()
+    : (insightResult.data ?? new Map<string, SupplierInsight>());
+
+  const alertResult = lowStockAlertService.buildAlertsFromMaps({
+    forecasts,
+    recommendations,
+  });
+  const lowStockAlerts = alertResult.error ? [] : (alertResult.data ?? []);
+
+  const reviewResult = purchasingReviewService.buildReviewFromMaps({
+    ingredients: items.map((item) => ({
+      id: item.id,
+      name: item.name,
+      unit: item.unit,
+      current_stock: item.current_stock,
+    })),
+    forecasts,
+    recommendations,
+    supplierInsights,
+    alerts: lowStockAlerts,
+    availability: {
+      forecast: !forecastResult.error,
+      recommendation: !recommendationResult.error,
+      supplier_insight: !insightResult.error,
+      alerts: !alertResult.error,
+    },
+  });
+
+  const purchasingReview = reviewResult.error
+    ? null
+    : (reviewResult.data ?? null);
+
+  // Advisory enrichments — do not block inventory CRUD.
   return {
-    items: inventoryResult.error ? [] : (inventoryResult.data ?? []),
+    items,
     categories: categoriesResult.error ? [] : (categoriesResult.data ?? []),
     suppliers: suppliersResult.error ? [] : (suppliersResult.data ?? []),
+    purchasingReviews: purchasingReview
+      ? purchasingReviewService.toReviewMap(purchasingReview)
+      : new Map<string, PurchasingReviewRow>(),
+    purchasingReviewMessages: purchasingReview?.informational_messages ?? [],
+    lowStockAlerts,
     error:
       inventoryResult.error ??
       categoriesResult.error ??
@@ -49,6 +123,13 @@ export function useInventory() {
   const [items, setItems] = useState<IngredientWithRelations[]>([]);
   const [categories, setCategories] = useState<IngredientCategory[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [purchasingReviews, setPurchasingReviews] = useState<
+    Map<string, PurchasingReviewRow>
+  >(() => new Map());
+  const [purchasingReviewMessages, setPurchasingReviewMessages] = useState<
+    string[]
+  >([]);
+  const [lowStockAlerts, setLowStockAlerts] = useState<LowStockAlert[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
@@ -72,6 +153,9 @@ export function useInventory() {
       setItems(state.items);
       setCategories(state.categories);
       setSuppliers(state.suppliers);
+      setPurchasingReviews(state.purchasingReviews);
+      setPurchasingReviewMessages(state.purchasingReviewMessages);
+      setLowStockAlerts(state.lowStockAlerts);
       setError(state.error);
     },
     [],
@@ -256,6 +340,9 @@ export function useInventory() {
     items: filteredItems,
     totalCount: items.length,
     hasActiveFilters,
+    purchasingReviews,
+    purchasingReviewMessages,
+    lowStockAlerts,
     categories,
     suppliers,
     loading,

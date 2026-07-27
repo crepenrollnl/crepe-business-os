@@ -1,3 +1,4 @@
+import type { PurchasingReviewRow } from "../types/purchasing-review";
 import type {
   IngredientWithRelations,
   InventorySortDirection,
@@ -7,6 +8,7 @@ import { InventoryRow } from "./inventory-row";
 
 type InventoryTableProps = {
   items: IngredientWithRelations[];
+  purchasingReviews?: Map<string, PurchasingReviewRow>;
   totalCount: number;
   hasActiveFilters: boolean;
   loading: boolean;
@@ -20,12 +22,14 @@ type InventoryTableProps = {
   onDelete: (item: IngredientWithRelations) => void;
 };
 
+const COLUMN_COUNT = 19;
+
 function InventoryTableSkeleton() {
   return (
     <>
       {Array.from({ length: 5 }).map((_, index) => (
         <tr key={index} className="border-t border-zinc-200">
-          {Array.from({ length: 8 }).map((__, cellIndex) => (
+          {Array.from({ length: COLUMN_COUNT }).map((__, cellIndex) => (
             <td key={cellIndex} className="px-4 py-4">
               <div className="h-4 animate-pulse rounded bg-zinc-200" />
             </td>
@@ -68,7 +72,7 @@ function InventoryEmptyState({
 }: InventoryEmptyStateProps) {
   return (
     <tr>
-      <td colSpan={8} className="px-4 py-16 text-center">
+      <td colSpan={COLUMN_COUNT} className="px-4 py-16 text-center">
         <div className="mx-auto max-w-sm">
           <EmptyStateIcon />
           <p className="mt-4 text-base font-medium text-zinc-900">
@@ -146,6 +150,7 @@ function SortableHeader({
 
 export function InventoryTable({
   items,
+  purchasingReviews = new Map(),
   totalCount,
   hasActiveFilters,
   loading,
@@ -199,13 +204,46 @@ export function InventoryTable({
                 Unit
               </th>
               <SortableHeader
-                label="Current Stock"
+                label="Current Quantity"
                 field="current_stock"
                 sortField={sortField}
                 sortDirection={sortDirection}
                 align="right"
                 onSort={onSort}
               />
+              <th className="px-4 py-3 text-right text-sm font-semibold text-zinc-700">
+                Avg Daily Usage
+              </th>
+              <th className="px-4 py-3 text-right text-sm font-semibold text-zinc-700">
+                Days Remaining
+              </th>
+              <th className="px-4 py-3 text-right text-sm font-semibold text-zinc-700">
+                Recommended Qty
+              </th>
+              <th className="px-4 py-3 text-right text-sm font-semibold text-zinc-700">
+                Target Stock
+              </th>
+              <th className="px-4 py-3 text-left text-sm font-semibold text-zinc-700">
+                Recommendation
+              </th>
+              <th className="px-4 py-3 text-left text-sm font-semibold text-zinc-700">
+                Reason
+              </th>
+              <th className="px-4 py-3 text-left text-sm font-semibold text-zinc-700">
+                Alert
+              </th>
+              <th className="px-4 py-3 text-left text-sm font-semibold text-zinc-700">
+                Last Supplier
+              </th>
+              <th className="px-4 py-3 text-right text-sm font-semibold text-zinc-700">
+                Last Price
+              </th>
+              <th className="px-4 py-3 text-left text-sm font-semibold text-zinc-700">
+                Last Purchase
+              </th>
+              <th className="px-4 py-3 text-right text-sm font-semibold text-zinc-700">
+                Purchase Count
+              </th>
               <SortableHeader
                 label="Minimum Stock"
                 field="minimum_stock"
@@ -240,6 +278,7 @@ export function InventoryTable({
                 <InventoryRow
                   key={item.id}
                   item={item}
+                  review={purchasingReviews.get(item.id) ?? null}
                   onEdit={onEdit}
                   onDelete={onDelete}
                 />

@@ -5,6 +5,8 @@ import { DeleteDialog } from "../components/delete-dialog";
 import { IngredientModal } from "../components/ingredient-modal";
 import { InventoryTable } from "../components/inventory-table";
 import { InventoryToolbar } from "../components/inventory-toolbar";
+import { LowStockAlertsPanel } from "../components/low-stock-alerts-panel";
+import { PurchasingReviewInfo } from "../components/purchasing-review-info";
 import { useInventory } from "../hooks/use-inventory";
 
 export function InventoryPage() {
@@ -12,6 +14,9 @@ export function InventoryPage() {
     items,
     totalCount,
     hasActiveFilters,
+    purchasingReviews,
+    purchasingReviewMessages,
+    lowStockAlerts,
     categories,
     suppliers,
     loading,
@@ -47,7 +52,8 @@ export function InventoryPage() {
             Inventory
           </h1>
           <p className="mt-2 text-base text-zinc-600 sm:text-lg">
-            Manage your ingredients and stock levels across categories and suppliers.
+            Purchasing review for ingredients — forecast, recommendations, and
+            supplier history. Informational only.
           </p>
         </div>
 
@@ -60,8 +66,16 @@ export function InventoryPage() {
           onAddClick={openCreateModal}
         />
 
+        {!loading && !error ? (
+          <>
+            <PurchasingReviewInfo messages={purchasingReviewMessages} />
+            <LowStockAlertsPanel alerts={lowStockAlerts} />
+          </>
+        ) : null}
+
         <InventoryTable
           items={items}
+          purchasingReviews={purchasingReviews}
           totalCount={totalCount}
           hasActiveFilters={hasActiveFilters}
           loading={loading}

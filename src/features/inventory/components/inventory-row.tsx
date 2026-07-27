@@ -1,7 +1,9 @@
+import type { PurchasingReviewRow } from "../types/purchasing-review";
 import type { IngredientWithRelations } from "../types/inventory";
 
 type InventoryRowProps = {
   item: IngredientWithRelations;
+  review?: PurchasingReviewRow | null;
   onEdit: (item: IngredientWithRelations) => void;
   onDelete: (item: IngredientWithRelations) => void;
 };
@@ -61,9 +63,176 @@ function getStockBadgeClass(status: StockStatus): string {
   return "bg-green-100 text-green-700";
 }
 
-export function InventoryRow({ item, onEdit, onDelete }: InventoryRowProps) {
+function formatQuantity(value: number): string {
+  if (Number.isInteger(value)) {
+    return String(value);
+  }
+  return value.toFixed(3).replace(/\.?0+$/, "");
+}
+
+function formatDaysRemaining(value: number | null | undefined): string {
+  if (value === null || value === undefined) {
+    return "—";
+  }
+  return value.toFixed(1);
+}
+
+function formatPurchaseDate(value: string | null | undefined): string {
+  if (!value) {
+    return "—";
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "—";
+  }
+
+  return date.toLocaleDateString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
+}
+
+function formatPurchasePrice(value: number | null | undefined): string {
+  if (value === null || value === undefined) {
+    return "—";
+  }
+  return `€${value.toFixed(2)}`;
+}
+
+function ForecastStatusLabel({
+  review,
+}: {
+  review: PurchasingReviewRow | null | undefined;
+}) {
+  if (!review?.forecast_available || review.forecast_status === null) {
+    return (
+      <span className="text-zinc-500" data-testid="forecast-status">
+        —
+      </span>
+    );
+  }
+
+  if (review.forecast_status === "healthy") {
+    return (
+      <span
+        className="inline-flex items-center gap-1 text-emerald-700"
+        data-testid="forecast-status"
+      >
+        <span aria-hidden="true">🟢</span> Healthy
+      </span>
+    );
+  }
+
+  if (review.forecast_status === "low") {
+    return (
+      <span
+        className="inline-flex items-center gap-1 text-amber-700"
+        data-testid="forecast-status"
+      >
+        <span aria-hidden="true">🟡</span> Low
+      </span>
+    );
+  }
+
+  return (
+    <span
+      className="inline-flex items-center gap-1 text-red-700"
+      data-testid="forecast-status"
+    >
+      <span aria-hidden="true">🔴</span> Critical
+    </span>
+  );
+}
+
+function RecommendationStatusLabel({
+  review,
+}: {
+  review: PurchasingReviewRow | null | undefined;
+}) {
+  if (!review?.recommendation_available || !review.recommendation_status) {
+    return (
+      <span className="text-zinc-500" data-testid="recommendation-status">
+        —
+      </span>
+    );
+  }
+
+  if (review.recommendation_status === "none") {
+    return (
+      <span className="text-zinc-500" data-testid="recommendation-status">
+        None
+      </span>
+    );
+  }
+
+  if (review.recommendation_status === "urgent") {
+    return (
+      <span
+        className="font-semibold text-red-700"
+        data-testid="recommendation-status"
+      >
+        Urgent
+      </span>
+    );
+  }
+
+  return (
+    <span
+      className="font-semibold text-amber-700"
+      data-testid="recommendation-status"
+    >
+      Recommended
+    </span>
+  );
+}
+
+function AlertLevelLabel({
+  review,
+}: {
+  review: PurchasingReviewRow | null | undefined;
+}) {
+  if (!review?.alert_level) {
+    return (
+      <span className="text-zinc-500" data-testid="low-stock-alert-level">
+        —
+      </span>
+    );
+  }
+
+  if (review.alert_level === "critical") {
+    return (
+      <span
+        className="inline-flex items-center gap-1 font-semibold text-red-700"
+        data-testid="low-stock-alert-level"
+        title={review.alert_reason ?? undefined}
+      >
+        <span aria-hidden="true">🔴</span> Critical
+      </span>
+    );
+  }
+
+  return (
+    <span
+      className="inline-flex items-center gap-1 font-semibold text-amber-700"
+      data-testid="low-stock-alert-level"
+      title={review.alert_reason ?? undefined}
+    >
+      <span aria-hidden="true">🟡</span> Low
+    </span>
+  );
+}
+
+export function InventoryRow({
+  item,
+  review = null,
+  onEdit,
+  onDelete,
+}: InventoryRowProps) {
   const stockStatus = getStockStatus(item);
   const showWarning = stockStatus !== "ok";
+  const currentQuantity = review?.current_quantity ?? item.current_stock;
 
   return (
     <tr className={`border-t transition-colors ${getRowClassName(stockStatus)}`}>
@@ -76,10 +245,79 @@ export function InventoryRow({ item, onEdit, onDelete }: InventoryRowProps) {
           className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-sm font-semibold ${getStockBadgeClass(
             stockStatus,
           )}`}
+          data-testid="current-quantity"
         >
           {showWarning && <WarningIcon />}
-          {item.current_stock}
+          {formatQuantity(currentQuantity)}
         </span>
+      </td>
+      <td
+        className="px-4 py-4 text-right text-zinc-600"
+        data-testid="avg-daily-usage"
+      >
+        {review?.average_daily_usage == null
+          ? "—"
+          : formatQuantity(review.average_daily_usage)}
+      </td>
+      <td className="px-4 py-4 text-right">
+        <div className="inline-flex flex-col items-end gap-0.5">
+          <span
+            className="font-medium text-zinc-900"
+            data-testid="days-remaining"
+          >
+            {formatDaysRemaining(review?.days_remaining)}
+          </span>
+          <ForecastStatusLabel review={review} />
+        </div>
+      </td>
+      <td
+        className="px-4 py-4 text-right font-medium text-zinc-900"
+        data-testid="recommended-quantity"
+      >
+        {review?.suggested_order_quantity == null
+          ? "—"
+          : formatQuantity(review.suggested_order_quantity)}
+      </td>
+      <td
+        className="px-4 py-4 text-right text-zinc-600"
+        data-testid="target-stock"
+      >
+        {review?.target_stock == null
+          ? "—"
+          : formatQuantity(review.target_stock)}
+      </td>
+      <td className="px-4 py-4">
+        <RecommendationStatusLabel review={review} />
+      </td>
+      <td
+        className="max-w-[14rem] px-4 py-4 text-sm text-zinc-600"
+        data-testid="recommendation-reason"
+      >
+        {review?.recommendation_reason ?? "—"}
+      </td>
+      <td className="px-4 py-4">
+        <AlertLevelLabel review={review} />
+      </td>
+      <td className="px-4 py-4 text-zinc-600" data-testid="last-supplier">
+        {review?.last_supplier_name ?? "—"}
+      </td>
+      <td
+        className="px-4 py-4 text-right text-zinc-600"
+        data-testid="last-purchase-price"
+      >
+        {formatPurchasePrice(review?.last_purchase_price)}
+      </td>
+      <td
+        className="px-4 py-4 text-zinc-600"
+        data-testid="last-purchase-date"
+      >
+        {formatPurchaseDate(review?.last_purchase_date)}
+      </td>
+      <td
+        className="px-4 py-4 text-right text-zinc-600"
+        data-testid="purchase-count"
+      >
+        {review?.purchase_count == null ? "—" : review.purchase_count}
       </td>
       <td className="px-4 py-4 text-right text-zinc-600">{item.minimum_stock}</td>
       <td className="px-4 py-4 text-right font-medium text-zinc-900">
