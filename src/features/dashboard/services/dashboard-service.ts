@@ -1,14 +1,29 @@
 /**
- * Dashboard read service (DEV-042 / DEV-044).
+ * Dashboard read service (DEV-042 / DEV-044 / DEV-122).
  *
- * Reads exclusively from dashboard_summary.
- * Does NOT mutate stock, recalculate KPIs, cache, or write tables.
+ * DEV-042/044: reads dashboard_summary KPIs (no recalculation).
+ * DEV-122: composes DashboardReadModel from existing immutable services.
  */
 
+import { lowStockAlertService } from "@/features/inventory/services/low-stock-alert-service";
+import type { LowStockAlert } from "@/features/inventory/types/low-stock-alert";
+import { cashReconciliationService } from "@/features/shifts/services/cash-reconciliation-service";
+import { dailyProfitSummaryService } from "@/features/shifts/services/daily-profit-summary-service";
+import { dailySalesSummaryService } from "@/features/shifts/services/daily-sales-summary-service";
+import { shiftService } from "@/features/shifts/services/shift-service";
+import type { CashReconciliation } from "@/features/shifts/types/cash-reconciliation";
+import type { DailyProfitSummary } from "@/features/shifts/types/daily-profit-summary";
+import type { DailySalesSummary } from "@/features/shifts/types/daily-sales-summary";
+import type { Shift } from "@/features/shifts/types/shift";
 import { toUserError } from "@/lib/service-errors";
 import { supabase } from "@/lib/supabase";
 import { fail, ok, type ServiceResult } from "@/types/service";
 import type { DashboardSummary } from "../types/dashboard";
+import type { DashboardReadModel } from "../types/dashboard-read-model";
+import {
+  assertDashboardReadModelHistoricallyConsistent,
+  buildDashboardReadModel,
+} from "../utils/dashboard-read-model-builder";
 
 const DASHBOARD_SUMMARY_VIEW = "dashboard_summary";
 
@@ -114,7 +129,32 @@ function mapReadError(error: unknown, fallback: string): string {
   });
 }
 
+async function loadClosedShiftExtras(shift: Shift): Promise<{
+  daily_sales_summary: DailySalesSummary | null;
+  daily_profit_summary: DailyProfitSummary | null;
+  cash_reconciliation: CashReconciliation | null;
+}> {
+  const [salesResult, profitResult, reconciliationResult] = await Promise.all([
+    dailySalesSummaryService.getSummaryForShift(shift.id),
+    dailyProfitSummaryService.getSummaryForShift(shift.id),
+    cashReconciliationService.getReconciliationForShift(shift.id),
+  ]);
+
+  return {
+    daily_sales_summary: salesResult.error ? null : (salesResult.data ?? null),
+    daily_profit_summary: profitResult.error
+      ? null
+      : (profitResult.data ?? null),
+    cash_reconciliation: reconciliationResult.error
+      ? null
+      : (reconciliationResult.data ?? null),
+  };
+}
+
 export const dashboardService = {
+  buildDashboardReadModel,
+  assertDashboardReadModelHistoricallyConsistent,
+
   /**
    * Load the single dashboard_summary KPI row (foundation + operational KPIs).
    */
@@ -136,6 +176,98 @@ export const dashboardService = {
       return ok(mapDashboardRow(data as DashboardSummarySqlRow));
     } catch (error) {
       return fail(mapReadError(error, "Failed to load dashboard summary"));
+    }
+  },
+
+  /**
+   * Compose the Dashboard read model from existing immutable services.
+   * Missing modules stay null — never recalculated or invented.
+   */
+  async getDashboardReadModel(): Promise<ServiceResult<DashboardReadModel>> {
+    try {
+      const [activeResult, alertsResult, kpiResult] = await Promise.all([
+        shiftService.getActiveShift(),
+        lowStockAlertService.getLowStockAlerts(),
+        this.getDashboardSummary(),
+      ]);
+
+      if (activeResult.error) {
+        return fail(activeResult.error);
+      }
+
+      const lowStockAlerts: LowStockAlert[] | null = alertsResult.error
+        ? null
+        : (alertsResult.data ?? []);
+      const kpiSummary = kpiResult.error ? null : (kpiResult.data ?? null);
+
+      const activeShift = activeResult.data;
+
+      if (activeShift) {
+        const built = buildDashboardReadModel({
+          current_shift: activeShift,
+          latest_closed_shift: null,
+          daily_sales_summary: null,
+          daily_profit_summary: null,
+          cash_reconciliation: null,
+          low_stock_alerts: lowStockAlerts,
+          kpi_summary: kpiSummary,
+        });
+
+        if (built.error) {
+          return fail(built.error);
+        }
+
+        return ok(built.data);
+      }
+
+      const closedResult = await shiftService.getLatestClosedShift();
+      if (closedResult.error) {
+        return fail(closedResult.error);
+      }
+
+      const latestClosed = closedResult.data;
+
+      if (!latestClosed) {
+        const built = buildDashboardReadModel({
+          current_shift: null,
+          latest_closed_shift: null,
+          daily_sales_summary: null,
+          daily_profit_summary: null,
+          cash_reconciliation: null,
+          low_stock_alerts: lowStockAlerts,
+          kpi_summary: kpiSummary,
+        });
+
+        if (built.error) {
+          return fail(built.error);
+        }
+
+        return ok(built.data);
+      }
+
+      const extras = await loadClosedShiftExtras(latestClosed);
+
+      const built = buildDashboardReadModel({
+        current_shift: null,
+        latest_closed_shift: latestClosed,
+        daily_sales_summary: extras.daily_sales_summary,
+        daily_profit_summary: extras.daily_profit_summary,
+        cash_reconciliation: extras.cash_reconciliation,
+        low_stock_alerts: lowStockAlerts,
+        kpi_summary: kpiSummary,
+      });
+
+      if (built.error) {
+        return fail(built.error);
+      }
+
+      return ok(built.data);
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Failed to load dashboard read model";
+      return fail(message);
     }
   },
 };

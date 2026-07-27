@@ -1,139 +1,86 @@
-import type { DashboardSummary } from "../types/dashboard";
-import { DashboardCard } from "./dashboard-card";
+import type { DashboardKpiCard } from "../types/dashboard-kpi-cards";
 
 type DashboardKpiCardsProps = {
-  summary: DashboardSummary;
+  cards: DashboardKpiCard[];
 };
 
-function formatMoney(value: number): string {
-  return `€${value.toFixed(2)}`;
-}
-
-function formatCount(value: number): string {
-  return value.toLocaleString();
-}
-
-function formatTimestamp(value: string | null): string {
-  if (value === null) {
-    return "—";
+function valueClass(card: DashboardKpiCard): string {
+  if (
+    card.id === "critical_inventory_alerts" &&
+    card.numeric_value !== null &&
+    card.numeric_value > 0
+  ) {
+    return "text-red-700";
   }
+  if (card.availability === "missing" || card.availability === "empty") {
+    return "text-zinc-400";
+  }
+  return "text-zinc-900";
+}
 
-  return value;
+function humanDetail(card: DashboardKpiCard): string | null {
+  if (card.availability === "missing") {
+    return "Not available yet";
+  }
+  if (card.availability === "empty" && card.id === "active_shift_status") {
+    return "No open shift";
+  }
+  if (
+    card.availability === "empty" &&
+    card.id === "critical_inventory_alerts"
+  ) {
+    return "All clear";
+  }
+  return null;
 }
 
 /**
- * Presentational KPI cards. Values come from DashboardSummary as-is.
+ * Compact KPI strip inside one business card (DEV-126.2).
+ * Presentational only — values come pre-formatted.
  */
-export function DashboardKpiCards({ summary }: DashboardKpiCardsProps) {
+export function DashboardKpiCards({ cards }: DashboardKpiCardsProps) {
+  if (cards.length === 0) {
+    return null;
+  }
+
   return (
-    <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-      <DashboardCard title="Total Inventory Value">
-        <p className="text-3xl font-semibold tabular-nums">
-          {formatMoney(summary.total_inventory_value)}
+    <section
+      className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm"
+      data-testid="dashboard-kpi-cards"
+      aria-label="Key indicators"
+    >
+      <div className="mb-5">
+        <h3 className="text-lg font-semibold text-zinc-900">Key Indicators</h3>
+        <p className="mt-1 text-sm text-zinc-600">
+          The numbers that matter most right now.
         </p>
-      </DashboardCard>
+      </div>
 
-      <DashboardCard title="Items Below Minimum">
-        <p className="text-3xl font-semibold tabular-nums">
-          {formatCount(summary.inventory_items_below_minimum)}
-        </p>
-      </DashboardCard>
-
-      <DashboardCard title="Finished Goods Available">
-        <p className="text-3xl font-semibold tabular-nums">
-          {formatCount(summary.finished_goods_available)}
-        </p>
-      </DashboardCard>
-
-      <DashboardCard title="Total Sales">
-        <p className="text-3xl font-semibold tabular-nums">
-          {formatCount(summary.total_sales_count)}
-        </p>
-      </DashboardCard>
-
-      <DashboardCard title="Total Purchases">
-        <p className="text-3xl font-semibold tabular-nums">
-          {formatCount(summary.total_purchase_count)}
-        </p>
-      </DashboardCard>
-
-      <DashboardCard title="Active Customers">
-        <p className="text-3xl font-semibold tabular-nums">
-          {formatCount(summary.active_customers_count)}
-        </p>
-      </DashboardCard>
-
-      <DashboardCard title="Active Suppliers">
-        <p className="text-3xl font-semibold tabular-nums">
-          {formatCount(summary.active_suppliers_count)}
-        </p>
-      </DashboardCard>
-
-      <DashboardCard title="Low Stock Items">
-        <p className="text-3xl font-semibold tabular-nums">
-          {formatCount(summary.low_stock_items)}
-        </p>
-      </DashboardCard>
-
-      <DashboardCard title="Out of Stock Items">
-        <p className="text-3xl font-semibold tabular-nums">
-          {formatCount(summary.out_of_stock_items)}
-        </p>
-      </DashboardCard>
-
-      <DashboardCard title="Batches In Progress">
-        <p className="text-3xl font-semibold tabular-nums">
-          {formatCount(summary.batches_in_progress)}
-        </p>
-      </DashboardCard>
-
-      <DashboardCard title="Finished Batches Today">
-        <p className="text-3xl font-semibold tabular-nums">
-          {formatCount(summary.finished_batches_today)}
-        </p>
-      </DashboardCard>
-
-      <DashboardCard title="Draft Sales">
-        <p className="text-3xl font-semibold tabular-nums">
-          {formatCount(summary.draft_sales_count)}
-        </p>
-      </DashboardCard>
-
-      <DashboardCard title="Confirmed Sales Today">
-        <p className="text-3xl font-semibold tabular-nums">
-          {formatCount(summary.confirmed_sales_today)}
-        </p>
-      </DashboardCard>
-
-      <DashboardCard title="Draft Purchases">
-        <p className="text-3xl font-semibold tabular-nums">
-          {formatCount(summary.draft_purchase_count)}
-        </p>
-      </DashboardCard>
-
-      <DashboardCard title="Completed Purchases Today">
-        <p className="text-3xl font-semibold tabular-nums">
-          {formatCount(summary.completed_purchases_today)}
-        </p>
-      </DashboardCard>
-
-      <DashboardCard title="Last Inventory Movement">
-        <p className="text-lg font-semibold tabular-nums break-all">
-          {formatTimestamp(summary.last_inventory_movement_at)}
-        </p>
-      </DashboardCard>
-
-      <DashboardCard title="Last Sale">
-        <p className="text-lg font-semibold tabular-nums break-all">
-          {formatTimestamp(summary.last_sale_at)}
-        </p>
-      </DashboardCard>
-
-      <DashboardCard title="Last Purchase">
-        <p className="text-lg font-semibold tabular-nums break-all">
-          {formatTimestamp(summary.last_purchase_at)}
-        </p>
-      </DashboardCard>
-    </div>
+      <dl className="grid gap-6 sm:grid-cols-2 xl:grid-cols-4">
+        {cards.map((card, index) => (
+          <div
+            key={card.id}
+            className={
+              index > 0
+                ? "xl:border-l xl:border-zinc-100 xl:pl-6"
+                : undefined
+            }
+          >
+            <dt className="text-xs font-medium uppercase tracking-wide text-zinc-500">
+              {card.title}
+            </dt>
+            <dd
+              className={`mt-2 text-3xl font-semibold tracking-tight tabular-nums ${valueClass(card)}`}
+              data-testid={`dashboard-kpi-${card.id}`}
+            >
+              {card.display_value}
+            </dd>
+            {humanDetail(card) ? (
+              <p className="mt-2 text-sm text-zinc-500">{humanDetail(card)}</p>
+            ) : null}
+          </div>
+        ))}
+      </dl>
+    </section>
   );
 }

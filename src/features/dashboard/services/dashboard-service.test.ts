@@ -30,8 +30,26 @@ const insertMock = vi.fn();
 const updateMock = vi.fn();
 const deleteMock = vi.fn();
 
-const DASHBOARD_SELECT =
-  "total_inventory_value, inventory_items_below_minimum, finished_goods_available, total_sales_count, total_purchase_count, active_customers_count, active_suppliers_count";
+const DASHBOARD_SELECT = [
+  "total_inventory_value",
+  "inventory_items_below_minimum",
+  "finished_goods_available",
+  "total_sales_count",
+  "total_purchase_count",
+  "active_customers_count",
+  "active_suppliers_count",
+  "low_stock_items",
+  "out_of_stock_items",
+  "batches_in_progress",
+  "finished_batches_today",
+  "draft_sales_count",
+  "confirmed_sales_today",
+  "draft_purchase_count",
+  "completed_purchases_today",
+  "last_inventory_movement_at",
+  "last_sale_at",
+  "last_purchase_at",
+].join(", ");
 
 function summaryRow(overrides?: Record<string, unknown>) {
   return {
@@ -42,6 +60,17 @@ function summaryRow(overrides?: Record<string, unknown>) {
     total_purchase_count: "4",
     active_customers_count: "7",
     active_suppliers_count: "5",
+    low_stock_items: "2",
+    out_of_stock_items: "1",
+    batches_in_progress: "0",
+    finished_batches_today: "3",
+    draft_sales_count: "1",
+    confirmed_sales_today: "4",
+    draft_purchase_count: "0",
+    completed_purchases_today: "2",
+    last_inventory_movement_at: null,
+    last_sale_at: null,
+    last_purchase_at: null,
     ...overrides,
   };
 }
@@ -120,6 +149,17 @@ describe("dashboardService.getDashboardSummary (DEV-042)", () => {
       total_purchase_count: 4,
       active_customers_count: 7,
       active_suppliers_count: 5,
+      low_stock_items: 2,
+      out_of_stock_items: 1,
+      batches_in_progress: 0,
+      finished_batches_today: 3,
+      draft_sales_count: 1,
+      confirmed_sales_today: 4,
+      draft_purchase_count: 0,
+      completed_purchases_today: 2,
+      last_inventory_movement_at: null,
+      last_sale_at: null,
+      last_purchase_at: null,
     } satisfies DashboardSummary);
     expect(supabaseMock.from).toHaveBeenCalledTimes(1);
     expect(supabaseMock.from).toHaveBeenCalledWith("dashboard_summary");
