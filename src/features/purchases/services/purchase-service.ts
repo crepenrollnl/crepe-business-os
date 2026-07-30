@@ -368,6 +368,32 @@ async function applyIngredientStockDelta(
   return increaseIngredientStockFallback(ingredientId, quantity);
 }
 
+/**
+ * Compensates a previously-applied increment_ingredient_stock call by
+ * invoking the same atomic RPC with a negated quantity. Used to unwind
+ * earlier lines when a later line in a multi-line purchase fails partway
+ * through — never a JS-side read-then-write, for the same reason the
+ * forward path avoids one.
+ */
+async function reverseIngredientStockDelta(
+  ingredientId: string,
+  quantity: number,
+): Promise<ServiceResult<null>> {
+  const { error } = await supabase.rpc("increment_ingredient_stock", {
+    p_ingredient_id: ingredientId,
+    p_quantity: -quantity,
+  });
+
+  if (error) {
+    return {
+      data: null,
+      error: toUserError(error, "Failed to reverse inventory stock increment"),
+    };
+  }
+
+  return { data: null, error: null };
+}
+
 async function increaseIngredientStock(
   lines: PurchaseTotals["preparedLines"],
 ): Promise<ServiceResult<null>> {
@@ -380,11 +406,26 @@ async function increaseIngredientStock(
     );
 
     if (result.error) {
+      const reversalFailures: string[] = [];
+
       for (const previous of applied.reverse()) {
-        await increaseIngredientStockFallback(
+        const reversal = await reverseIngredientStockDelta(
           previous.ingredient_id,
-          -previous.quantity,
+          previous.quantity,
         );
+
+        if (reversal.error) {
+          reversalFailures.push(
+            `ingredient ${previous.ingredient_id} (delta ${previous.quantity}): ${reversal.error}`,
+          );
+        }
+      }
+
+      if (reversalFailures.length > 0) {
+        return {
+          data: null,
+          error: `${result.error} Additionally, failed to reverse already-applied stock increments — stock may now be inconsistent: ${reversalFailures.join("; ")}`,
+        };
       }
 
       return result;
