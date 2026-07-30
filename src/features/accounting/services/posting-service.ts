@@ -242,6 +242,44 @@ async function allocatePostingNumber(entryDate: string): Promise<ServiceResult<s
   return ok(data as string);
 }
 
+/**
+ * Independent server-side recomputation of the debit/credit currency
+ * conversion and base-currency balance for a Journal Proposal — the two
+ * risks flagged in the Posting Pipeline (computed entirely in TS, then
+ * inserted straight into the immutable ledger with no DB-side check).
+ * Cannot verify the posting rule / account selection itself — Posting
+ * Rules have no SQL representation yet.
+ */
+async function verifyProposalAmounts(
+  proposal: JournalProposal,
+): Promise<ServiceResult<true>> {
+  const { data, error } = await supabase.rpc("verify_journal_posting_amounts", {
+    p_transaction_currency: proposal.journal_entry.transaction_currency,
+    p_base_currency: proposal.journal_entry.base_currency,
+    p_exchange_rate: proposal.journal_entry.exchange_rate,
+    p_lines: proposal.journal_lines.map((line) => ({
+      debit_transaction: line.debit_transaction,
+      credit_transaction: line.credit_transaction,
+      debit_base: line.debit_base,
+      credit_base: line.credit_base,
+    })),
+  });
+
+  if (error) {
+    return fail(
+      toUserError(error, "Failed to verify journal posting amounts"),
+    );
+  }
+
+  if (data !== true) {
+    return fail(
+      "Journal proposal failed server-side amount verification and was not posted.",
+    );
+  }
+
+  return ok(true);
+}
+
 function mapJournalRow(row: Record<string, unknown>): JournalEntry {
   return {
     id: row.id as string,
@@ -286,6 +324,11 @@ export const postingService = {
       const balanced = validateProposalBalanced(proposal);
       if (!balanced.ok) {
         return persistenceFail(balanced.error);
+      }
+
+      const amountsVerified = await verifyProposalAmounts(proposal);
+      if (amountsVerified.error) {
+        return fail(amountsVerified.error);
       }
 
       const postingDate = toDateOnly(

@@ -60,6 +60,8 @@ interface MockDbState {
   latestPostingNumber: string | null;
   insertErrors: Partial<Record<string, { message: string }>>;
   updateError: { message: string } | null;
+  /** Force verify_journal_posting_amounts' result instead of recomputing it. */
+  verifyAmountsOverride?: boolean | { message: string };
 }
 
 const inserts: Array<{ table: string; payload: unknown }> = [];
@@ -237,6 +239,42 @@ function installMock(state: MockDbState) {
         }
         return {
           data: `${prefix}${String(nextSeq).padStart(6, "0")}`,
+          error: null,
+        };
+      }
+      if (fn === "verify_journal_posting_amounts") {
+        if (state.verifyAmountsOverride !== undefined) {
+          return typeof state.verifyAmountsOverride === "boolean"
+            ? { data: state.verifyAmountsOverride, error: null }
+            : { data: null, error: state.verifyAmountsOverride };
+        }
+
+        const exchangeRate = args.p_exchange_rate as number;
+        const lines = args.p_lines as Array<{
+          debit_transaction: number;
+          credit_transaction: number;
+          debit_base: number;
+          credit_base: number;
+        }>;
+
+        const round2 = (value: number) => Math.round(value * 100) / 100;
+
+        const linesConsistent = lines.every(
+          (line) =>
+            round2(line.debit_base) ===
+              round2(line.debit_transaction * exchangeRate) &&
+            round2(line.credit_base) ===
+              round2(line.credit_transaction * exchangeRate),
+        );
+        const debitTotal = round2(
+          lines.reduce((sum, line) => sum + line.debit_base, 0),
+        );
+        const creditTotal = round2(
+          lines.reduce((sum, line) => sum + line.credit_base, 0),
+        );
+
+        return {
+          data: linesConsistent && debitTotal > 0 && debitTotal === creditTotal,
           error: null,
         };
       }
@@ -536,6 +574,38 @@ describe("postingService (DEV-091)", () => {
     expect(updates).toHaveLength(0);
   });
 
+  it("rejects a proposal that fails server-side amount verification (V1 plan 1.7)", async () => {
+    installMock(defaultState({ verifyAmountsOverride: false }));
+
+    const result = await postingService.postJournalProposal(buildProposal(), {
+      postingDate: ENTRY_DATE,
+      nowIso: NOW,
+    });
+
+    expect(result.data).toBeNull();
+    expect(result.error).toBe(
+      "Journal proposal failed server-side amount verification and was not posted.",
+    );
+    expect(inserts).toHaveLength(0);
+  });
+
+  it("surfaces an error from the amount verification RPC itself", async () => {
+    installMock(
+      defaultState({
+        verifyAmountsOverride: { message: "connection reset" },
+      }),
+    );
+
+    const result = await postingService.postJournalProposal(buildProposal(), {
+      postingDate: ENTRY_DATE,
+      nowIso: NOW,
+    });
+
+    expect(result.data).toBeNull();
+    expect(result.error).toBe("connection reset");
+    expect(inserts).toHaveLength(0);
+  });
+
   it("rejects posting into a closed fiscal period", async () => {
     installMock(
       defaultState({
@@ -593,10 +663,20 @@ describe("postingService (DEV-091)", () => {
         base_currency: "EUR",
         exchange_rate: 0.92,
       },
+      // Base amounts converted at 0.92 so this fixture is internally
+      // consistent and only fails at the exchange-rate-availability check
+      // this test targets, not the server-side amount verification (1.7).
+      journal_lines: base.journal_lines.map((line) => ({
+        ...line,
+        debit_base: Math.round(line.debit_transaction * 0.92 * 100) / 100,
+        credit_base: Math.round(line.credit_transaction * 0.92 * 100) / 100,
+      })),
       ledger_entries: base.ledger_entries.map((entry) => ({
         ...entry,
         transaction_currency: "USD",
         base_currency: "EUR",
+        debit_base: Math.round(entry.debit_transaction * 0.92 * 100) / 100,
+        credit_base: Math.round(entry.credit_transaction * 0.92 * 100) / 100,
       })),
     });
 
