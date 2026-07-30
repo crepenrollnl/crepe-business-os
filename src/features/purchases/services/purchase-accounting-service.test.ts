@@ -7,12 +7,12 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { roundMoney } from "@/lib/money";
 import type {
   AccountRoleBinding,
   FiscalPeriod,
   PostingRule,
 } from "@/types/accounting";
-import type { TaxResult } from "@/features/tax-integration";
 import type { PurchaseAccountingContext } from "../types/purchase-accounting";
 import type { PurchaseTaxDocument, PurchaseTaxResult } from "../types/purchase-tax";
 import type { PurchaseWithRelations } from "../types/purchase";
@@ -93,6 +93,132 @@ vi.mock("@/features/tax-integration", async () => {
 import { purchaseAccountingService } from "./purchase-accounting-service";
 import { purchaseTaxService } from "./purchase-tax-service";
 import { createPurchaseReceivedPostingRule } from "./purchase-received-posting-rule";
+
+/**
+ * Fixture-only NL rate table for the calculate_purchase_taxes RPC mock below.
+ * Mirrors sql/071_accounting_vat_netherlands_seed.sql for exactly the
+ * category/regime combinations exercised in this file (all percentage_of_base,
+ * all exclusive price_mode — no legacy-rate date branching needed here).
+ */
+const NL_RATE_FIXTURES: Record<
+  string,
+  { tax_code: string; rate: number; direction: "output" | "input" | "neutral" }
+> = {
+  "goods:standard_vat": {
+    tax_code: "NL-VAT-STD-21",
+    rate: 0.21,
+    direction: "output",
+  },
+  "food:reduced_vat": {
+    tax_code: "NL-VAT-RED-9",
+    rate: 0.09,
+    direction: "output",
+  },
+  "goods:zero_rate": {
+    tax_code: "NL-VAT-ZERO-0",
+    rate: 0,
+    direction: "output",
+  },
+  "services:reverse_charge": {
+    tax_code: "NL-VAT-RC",
+    rate: 0,
+    direction: "neutral",
+  },
+  "goods:small_business_scheme_kor": {
+    tax_code: "NL-VAT-KOR",
+    rate: 0,
+    direction: "neutral",
+  },
+};
+
+interface MockPurchaseTaxLineParams {
+  line_id: string;
+  quantity: number;
+  unit_price: number;
+  discount?: number;
+  tax_category: string;
+  tax_regime?: string | null;
+}
+
+/**
+ * Installs a calculate_purchase_taxes RPC mock so requireTax()/proposeWithTax()
+ * below can exercise the real purchaseTaxService (now RPC-based) without a
+ * database. Computes real percentage_of_base arithmetic from NL_RATE_FIXTURES
+ * instead of hand-typed canned totals, so multi-line/multi-tax aggregation is
+ * still genuinely exercised.
+ */
+function mockCalculatePurchaseTaxesRpc() {
+  supabaseMock.rpc.mockImplementation(
+    async (fn: string, params: Record<string, unknown>) => {
+      if (fn !== "calculate_purchase_taxes") {
+        return { data: null, error: { message: `Unexpected rpc: ${fn}` } };
+      }
+
+      const lines = params.p_lines as MockPurchaseTaxLineParams[];
+      let subtotal = 0;
+      let taxTotal = 0;
+
+      const outLines = lines.map((line) => {
+        const amount = roundMoney(
+          line.quantity * line.unit_price - (line.discount ?? 0),
+        );
+        const fixture =
+          NL_RATE_FIXTURES[`${line.tax_category}:${line.tax_regime ?? ""}`];
+        const taxes = fixture
+          ? [
+              {
+                tax_code: fixture.tax_code,
+                tax_definition_id: `def-${fixture.tax_code}`,
+                tax_rule_id: `rule-${fixture.tax_code}`,
+                jurisdiction_id: "jur-nl",
+                direction: fixture.direction,
+                application_method: "percentage_of_base",
+                taxable_base: amount,
+                rate_value: fixture.rate,
+                tax_amount: roundMoney(amount * fixture.rate),
+                net_amount: amount,
+                gross_amount: roundMoney(amount + amount * fixture.rate),
+              },
+            ]
+          : [];
+        const lineTax = roundMoney(
+          taxes.reduce((sum, tax) => sum + tax.tax_amount, 0),
+        );
+
+        subtotal = roundMoney(subtotal + amount);
+        taxTotal = roundMoney(taxTotal + lineTax);
+
+        return {
+          line_id: line.line_id,
+          taxable_amount: amount,
+          tax_amount: lineTax,
+          net_amount: amount,
+          gross_amount: roundMoney(amount + lineTax),
+          taxes,
+        };
+      });
+
+      return {
+        data: {
+          country: params.p_country,
+          jurisdiction_id: "jur-nl",
+          jurisdiction_code: "NL",
+          currency: params.p_currency,
+          transaction_date: params.p_transaction_date,
+          rounding: { mode: "half_up", decimal_places: 2 },
+          subtotal,
+          tax_total: taxTotal,
+          grand_total: roundMoney(subtotal + taxTotal),
+          effective_tax_rate: subtotal > 0 ? taxTotal / subtotal : 0,
+          lines: outLines,
+          by_tax_code: {},
+          is_valid: true,
+        },
+        error: null,
+      };
+    },
+  );
+}
 
 function period(overrides?: Partial<FiscalPeriod>): FiscalPeriod {
   return {
@@ -236,8 +362,10 @@ function taxDocument(
   };
 }
 
-function requireTax(document: PurchaseTaxDocument): PurchaseTaxResult {
-  const result = purchaseTaxService.calculatePurchaseTaxes(document);
+async function requireTax(
+  document: PurchaseTaxDocument,
+): Promise<PurchaseTaxResult> {
+  const result = await purchaseTaxService.calculatePurchaseTaxes(document);
   if (result.error || !result.data) {
     throw new Error(result.error ?? "Failed to build tax fixture");
   }
@@ -246,62 +374,13 @@ function requireTax(document: PurchaseTaxDocument): PurchaseTaxResult {
 
 function stubTaxResult(
   overrides?: Partial<Omit<PurchaseTaxResult, "tax_result">> & {
-    tax_result?: Partial<TaxResult>;
+    tax_result?: Partial<PurchaseTaxResult["tax_result"]>;
   },
 ): PurchaseTaxResult {
   const { tax_result: taxResultOverrides, ...rest } = overrides ?? {};
   const net = rest.subtotal ?? 100;
   const tax = rest.tax_total ?? 21;
   const gross = rest.grand_total ?? net + tax;
-
-  const taxResult: TaxResult = {
-    request_id: "tax-req-1",
-    mode: "calculate",
-    country: "NL",
-    currency: "EUR",
-    jurisdiction_id: "jur-nl",
-    document_type: "purchase",
-    transaction_date: "2026-07-26",
-    net_total: net,
-    tax_total: tax,
-    gross_total: gross,
-    effective_tax_rate: net > 0 ? tax / net : 0,
-    breakdown: {
-      lines: [
-        {
-          line_id: "line-1",
-          tax_code: "NL-VAT-STD-21",
-          tax_definition_id: "def-std",
-          tax_rule_id: "rule-std",
-          tax_rate_id: "rate-std",
-          jurisdiction_id: "jur-nl",
-          direction: "input",
-          application_method: "percentage_of_base",
-          taxable_base: net,
-          rate_value: 0.21,
-          tax_amount: tax,
-          net_amount: net,
-          gross_amount: gross,
-        },
-      ],
-      by_tax_code: { "NL-VAT-STD-21": tax },
-    },
-    lines: [
-      {
-        line_id: "line-1",
-        taxable_amount: net,
-        tax_amount: tax,
-        net_amount: net,
-        gross_amount: gross,
-        taxes: [],
-      },
-    ],
-    applied_tax_definitions: [],
-    rounding: { mode: "half_up", decimal_places: 2 },
-    warnings: [],
-    is_valid: true,
-    ...taxResultOverrides,
-  };
 
   return {
     document_id: "purchase-1",
@@ -324,16 +403,30 @@ function stubTaxResult(
     ],
     warnings: [],
     ...rest,
-    tax_result: taxResult,
+    tax_result: {
+      currency: "EUR",
+      breakdown: {
+        lines: [
+          {
+            tax_code: "NL-VAT-STD-21",
+            direction: "input",
+            rate_value: 0.21,
+            net_amount: net,
+            tax_amount: tax,
+          },
+        ],
+      },
+      ...taxResultOverrides,
+    },
   };
 }
 
-function proposeWithTax(
+async function proposeWithTax(
   doc: PurchaseTaxDocument,
   purchaseOverrides?: Partial<PurchaseWithRelations>,
   accountingOverrides?: Partial<PurchaseAccountingContext>,
 ) {
-  const tax = requireTax(doc);
+  const tax = await requireTax(doc);
   calculateSpy.mockClear();
   previewSpy.mockClear();
   validateSpy.mockClear();
@@ -362,10 +455,12 @@ describe("purchaseAccountingService (DEV-100)", () => {
     calculateSpy.mockClear();
     previewSpy.mockClear();
     validateSpy.mockClear();
+    supabaseMock.rpc.mockReset();
+    mockCalculatePurchaseTaxesRpc();
   });
 
-  it("routes Purchases through the generic Accounting integration framework", () => {
-    const { result, tax } = proposeWithTax(taxDocument());
+  it("routes Purchases through the generic Accounting integration framework", async () => {
+    const { result, tax } = await proposeWithTax(taxDocument());
 
     expect(result.error).toBeNull();
     expect(proposeSpy).toHaveBeenCalledTimes(1);
@@ -390,8 +485,8 @@ describe("purchaseAccountingService (DEV-100)", () => {
     });
   });
 
-  it("proposes standard VAT journal: Dr Inventory / Dr Recoverable VAT / Cr AP", () => {
-    const { result } = proposeWithTax(taxDocument());
+  it("proposes standard VAT journal: Dr Inventory / Dr Recoverable VAT / Cr AP", async () => {
+    const { result } = await proposeWithTax(taxDocument());
 
     expect(result.error).toBeNull();
     expect(result.data?.journalProposal.journal_entry.status).toBe("posted");
@@ -413,8 +508,8 @@ describe("purchaseAccountingService (DEV-100)", () => {
     expect(result.data?.tax.tax_total).toBe(21);
   });
 
-  it("proposes reduced VAT journal from TaxResult amounts", () => {
-    const { result } = proposeWithTax(
+  it("proposes reduced VAT journal from TaxResult amounts", async () => {
+    const { result } = await proposeWithTax(
       taxDocument({
         lines: [
           {
@@ -441,8 +536,8 @@ describe("purchaseAccountingService (DEV-100)", () => {
     expect(ap?.credit_base).toBe(109);
   });
 
-  it("omits recoverable VAT line for zero VAT (balanced Dr net / Cr gross)", () => {
-    const { result } = proposeWithTax(
+  it("omits recoverable VAT line for zero VAT (balanced Dr net / Cr gross)", async () => {
+    const { result } = await proposeWithTax(
       taxDocument({
         lines: [
           {
@@ -475,8 +570,8 @@ describe("purchaseAccountingService (DEV-100)", () => {
     expect(ap?.credit_base).toBe(100);
   });
 
-  it("supports reverse charge with zero tax and tax_line propagation", () => {
-    const { result, tax } = proposeWithTax(
+  it("supports reverse charge with zero tax and tax_line propagation", async () => {
+    const { result, tax } = await proposeWithTax(
       taxDocument({
         lines: [
           {
@@ -505,8 +600,8 @@ describe("purchaseAccountingService (DEV-100)", () => {
     );
   });
 
-  it("supports KOR (small business scheme) with zero tax", () => {
-    const { result, tax } = proposeWithTax(
+  it("supports KOR (small business scheme) with zero tax", async () => {
+    const { result, tax } = await proposeWithTax(
       taxDocument({
         lines: [
           {
@@ -526,8 +621,8 @@ describe("purchaseAccountingService (DEV-100)", () => {
     expect(result.data?.journalProposal.journal_lines).toHaveLength(2);
   });
 
-  it("supports multi-tax purchases via aggregated tax_amount and tax_lines", () => {
-    const { result, tax } = proposeWithTax(
+  it("supports multi-tax purchases via aggregated tax_amount and tax_lines", async () => {
+    const { result, tax } = await proposeWithTax(
       taxDocument({
         lines: [
           {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import {
   NumericInput,
   formatNumericInput,
@@ -20,8 +20,12 @@ import type { PurchaseAccountingPreviewData } from "../types/purchase-accounting
 import {
   PURCHASE_TAX_CATEGORY_OPTIONS,
   PURCHASE_TAX_REGIME_OPTIONS,
+  type PurchaseTaxResult,
 } from "../types/purchase-tax";
 import { buildPurchaseTaxDocument } from "../utils/build-purchase-tax-document";
+
+/** Debounce delay before re-requesting the tax preview RPC after an edit. */
+const TAX_PREVIEW_DEBOUNCE_MS = 400;
 
 type PurchaseDocumentModalProps = {
   isOpen: boolean;
@@ -220,22 +224,52 @@ function PurchaseDocumentForm({
   const isDraftValid = Object.keys(draftFieldErrors).length === 0;
   const isReceiveValid = Object.keys(receiveFieldErrors).length === 0;
 
-  const taxPreview = useMemo(() => {
+  const [taxPreview, setTaxPreview] = useState<{
+    error: string | null;
+    data: PurchaseTaxResult | null;
+  } | null>(null);
+  const [isTaxPreviewLoading, setIsTaxPreviewLoading] = useState(false);
+
+  // Debounced: re-requests the tax preview RPC after edits settle, instead
+  // of calculating in-browser synchronously on every keystroke.
+  useEffect(() => {
     const values = draftToValues(formValues);
     if (values.lines.length === 0 || !values.purchased_at) {
-      return null;
+      setTaxPreview(null);
+      setIsTaxPreviewLoading(false);
+      return;
     }
 
-    const document = buildPurchaseTaxDocument({
-      values,
-      suppliers,
-      documentId: purchase?.id,
-    });
-    const result = purchaseTaxService.previewPurchaseTaxes(document);
-    if (result.error || !result.data) {
-      return { error: result.error ?? "Tax preview unavailable.", data: null };
-    }
-    return { error: null, data: result.data };
+    let cancelled = false;
+    setIsTaxPreviewLoading(true);
+
+    const timerId = window.setTimeout(() => {
+      const document = buildPurchaseTaxDocument({
+        values,
+        suppliers,
+        documentId: purchase?.id,
+      });
+
+      void purchaseTaxService.previewPurchaseTaxes(document).then((result) => {
+        if (cancelled) {
+          return;
+        }
+        if (result.error || !result.data) {
+          setTaxPreview({
+            error: result.error ?? "Tax preview unavailable.",
+            data: null,
+          });
+        } else {
+          setTaxPreview({ error: null, data: result.data });
+        }
+        setIsTaxPreviewLoading(false);
+      });
+    }, TAX_PREVIEW_DEBOUNCE_MS);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timerId);
+    };
   }, [formValues, purchase?.id, suppliers]);
 
   const subtotal = useMemo(() => {
@@ -740,7 +774,10 @@ function PurchaseDocumentForm({
               </table>
             </div>
           </div>
-          {taxPreview?.error && (
+          {isTaxPreviewLoading && (
+            <p className="text-sm text-zinc-500">Calculating taxes…</p>
+          )}
+          {!isTaxPreviewLoading && taxPreview?.error && (
             <p className="text-sm text-amber-700">{taxPreview.error}</p>
           )}
         </div>

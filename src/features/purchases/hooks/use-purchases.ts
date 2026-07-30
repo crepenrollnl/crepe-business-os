@@ -304,15 +304,16 @@ export function usePurchases() {
   }, [isSaving]);
 
   const resolvePurchaseTax = useCallback(
-    (
+    async (
       values: PurchaseFormValues,
-    ): { tax: PurchaseTaxResult | null; error: string | null } => {
+    ): Promise<{ tax: PurchaseTaxResult | null; error: string | null }> => {
       const taxDocument = buildPurchaseTaxDocument({
         values,
         suppliers,
         documentId: editingPurchase?.id,
       });
-      const taxResult = purchaseTaxService.calculatePurchaseTaxes(taxDocument);
+      const taxResult =
+        await purchaseTaxService.calculatePurchaseTaxes(taxDocument);
       if (taxResult.error || !taxResult.data) {
         return {
           tax: null,
@@ -329,7 +330,7 @@ export function usePurchases() {
       setIsSaving(true);
       setActionError(null);
 
-      const resolved = resolvePurchaseTax(values);
+      const resolved = await resolvePurchaseTax(values);
       if (resolved.error || !resolved.tax) {
         setActionError(resolved.error ?? "Failed to calculate purchase taxes.");
         setIsSaving(false);
@@ -361,7 +362,7 @@ export function usePurchases() {
       setIsSaving(true);
       setActionError(null);
 
-      const resolved = resolvePurchaseTax(values);
+      const resolved = await resolvePurchaseTax(values);
       if (resolved.error || !resolved.tax) {
         setActionError(resolved.error ?? "Failed to calculate purchase taxes.");
         setIsSaving(false);

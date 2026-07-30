@@ -1,13 +1,8 @@
 /**
- * Purchases → Tax Integration contracts (DEV-099).
+ * Purchases → calculate_purchase_taxes RPC contracts (DEV-099, V1 plan 1.6).
  *
  * Purchases requests tax calculation only — no rates/rules knowledge.
  */
-
-import type {
-  TaxResult,
-  TaxValidationWarning,
-} from "@/features/tax-integration";
 
 /**
  * Opaque tax category codes used on purchase lines.
@@ -85,6 +80,19 @@ export interface PurchaseTaxLineView {
   gross_amount: number;
 }
 
+/**
+ * Flat per-tax breakdown line from calculate_purchase_taxes, one row per
+ * (purchase line, resolved tax) pair. Used by purchase-accounting-service.ts
+ * to build Accounting event tax facts.
+ */
+export interface PurchaseTaxBreakdownLine {
+  tax_code: string;
+  direction: "input" | "output" | "neutral";
+  rate_value: number;
+  net_amount: number;
+  tax_amount: number;
+}
+
 export interface PurchaseTaxResult {
   document_id: string | null;
   mode: "calculate" | "preview" | "validate";
@@ -94,7 +102,12 @@ export interface PurchaseTaxResult {
   grand_total: number;
   effective_tax_rate: number;
   lines: readonly PurchaseTaxLineView[];
-  warnings: readonly TaxValidationWarning[];
-  /** Full integration result for advanced callers. */
-  tax_result: TaxResult;
+  warnings: readonly string[];
+  /** Flattened tax breakdown for advanced callers (e.g. Accounting). */
+  tax_result: {
+    currency: string;
+    breakdown: {
+      lines: readonly PurchaseTaxBreakdownLine[];
+    };
+  };
 }
