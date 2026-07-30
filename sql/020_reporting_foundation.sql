@@ -92,7 +92,7 @@ GROUP BY
   a.product_id,
   r.name;
 
-COMMENT ON VIEW report_finished_goods_summary AS
+COMMENT ON VIEW report_finished_goods_summary IS
   'Read-only finished-goods reporting DTO. Product-level projection over finished_goods_batch_availability. No FIFO/ledger mutation; remaining never stored.';
 
 GRANT SELECT ON report_finished_goods_summary TO authenticated;
@@ -116,7 +116,7 @@ SELECT
   v.cancelled_at
 FROM sales_list_view v;
 
-COMMENT ON VIEW report_sales_summary AS
+COMMENT ON VIEW report_sales_summary IS
   'Read-only sales reporting DTO. One row per sale via sales_list_view. No FIFO, ledger, or COGS.';
 
 GRANT SELECT ON report_sales_summary TO authenticated;
@@ -140,7 +140,7 @@ SELECT
   p.updated_at
 FROM purchases p;
 
-COMMENT ON VIEW report_purchase_summary AS
+COMMENT ON VIEW report_purchase_summary IS
   'Read-only purchase reporting DTO. One row per purchase header. No stock mutations.';
 
 GRANT SELECT ON report_purchase_summary TO authenticated;
