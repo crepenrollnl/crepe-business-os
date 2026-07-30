@@ -11,6 +11,7 @@ import { supabase } from "@/lib/supabase";
 import { fail, ok, type ServiceResult } from "@/types/service";
 import type { Shift } from "../types/shift";
 import type {
+  BuildDailyProfitSummaryResult,
   DailyProfitSaleFact,
   DailyProfitSummary,
   GenerateDailyProfitSummaryResult,
@@ -85,6 +86,36 @@ function mapSummary(row: DailyProfitSummaryRow): DailyProfitSummary | null {
     generated_at: row.generated_at,
     created_at: row.created_at,
   };
+}
+
+/**
+ * Server-side recomputation check for the JS-built summary. Rejects the
+ * write if the independent SQL aggregate disagrees with the JS result.
+ */
+async function verifyDailyProfitSummary(
+  built: BuildDailyProfitSummaryResult,
+): Promise<ServiceResult<true>> {
+  const { data, error } = await supabase.rpc("verify_daily_profit_summary", {
+    p_shift_id: built.shift_id,
+    p_net_revenue: built.net_revenue,
+    p_total_cogs: built.total_cogs,
+    p_gross_profit: built.gross_profit,
+    p_gross_margin_percent: built.gross_margin_percent,
+  });
+
+  if (error) {
+    return fail(
+      mapSummaryError(error, "Failed to verify daily profit summary"),
+    );
+  }
+
+  if (data !== true) {
+    return fail(
+      "Daily profit summary failed server-side verification and was not saved.",
+    );
+  }
+
+  return ok(true);
 }
 
 function mapSummaryError(error: unknown, fallback: string): string {
@@ -271,6 +302,11 @@ export const dailyProfitSummaryService = {
 
       if (built.error || !built.data) {
         return fail(built.error ?? "Failed to build daily profit summary");
+      }
+
+      const verified = await verifyDailyProfitSummary(built.data);
+      if (verified.error) {
+        return fail(verified.error);
       }
 
       const { data, error } = await supabase

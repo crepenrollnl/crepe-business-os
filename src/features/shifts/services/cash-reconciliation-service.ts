@@ -77,6 +77,43 @@ function optionalNotes(value: string | null | undefined): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
+/**
+ * Server-side recomputation check for the JS-built expected cash and
+ * difference. Rejects the write if the independent SQL arithmetic
+ * disagrees with the JS result.
+ */
+async function verifyCashReconciliation(input: {
+  opening_cash?: number;
+  cash_in?: number;
+  cash_out?: number;
+  counted_cash: number;
+  expected_cash: number;
+  difference: number;
+}): Promise<ServiceResult<true>> {
+  const { data, error } = await supabase.rpc("verify_cash_reconciliation", {
+    p_opening_cash: input.opening_cash ?? 0,
+    p_cash_in: input.cash_in ?? 0,
+    p_cash_out: input.cash_out ?? 0,
+    p_counted_cash: input.counted_cash,
+    p_expected_cash: input.expected_cash,
+    p_difference: input.difference,
+  });
+
+  if (error) {
+    return fail(
+      mapReconciliationError(error, "Failed to verify cash reconciliation"),
+    );
+  }
+
+  if (data !== true) {
+    return fail(
+      "Cash reconciliation failed server-side verification and was not saved.",
+    );
+  }
+
+  return ok(true);
+}
+
 function mapReconciliationError(error: unknown, fallback: string): string {
   return toUserError(error, fallback, {
     map: (err) => {
@@ -235,6 +272,18 @@ export const cashReconciliationService = {
       });
       const countedCash = input.counted_cash;
       const difference = calculateCashDifference(countedCash, expectedCash);
+
+      const verified = await verifyCashReconciliation({
+        opening_cash: input.opening_cash,
+        cash_in: input.cash_in,
+        cash_out: input.cash_out,
+        counted_cash: countedCash,
+        expected_cash: expectedCash,
+        difference,
+      });
+      if (verified.error) {
+        return fail(verified.error);
+      }
 
       const { data, error } = await supabase
         .from("shift_cash_reconciliations")

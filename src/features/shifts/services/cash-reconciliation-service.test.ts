@@ -104,6 +104,7 @@ describe("cashReconciliationService (DEV-113)", () => {
       data: { user: { id: USER_ID } },
       error: null,
     });
+    supabaseMock.rpc.mockResolvedValue({ data: true, error: null });
   });
 
   describe("getExpectedCashForShift", () => {

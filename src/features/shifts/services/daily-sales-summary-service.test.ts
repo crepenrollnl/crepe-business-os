@@ -100,6 +100,7 @@ function mockSaleLinesQuery(rows: Record<string, unknown>[]) {
 describe("dailySalesSummaryService (DEV-114)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    supabaseMock.rpc.mockResolvedValue({ data: true, error: null });
   });
 
   describe("generateForClosedShift", () => {

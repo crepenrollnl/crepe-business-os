@@ -100,6 +100,7 @@ describe("dailyProfitSummaryService (DEV-115)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     getSaleProfitSummaryMock.mockReset();
+    supabaseMock.rpc.mockResolvedValue({ data: true, error: null });
   });
 
   describe("generateForClosedShift", () => {
