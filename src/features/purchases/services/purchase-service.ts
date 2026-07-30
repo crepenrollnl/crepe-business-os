@@ -1,5 +1,4 @@
 import { DEFAULT_CURRENCY } from "@/constants/config";
-import { calculateMoneyLineTotal, roundMoney } from "@/lib/money";
 import { toUserError } from "@/lib/service-errors";
 import { supabase } from "@/lib/supabase";
 import type { ServiceResult } from "@/types/service";
@@ -84,10 +83,6 @@ function mapPurchaseItem(row: PurchaseItemRow): PurchaseItem {
   };
 }
 
-function calculateLineTotal(quantity: number, unitCost: number): number {
-  return calculateMoneyLineTotal(quantity, unitCost);
-}
-
 function normalizePurchasedAt(value: string): string {
   const trimmed = value.trim();
 
@@ -147,40 +142,66 @@ function validatePurchaseInput(
   return validateLines(input.lines);
 }
 
-function buildTotals(lines: PurchaseLineInput[], taxTotal = 0) {
-  const preparedLines = lines.map((line) => {
-    const quantity = line.quantity;
-    const unit_cost = line.unit_cost;
-    const discount = line.discount ?? 0;
-    const line_total = roundMoney(
-      calculateLineTotal(quantity, unit_cost) - discount,
-    );
+interface PurchaseTotals {
+  preparedLines: Array<{
+    ingredient_id: string;
+    quantity: number;
+    unit_cost: number;
+    line_total: number;
+  }>;
+  subtotal: number;
+  tax_total: number;
+  total: number;
+}
 
-    return {
+/**
+ * Calculates line/subtotal/tax/total on the server (calculate_purchase_totals)
+ * instead of in JS, so the persisted purchase always matches a server-side
+ * calculation rather than whatever a given client build computed.
+ */
+async function buildTotals(
+  lines: PurchaseLineInput[],
+  taxTotal = 0,
+): Promise<ServiceResult<PurchaseTotals>> {
+  const { data, error } = await supabase.rpc("calculate_purchase_totals", {
+    p_lines: lines.map((line) => ({
       ingredient_id: line.ingredient_id,
-      quantity,
-      unit_cost,
-      line_total,
-    };
+      quantity: line.quantity,
+      unit_cost: line.unit_cost,
+      discount: line.discount ?? 0,
+    })),
+    p_tax_total: taxTotal,
   });
 
-  const subtotal = roundMoney(
-    preparedLines.reduce((sum, line) => sum + line.line_total, 0),
-  );
-  const tax_total = roundMoney(taxTotal);
+  if (error || !data) {
+    return {
+      data: null,
+      error: toUserError(error, "Failed to calculate purchase totals"),
+    };
+  }
+
+  const rows = data.lines as Array<Record<string, number | string>>;
 
   return {
-    preparedLines,
-    subtotal,
-    tax_total,
-    total: roundMoney(subtotal + tax_total),
+    data: {
+      preparedLines: rows.map((line) => ({
+        ingredient_id: line.ingredient_id as string,
+        quantity: toNumber(line.quantity),
+        unit_cost: toNumber(line.unit_cost),
+        line_total: toNumber(line.line_total),
+      })),
+      subtotal: toNumber(data.subtotal as number | string),
+      tax_total: toNumber(data.tax_total as number | string),
+      total: toNumber(data.total as number | string),
+    },
+    error: null,
   };
 }
 
 function toPurchasePayload(
   input: PurchaseFormValues,
   status: PurchaseStatus,
-  totals: ReturnType<typeof buildTotals>,
+  totals: PurchaseTotals,
 ) {
   return {
     supplier_id: input.supplier_id.trim().length > 0 ? input.supplier_id : null,
@@ -247,7 +268,7 @@ async function fetchIngredients(): Promise<
 
 async function replacePurchaseItems(
   purchaseId: string,
-  lines: ReturnType<typeof buildTotals>["preparedLines"],
+  lines: PurchaseTotals["preparedLines"],
 ): Promise<ServiceResult<PurchaseItem[]>> {
   const { error: deleteError } = await supabase
     .from("purchase_items")
@@ -309,38 +330,19 @@ function isMissingRpcError(error: unknown): boolean {
   );
 }
 
+/**
+ * The increment_ingredient_stock RPC is missing from this database.
+ * Fail loudly instead of a non-atomic read-then-write, which would race
+ * under concurrent purchases and silently drop stock increments.
+ */
 async function increaseIngredientStockFallback(
   ingredientId: string,
   quantity: number,
 ): Promise<ServiceResult<null>> {
-  const { data, error } = await supabase
-    .from("ingredients")
-    .select("id, current_stock")
-    .eq("id", ingredientId)
-    .single();
-
-  if (error || !data) {
-    return {
-      data: null,
-      error: toUserError(error, "Failed to load ingredient stock"),
-    };
-  }
-
-  const nextStock = toNumber(data.current_stock) + quantity;
-
-  const { error: updateError } = await supabase
-    .from("ingredients")
-    .update({ current_stock: nextStock })
-    .eq("id", ingredientId);
-
-  if (updateError) {
-    return {
-      data: null,
-      error: toUserError(updateError, "Failed to update inventory stock"),
-    };
-  }
-
-  return { data: null, error: null };
+  return {
+    data: null,
+    error: `Cannot update inventory stock for ingredient ${ingredientId} (delta ${quantity}): the increment_ingredient_stock database function is not installed. Apply sql/001_create_purchases.sql and try again.`,
+  };
 }
 
 async function applyIngredientStockDelta(
@@ -367,7 +369,7 @@ async function applyIngredientStockDelta(
 }
 
 async function increaseIngredientStock(
-  lines: ReturnType<typeof buildTotals>["preparedLines"],
+  lines: PurchaseTotals["preparedLines"],
 ): Promise<ServiceResult<null>> {
   const applied: Array<{ ingredient_id: string; quantity: number }> = [];
 
@@ -470,7 +472,16 @@ async function persistPurchase(
     return { data: null, error: validationError };
   }
 
-  const totals = buildTotals(input.lines, input.tax_total ?? 0);
+  const totalsResult = await buildTotals(input.lines, input.tax_total ?? 0);
+
+  if (totalsResult.error || !totalsResult.data) {
+    return {
+      data: null,
+      error: totalsResult.error ?? "Failed to calculate purchase totals",
+    };
+  }
+
+  const totals = totalsResult.data;
   const payload = toPurchasePayload(input, status, totals);
 
   if (input.id) {
@@ -722,7 +733,16 @@ export const purchaseService = {
         return { data: null, error: lineValidation };
       }
 
-      const totals = buildTotals(formLines);
+      const totalsResult = await buildTotals(formLines);
+
+      if (totalsResult.error || !totalsResult.data) {
+        return {
+          data: null,
+          error: totalsResult.error ?? "Failed to calculate purchase totals",
+        };
+      }
+
+      const totals = totalsResult.data;
 
       const { data, error } = await supabase
         .from("purchases")
