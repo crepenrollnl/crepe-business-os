@@ -823,42 +823,14 @@ function enrichPlan(
   };
 }
 
-async function areRequiredIngredientsAvailable(
-  ingredients: ProductionPlanIngredient[],
-): Promise<ServiceResult<boolean>> {
-  if (ingredients.length === 0) {
-    return { data: true, error: null };
-  }
-
-  const stockResult = await fetchIngredientStock(
-    ingredients.map((line) => line.ingredient_id),
-  );
-
-  if (stockResult.error || !stockResult.data) {
-    return {
-      data: null,
-      error: stockResult.error ?? "Failed to load ingredient stock",
-    };
-  }
-
-  const stockMap = new Map(
-    stockResult.data.map((ingredient) => [
-      ingredient.id,
-      roundQuantity(toNumber(ingredient.current_stock)),
-    ]),
-  );
-
-  const available = ingredients.every((line) => {
-    const current = stockMap.get(line.ingredient_id) ?? 0;
-    return current + 1e-9 >= line.required_quantity;
-  });
-
-  return { data: available, error: null };
-}
-
+/**
+ * Checks live ingredient sufficiency and transitions the plan to
+ * ready_to_produce atomically on the server (check_production_plan_readiness).
+ * Requirements and current stock are read fresh inside that RPC, under a
+ * row lock on the plan, instead of relying on client-loaded snapshots.
+ */
 async function maybeMarkReadyToProduce(
   plan: ProductionPlan,
-  ingredients: ProductionPlanIngredient[],
 ): Promise<ServiceResult<ProductionPlan>> {
   if (
     plan.status === "completed" ||
@@ -868,33 +840,22 @@ async function maybeMarkReadyToProduce(
     return { data: plan, error: null };
   }
 
-  const availability = await areRequiredIngredientsAvailable(ingredients);
-
-  if (availability.error || availability.data === null) {
-    return {
-      data: null,
-      error: availability.error ?? "Failed to check inventory availability",
-    };
-  }
-
-  if (!availability.data) {
-    return { data: plan, error: null };
-  }
-
-  const { data, error } = await supabase
-    .from("production_plans")
-    .update({
-      status: "ready_to_produce",
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", plan.id)
-    .select("*")
-    .single();
+  const { data, error } = await supabase.rpc(
+    "check_production_plan_readiness",
+    { p_plan_id: plan.id },
+  );
 
   if (error) {
     return {
       data: null,
       error: toUserError(error, "Failed to update production plan status"),
+    };
+  }
+
+  if (!data) {
+    return {
+      data: null,
+      error: "Failed to update production plan status",
     };
   }
 
@@ -1057,23 +1018,10 @@ export const productionService = {
           plan.status === "planned" ||
           plan.status === "waiting_for_purchases"
         ) {
-          const { data: ingredientRows, error: ingredientError } =
-            await supabase
-              .from("production_plan_ingredients")
-              .select("*")
-              .eq("production_plan_id", plan.id);
+          const readiness = await maybeMarkReadyToProduce(plan);
 
-          if (!ingredientError && ingredientRows) {
-            const readiness = await maybeMarkReadyToProduce(
-              plan,
-              (ingredientRows as ProductionPlanIngredientRow[]).map(
-                mapIngredient,
-              ),
-            );
-
-            if (readiness.data) {
-              currentPlan = readiness.data;
-            }
+          if (readiness.data) {
+            currentPlan = readiness.data;
           }
         }
 
@@ -1129,10 +1077,7 @@ export const productionService = {
         plan.status === "planned" ||
         plan.status === "waiting_for_purchases"
       ) {
-        const readiness = await maybeMarkReadyToProduce(
-          plan,
-          relationsResult.data.ingredients,
-        );
+        const readiness = await maybeMarkReadyToProduce(plan);
 
         if (readiness.error || !readiness.data) {
           return {
