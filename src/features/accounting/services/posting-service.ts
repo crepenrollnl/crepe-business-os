@@ -229,31 +229,17 @@ async function validateExchangeRateAvailable(input: {
 }
 
 async function allocatePostingNumber(entryDate: string): Promise<ServiceResult<string>> {
-  const year = toDateOnly(entryDate).slice(0, 4);
-  const prefix = `JE-${year}-`;
+  const { data, error } = await supabase.rpc("allocate_posting_number", {
+    p_entry_date: toDateOnly(entryDate),
+  });
 
-  const { data, error } = await supabase
-    .from("journal_entries")
-    .select("posting_number")
-    .like("posting_number", `${prefix}%`)
-    .order("posting_number", { ascending: false })
-    .limit(1);
-
-  if (error) {
-    return fail(toUserError(error, "Failed to allocate posting number"));
+  if (error || !data) {
+    return fail(
+      toUserError(error, "Failed to allocate posting number"),
+    );
   }
 
-  const latest = data?.[0]?.posting_number as string | undefined;
-  let nextSeq = 1;
-  if (latest) {
-    const raw = latest.slice(prefix.length);
-    const parsed = Number.parseInt(raw, 10);
-    if (Number.isFinite(parsed) && parsed >= 1) {
-      nextSeq = parsed + 1;
-    }
-  }
-
-  return ok(`${prefix}${String(nextSeq).padStart(6, "0")}`);
+  return ok(data as string);
 }
 
 function mapJournalRow(row: Record<string, unknown>): JournalEntry {

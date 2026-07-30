@@ -220,6 +220,30 @@ function installMock(state: MockDbState) {
 
   let journalSelectCount = 0;
 
+  supabaseMock.rpc.mockImplementation(
+    async (fn: string, args: Record<string, unknown>) => {
+      if (fn === "allocate_posting_number") {
+        const entryDate = args.p_entry_date as string;
+        const prefix = `JE-${entryDate.slice(0, 4)}-`;
+        let nextSeq = 1;
+        if (state.latestPostingNumber?.startsWith(prefix)) {
+          const parsed = Number.parseInt(
+            state.latestPostingNumber.slice(prefix.length),
+            10,
+          );
+          if (Number.isFinite(parsed) && parsed >= 1) {
+            nextSeq = parsed + 1;
+          }
+        }
+        return {
+          data: `${prefix}${String(nextSeq).padStart(6, "0")}`,
+          error: null,
+        };
+      }
+      return { data: null, error: { message: `Unexpected rpc: ${fn}` } };
+    },
+  );
+
   supabaseMock.from.mockImplementation((table: string) => {
     if (table === "journal_entries") {
       const api: Record<string, unknown> = {};
@@ -273,21 +297,6 @@ function installMock(state: MockDbState) {
             };
           });
           return eqApi;
-        });
-
-        selectApi.like = vi.fn(() => {
-          const likeApi: Record<string, unknown> = {};
-          likeApi.order = vi.fn(() => {
-            const orderApi: Record<string, unknown> = {};
-            orderApi.limit = vi.fn(async () => ({
-              data: state.latestPostingNumber
-                ? [{ posting_number: state.latestPostingNumber }]
-                : [],
-              error: null,
-            }));
-            return orderApi;
-          });
-          return likeApi;
         });
 
         // Used after update: .update().eq().eq().select().single()
