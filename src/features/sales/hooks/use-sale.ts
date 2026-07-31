@@ -10,6 +10,10 @@ import type { SaleAccountingPostingStatus } from "../types/sale-accounting";
 import type { SaleCostSummary } from "../types/sale-cogs";
 import type { SaleProfitSummary } from "../types/sale-profit";
 import type { SaleDetail } from "../types/sale";
+import {
+  reconcileCompletedSaleReview,
+  type CompletedSaleReviewRead,
+} from "../utils/completed-sale-review-builder";
 
 function isCompletedSale(sale: SaleDetail | null): boolean {
   return sale?.status === "confirmed" || sale?.status === "paid";
@@ -35,42 +39,46 @@ export function useSale(saleId: string) {
     useState<SaleAccountingPostingStatus>("pending");
   const [reviewLoading, setReviewLoading] = useState(false);
 
-  const loadCogs = useCallback(async (detail: SaleDetail) => {
-    if (!isCompletedSale(detail)) {
-      setCogsSummary(null);
-      setCogsError(null);
+  /**
+   * Loads COGS on its own but does not commit it to state — the sale
+   * detail page's displayed cogsSummary/cogsError is decided jointly with
+   * the profit read by reconcileCompletedSaleReview below, since profit
+   * verifies both figures together (sql/077) and a profit failure means
+   * COGS was never confirmed either.
+   */
+  const loadCogs = useCallback(
+    async (detail: SaleDetail): Promise<CompletedSaleReviewRead<SaleCostSummary>> => {
+      if (!isCompletedSale(detail)) {
+        setCogsLoading(false);
+        return { data: null, error: null };
+      }
+
+      setCogsLoading(true);
+
+      const result = await saleCogsService.getSaleCostSummary(detail.sale_id);
+
       setCogsLoading(false);
-      return;
-    }
 
-    setCogsLoading(true);
-    setCogsError(null);
+      if (result.error || !result.data) {
+        return { data: null, error: result.error ?? "Failed to load sale COGS" };
+      }
 
-    const result = await saleCogsService.getSaleCostSummary(detail.sale_id);
-
-    if (result.error || !result.data) {
-      setCogsSummary(null);
-      setCogsError(result.error ?? "Failed to load sale COGS");
-      setCogsLoading(false);
-      return;
-    }
-
-    setCogsSummary(result.data);
-    setCogsError(null);
-    setCogsLoading(false);
-  }, []);
+      return { data: result.data, error: null };
+    },
+    [],
+  );
 
   const loadProfit = useCallback(
-    async (detail: SaleDetail, options?: { registerGeneration?: boolean }) => {
+    async (
+      detail: SaleDetail,
+      options?: { registerGeneration?: boolean },
+    ): Promise<CompletedSaleReviewRead<SaleProfitSummary>> => {
       if (!isCompletedSale(detail)) {
-        setProfitSummary(null);
-        setProfitError(null);
         setProfitLoading(false);
-        return;
+        return { data: null, error: null };
       }
 
       setProfitLoading(true);
-      setProfitError(null);
 
       const result = options?.registerGeneration
         ? await saleProfitService.buildFrozenSaleProfit(detail.sale_id)
@@ -84,23 +92,22 @@ export function useSale(saleId: string) {
           const reload = await saleProfitService.getSaleProfitSummary(
             detail.sale_id,
           );
+          setProfitLoading(false);
           if (!reload.error && reload.data) {
-            setProfitSummary(reload.data);
-            setProfitError(null);
-            setProfitLoading(false);
-            return;
+            return { data: reload.data, error: null };
           }
+          return {
+            data: null,
+            error: reload.error ?? result.error ?? "Failed to load sale profit",
+          };
         }
 
-        setProfitSummary(null);
-        setProfitError(result.error ?? "Failed to load sale profit");
         setProfitLoading(false);
-        return;
+        return { data: null, error: result.error ?? "Failed to load sale profit" };
       }
 
-      setProfitSummary(result.data);
-      setProfitError(null);
       setProfitLoading(false);
+      return { data: result.data, error: null };
     },
     [],
   );
@@ -133,13 +140,22 @@ export function useSale(saleId: string) {
       }
 
       setReviewLoading(true);
-      await Promise.all([
+      const [cogsRead, profitRead] = await Promise.all([
         loadCogs(detail),
         loadProfit(detail, {
           registerGeneration: options?.registerProfitGeneration,
         }),
         loadAccountingStatus(detail),
       ]);
+
+      const resolved = reconcileCompletedSaleReview({
+        cogs: cogsRead,
+        profit: profitRead,
+      });
+      setCogsSummary(resolved.cogsSummary);
+      setCogsError(resolved.cogsError);
+      setProfitSummary(resolved.profitSummary);
+      setProfitError(resolved.profitError);
       setReviewLoading(false);
     },
     [loadAccountingStatus, loadCogs, loadProfit],

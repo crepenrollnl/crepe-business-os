@@ -10,6 +10,7 @@
  */
 
 import { toUserError } from "@/lib/service-errors";
+import { supabase } from "@/lib/supabase";
 import { fail, ok, type ServiceResult } from "@/types/service";
 import type { SaleProfitSummary } from "../types/sale-profit";
 import type { SaleStatus } from "../types/sale";
@@ -28,6 +29,41 @@ const builtSaleProfitIds = new Set<string>();
 
 function isCompletedSaleStatus(status: SaleStatus): boolean {
   return status === "confirmed" || status === "paid";
+}
+
+/**
+ * Independent server-side recomputation of a completed sale's frozen COGS
+ * and gross profit/margin — sale-cogs-builder.ts / sale-profit-builder.ts
+ * compute both entirely in TS with nothing checking them before the sale
+ * detail page displays them (V1 plan 1.8). Read-only: rejects the display,
+ * never a write.
+ */
+async function verifySaleCostAndProfit(input: {
+  sale_id: string;
+  total_cogs: number;
+  net_revenue: number;
+  gross_profit: number;
+  gross_margin_percent: number | null;
+}): Promise<ServiceResult<true>> {
+  const { data, error } = await supabase.rpc("verify_sale_cost_and_profit", {
+    p_sale_id: input.sale_id,
+    p_total_cogs: input.total_cogs,
+    p_net_revenue: input.net_revenue,
+    p_gross_profit: input.gross_profit,
+    p_gross_margin_percent: input.gross_margin_percent,
+  });
+
+  if (error) {
+    return fail(toUserError(error, "Failed to verify sale COGS and profit"));
+  }
+
+  if (data !== true) {
+    return fail(
+      "Sale COGS and profit failed server-side verification and were not shown.",
+    );
+  }
+
+  return ok(true);
 }
 
 async function deriveProfit(
@@ -74,6 +110,17 @@ async function deriveProfit(
 
   if (!built.ok) {
     return fail(built.error);
+  }
+
+  const verified = await verifySaleCostAndProfit({
+    sale_id: built.summary.sale_id,
+    total_cogs: cogsResult.data.total_cogs,
+    net_revenue: built.summary.net_revenue,
+    gross_profit: built.summary.gross_profit,
+    gross_margin_percent: built.summary.gross_margin_percent,
+  });
+  if (verified.error) {
+    return fail(verified.error);
   }
 
   if (options?.registerGeneration) {
