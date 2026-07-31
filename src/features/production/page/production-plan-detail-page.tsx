@@ -34,6 +34,8 @@ export function ProductionPlanDetailPage({
     calculationError,
     isTransferring,
     transferError,
+    isConfirming,
+    confirmError,
     openAddModal,
     closeAddModal,
     openEditQuantity,
@@ -44,6 +46,7 @@ export function ProductionPlanDetailPage({
     updateQuantity,
     removeProduct,
     calculateRequirements,
+    confirmPlan,
     sendToPurchases,
     retry,
   } = useProductionPlanDetail(planId);
@@ -87,7 +90,18 @@ export function ProductionPlanDetailPage({
               onCalculate={() => {
                 void calculateRequirements();
               }}
+              canConfirm={plan.status === "draft" && plan.products.length > 0}
+              isConfirming={isConfirming}
+              onConfirm={() => {
+                void confirmPlan();
+              }}
             />
+
+            {confirmError ? (
+              <p className="text-sm text-red-600" role="alert">
+                {confirmError}
+              </p>
+            ) : null}
 
             <ProductionPlanProductsSection
               products={plan.products}

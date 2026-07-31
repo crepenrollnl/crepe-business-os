@@ -1484,6 +1484,39 @@ export const productionService = {
   },
 
   /**
+   * Confirms a Draft production plan: server-side snapshots ingredient
+   * requirements into production_plan_ingredients, moves the plan to
+   * planned, then advances straight to ready_to_produce if every
+   * ingredient is already sufficiently stocked (confirm_production_plan,
+   * sql/078). The only way to move a fully-stocked Draft plan into the
+   * Production Execution queue without first sending a (now-empty)
+   * purchase draft.
+   */
+  async confirmProductionPlan(
+    planId: string,
+  ): Promise<ServiceResult<ProductionPlanWithRelations>> {
+    try {
+      const { error } = await supabase.rpc("confirm_production_plan", {
+        p_plan_id: planId,
+      });
+
+      if (error) {
+        return {
+          data: null,
+          error: toUserError(error, "Failed to confirm production plan"),
+        };
+      }
+
+      return this.getProductionPlanById(planId);
+    } catch (error) {
+      return {
+        data: null,
+        error: toUserError(error, "Failed to confirm production plan"),
+      };
+    }
+  },
+
+  /**
    * Transfers calculated Purchase Draft lines into Purchases as a Draft.
    * Reuses Purchases persistence — Planning never owns purchase documents.
    * Does not receive goods or change inventory.

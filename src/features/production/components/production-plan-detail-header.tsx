@@ -11,6 +11,9 @@ type ProductionPlanDetailHeaderProps = {
   canCalculate: boolean;
   isCalculating: boolean;
   onCalculate: () => void;
+  canConfirm: boolean;
+  isConfirming: boolean;
+  onConfirm: () => void;
 };
 
 export function ProductionPlanDetailHeader({
@@ -18,6 +21,9 @@ export function ProductionPlanDetailHeader({
   canCalculate,
   isCalculating,
   onCalculate,
+  canConfirm,
+  isConfirming,
+  onConfirm,
 }: ProductionPlanDetailHeaderProps) {
   return (
     <div className="space-y-6">
@@ -81,10 +87,25 @@ export function ProductionPlanDetailHeader({
                 ? "Calculate ingredient requirements for this plan"
                 : "Add at least one product before calculating requirements"
             }
-            className="inline-flex items-center justify-center rounded-lg bg-amber-500 px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-amber-600 disabled:cursor-not-allowed disabled:opacity-50"
+            className="inline-flex items-center justify-center rounded-lg border border-zinc-300 bg-white px-5 py-2.5 text-sm font-semibold text-zinc-700 shadow-sm transition-colors hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {isCalculating ? "Calculating..." : "Calculate Requirements"}
           </button>
+          {plan.status === "draft" ? (
+            <button
+              type="button"
+              disabled={!canConfirm || isConfirming}
+              onClick={onConfirm}
+              title={
+                canConfirm
+                  ? "Confirm this plan and move it toward production"
+                  : "Add at least one product before confirming the plan"
+              }
+              className="inline-flex items-center justify-center rounded-lg bg-amber-500 px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-amber-600 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {isConfirming ? "Confirming..." : "Confirm Plan"}
+            </button>
+          ) : null}
         </div>
       </div>
     </div>

@@ -35,6 +35,8 @@ export function useProductionPlanDetail(planId: string) {
   const [calculationError, setCalculationError] = useState<string | null>(null);
   const [isTransferring, setIsTransferring] = useState(false);
   const [transferError, setTransferError] = useState<string | null>(null);
+  const [isConfirming, setIsConfirming] = useState(false);
+  const [confirmError, setConfirmError] = useState<string | null>(null);
 
   const clearCalculation = useCallback(() => {
     setCalculationResult(null);
@@ -257,6 +259,33 @@ export function useProductionPlanDetail(planId: string) {
     return true;
   }, [isCalculating, plan, planId]);
 
+  const confirmPlan = useCallback(async () => {
+    if (!plan || plan.status !== "draft" || isConfirming) {
+      return false;
+    }
+
+    if (plan.products.length === 0) {
+      setConfirmError("Add at least one product before confirming the plan");
+      return false;
+    }
+
+    setIsConfirming(true);
+    setConfirmError(null);
+
+    const result = await productionService.confirmProductionPlan(planId);
+
+    if (result.error || !result.data) {
+      setConfirmError(result.error ?? "Failed to confirm production plan");
+      setIsConfirming(false);
+      return false;
+    }
+
+    setPlan(result.data);
+    clearCalculation();
+    setIsConfirming(false);
+    return true;
+  }, [clearCalculation, isConfirming, plan, planId]);
+
   const sendToPurchases = useCallback(async () => {
     if (
       !plan ||
@@ -327,6 +356,8 @@ export function useProductionPlanDetail(planId: string) {
     calculationError,
     isTransferring,
     transferError,
+    isConfirming,
+    confirmError,
     openAddModal,
     closeAddModal,
     openEditQuantity,
@@ -337,6 +368,7 @@ export function useProductionPlanDetail(planId: string) {
     updateQuantity,
     removeProduct,
     calculateRequirements,
+    confirmPlan,
     sendToPurchases,
     retry: () => loadPlan(),
   };
