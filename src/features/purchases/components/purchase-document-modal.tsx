@@ -18,8 +18,10 @@ import type {
 } from "../types/purchase";
 import type { PurchaseAccountingPreviewData } from "../types/purchase-accounting-preview";
 import {
+  DEFAULT_TAX_REGIME_BY_CATEGORY,
   PURCHASE_TAX_CATEGORY_OPTIONS,
   PURCHASE_TAX_REGIME_OPTIONS,
+  type PurchaseTaxCategoryCode,
   type PurchaseTaxResult,
 } from "../types/purchase-tax";
 import { buildPurchaseTaxDocument } from "../utils/build-purchase-tax-document";
@@ -316,6 +318,24 @@ function PurchaseDocumentForm({
       ...current,
       lines: current.lines.map((line, lineIndex) =>
         lineIndex === index ? { ...line, [field]: value } : line,
+      ),
+    }));
+  };
+
+  const updateLineTaxCategory = (index: number, category: string) => {
+    setFormValues((current) => ({
+      ...current,
+      lines: current.lines.map((line, lineIndex) =>
+        lineIndex === index
+          ? {
+              ...line,
+              tax_category: category,
+              tax_regime:
+                DEFAULT_TAX_REGIME_BY_CATEGORY[
+                  category as PurchaseTaxCategoryCode
+                ] ?? line.tax_regime,
+            }
+          : line,
       ),
     }));
   };
@@ -642,6 +662,11 @@ function PurchaseDocumentForm({
                     const taxLine = taxPreview?.data?.lines.find(
                       (row) => row.line_id === `line-${index + 1}`,
                     );
+                    const lineTaxWarning = taxPreview?.data?.warnings.find(
+                      (message) =>
+                        message.includes(`category '${line.tax_category}'`) &&
+                        message.includes(`regime '${line.tax_regime}'`),
+                    );
 
                     return (
                       <tr key={index} className="border-t border-zinc-200">
@@ -712,7 +737,7 @@ function PurchaseDocumentForm({
                           <select
                             value={line.tax_category}
                             onChange={(event) =>
-                              updateLine(index, "tax_category", event.target.value)
+                              updateLineTaxCategory(index, event.target.value)
                             }
                             disabled={isReadOnly || isSaving}
                             className={inputClassName}
@@ -739,6 +764,14 @@ function PurchaseDocumentForm({
                               </option>
                             ))}
                           </select>
+                          {lineTaxWarning && (
+                            <p
+                              className="mt-1 text-xs text-amber-700"
+                              title={lineTaxWarning}
+                            >
+                              ⚠ No matching tax rule for this regime
+                            </p>
+                          )}
                         </td>
                         <td className="px-3 py-3 align-top text-sm text-zinc-700">
                           {taxLine?.tax_code ?? "—"}

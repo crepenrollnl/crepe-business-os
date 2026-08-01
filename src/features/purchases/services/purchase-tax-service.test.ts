@@ -253,6 +253,7 @@ describe("purchaseTaxService (DEV-099, RPC-based)", () => {
         grand_total: 121,
         effective_tax_rate: 0.21,
       });
+      expect(result.data?.warnings).toEqual([]);
       expect(result.data?.lines).toEqual([
         {
           line_id: "line-1",
@@ -337,6 +338,62 @@ describe("purchaseTaxService (DEV-099, RPC-based)", () => {
         tax_amount: 0,
       });
       expect(result.data?.tax_result.breakdown.lines).toHaveLength(0);
+      expect(result.data?.warnings).toEqual([
+        "No tax rule found for category 'goods' with regime 'standard_vat'. Tax amount set to 0. Please check the tax regime selection.",
+      ]);
+    });
+
+    it("only warns for the unresolved line when one of several lines has no matching rule", async () => {
+      supabaseMock.rpc.mockResolvedValue(
+        rpcResult({
+          subtotal: 200,
+          tax_total: 21,
+          grand_total: 221,
+          lines: [
+            {
+              line_id: "line-1",
+              taxable_amount: 100,
+              tax_amount: 21,
+              net_amount: 100,
+              gross_amount: 121,
+              taxes: [rpcTaxLine()],
+            },
+            {
+              line_id: "line-2",
+              taxable_amount: 100,
+              tax_amount: 0,
+              net_amount: 100,
+              gross_amount: 100,
+              taxes: [],
+            },
+          ],
+        }),
+      );
+
+      const result = await purchaseTaxService.calculatePurchaseTaxes(
+        document({
+          lines: [
+            {
+              line_id: "line-1",
+              quantity: 1,
+              unit_price: 100,
+              tax_category: "goods",
+              tax_regime: "standard_vat",
+            },
+            {
+              line_id: "line-2",
+              quantity: 1,
+              unit_price: 100,
+              tax_category: "food",
+              tax_regime: "standard_vat",
+            },
+          ],
+        }),
+      );
+
+      expect(result.data?.warnings).toEqual([
+        "No tax rule found for category 'food' with regime 'standard_vat'. Tax amount set to 0. Please check the tax regime selection.",
+      ]);
     });
 
     it("tags mode=preview for previewPurchaseTaxes without changing the call", async () => {

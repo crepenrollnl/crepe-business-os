@@ -94,6 +94,19 @@ function toPurchaseTaxResult(
   mode: "calculate" | "preview" | "validate",
   rpcResult: CalculatePurchaseTaxesRpcResult,
 ): PurchaseTaxResult {
+  const linesById = new Map(
+    document.lines.map((line) => [line.line_id, line]),
+  );
+
+  const warnings = rpcResult.lines
+    .filter((line) => line.taxes.length === 0)
+    .map((line) => linesById.get(line.line_id))
+    .filter((line): line is PurchaseTaxDocument["lines"][number] => Boolean(line))
+    .map(
+      (line) =>
+        `No tax rule found for category '${line.tax_category}' with regime '${line.tax_regime ?? "standard_vat"}'. Tax amount set to 0. Please check the tax regime selection.`,
+    );
+
   return {
     document_id: document.document_id ?? null,
     mode,
@@ -103,7 +116,7 @@ function toPurchaseTaxResult(
     grand_total: rpcResult.grand_total,
     effective_tax_rate: rpcResult.effective_tax_rate,
     lines: toLineViews(rpcResult.lines),
-    warnings: [],
+    warnings,
     tax_result: {
       currency: rpcResult.currency,
       breakdown: {

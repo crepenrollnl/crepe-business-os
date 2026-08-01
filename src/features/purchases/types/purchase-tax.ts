@@ -38,6 +38,25 @@ export const PURCHASE_TAX_REGIME_OPTIONS = [
 export type PurchaseTaxRegimeCode =
   (typeof PURCHASE_TAX_REGIME_OPTIONS)[number];
 
+/**
+ * Default regime to apply when a line's tax category changes, so a plain
+ * category pick resolves a tax rule instead of silently zeroing (V1 plan 1.12).
+ * goods/services keep standard_vat as default even though other regimes
+ * (zero_rate, exempt, etc.) are also valid for them in specific cases —
+ * the user can still override the regime select manually.
+ */
+export const DEFAULT_TAX_REGIME_BY_CATEGORY: Record<
+  PurchaseTaxCategoryCode,
+  PurchaseTaxRegimeCode
+> = {
+  goods: "standard_vat",
+  services: "standard_vat",
+  digital_services: "standard_vat",
+  food: "reduced_vat",
+  alcohol: "standard_vat",
+  transport: "standard_vat",
+};
+
 export interface PurchaseTaxLineInput {
   line_id: string;
   quantity: number;
