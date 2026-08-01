@@ -22,3 +22,6 @@ export const MONEY_DECIMAL_PLACES = 2;
  * Matches operational planning / production stock precision (3 dp).
  */
 export const QUANTITY_DECIMAL_PLACES = 3;
+
+/** Minimum password length enforced on password set/reset forms. */
+export const MIN_PASSWORD_LENGTH = 8;

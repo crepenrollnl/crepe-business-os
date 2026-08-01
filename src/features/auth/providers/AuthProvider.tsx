@@ -16,6 +16,7 @@ import { authService } from "@/features/auth/services/auth-service";
 type AuthContextValue = {
   user: User | null;
   loading: boolean;
+  isPasswordRecovery: boolean;
   signOut: () => Promise<void>;
 };
 
@@ -28,6 +29,7 @@ type AuthProviderProps = {
 export function AuthProvider({ children }: AuthProviderProps) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const [isPasswordRecovery, setIsPasswordRecovery] = useState(false);
 
   useEffect(() => {
     const initializeSession = async () => {
@@ -43,7 +45,13 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
+    } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === "PASSWORD_RECOVERY") {
+        setIsPasswordRecovery(true);
+      } else if (event === "SIGNED_OUT") {
+        setIsPasswordRecovery(false);
+      }
+
       setUser(session?.user ?? null);
       setLoading(false);
     });
@@ -61,9 +69,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
     () => ({
       user,
       loading,
+      isPasswordRecovery,
       signOut,
     }),
-    [user, loading, signOut],
+    [user, loading, isPasswordRecovery, signOut],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

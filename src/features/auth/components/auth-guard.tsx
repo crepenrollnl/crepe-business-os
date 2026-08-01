@@ -10,16 +10,25 @@ type AuthGuardProps = {
 };
 
 export function AuthGuard({ children }: AuthGuardProps) {
-  const { user, loading } = useAuth();
+  const { user, loading, isPasswordRecovery } = useAuth();
   const router = useRouter();
 
   useEffect(() => {
-    if (!loading && !user) {
-      router.replace("/login");
+    if (loading) {
+      return;
     }
-  }, [user, loading, router]);
 
-  if (loading || !user) {
+    if (!user) {
+      router.replace("/login");
+      return;
+    }
+
+    if (isPasswordRecovery) {
+      router.replace("/reset-password");
+    }
+  }, [user, loading, isPasswordRecovery, router]);
+
+  if (loading || !user || isPasswordRecovery) {
     return <AuthLoading />;
   }
 

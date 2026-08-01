@@ -13,6 +13,10 @@ export type RequestPasswordResetResult =
   | { success: true }
   | { success: false };
 
+export type UpdatePasswordResult =
+  | { success: true }
+  | { success: false };
+
 export const authService = {
   async signIn(credentials: SignInCredentials): Promise<SignInResult> {
     const { error } = await supabase.auth.signInWithPassword({
@@ -34,6 +38,18 @@ export const authService = {
   async requestPasswordReset(email: string): Promise<RequestPasswordResetResult> {
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
       redirectTo: `${window.location.origin}/reset-password`,
+    });
+
+    if (error) {
+      return { success: false };
+    }
+
+    return { success: true };
+  },
+
+  async updatePassword(newPassword: string): Promise<UpdatePasswordResult> {
+    const { error } = await supabase.auth.updateUser({
+      password: newPassword,
     });
 
     if (error) {
