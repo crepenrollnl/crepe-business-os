@@ -53,6 +53,14 @@ vi.mock("@/features/search/components/global-search", () => ({
   GlobalSearch: () => <div data-testid="global-search" />,
 }));
 
+vi.mock("@/features/auth/hooks/use-auth", () => ({
+  useAuth: () => ({ user: null, loading: false, signOut: vi.fn() }),
+}));
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ replace: vi.fn() }),
+}));
+
 vi.mock("../services/reporting-workspace-service", () => ({
   reportingWorkspaceService: {
     getReportingWorkspace: (...args: unknown[]) =>

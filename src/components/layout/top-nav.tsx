@@ -1,4 +1,4 @@
-import { UserAvatar } from "@/components/ui/user-avatar";
+import { LogoutButton } from "@/features/auth/components/logout-button";
 import { GlobalSearch } from "@/features/search/components/global-search";
 
 type TopNavProps = {
@@ -42,7 +42,7 @@ export function TopNav({ onMenuClick }: TopNavProps) {
       </div>
 
       <div className="shrink-0">
-        <UserAvatar />
+        <LogoutButton />
       </div>
     </header>
   );
