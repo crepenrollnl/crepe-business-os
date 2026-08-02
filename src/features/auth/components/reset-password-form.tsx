@@ -75,7 +75,11 @@ export function ResetPasswordForm() {
 
     if (!result.success) {
       setIsSubmitting(false);
-      setSubmitError("Something went wrong. Please try again.");
+      setSubmitError(
+        result.error === "same_password"
+          ? "New password must be different from your current password."
+          : "Something went wrong. Please try again.",
+      );
       return;
     }
 

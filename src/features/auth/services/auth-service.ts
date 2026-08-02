@@ -15,7 +15,7 @@ export type RequestPasswordResetResult =
 
 export type UpdatePasswordResult =
   | { success: true }
-  | { success: false };
+  | { success: false; error: "same_password" | "unknown" };
 
 export const authService = {
   async signIn(credentials: SignInCredentials): Promise<SignInResult> {
@@ -53,7 +53,10 @@ export const authService = {
     });
 
     if (error) {
-      return { success: false };
+      return {
+        success: false,
+        error: error.code === "same_password" ? "same_password" : "unknown",
+      };
     }
 
     return { success: true };
