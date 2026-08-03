@@ -11,7 +11,7 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { supabaseMock } = vi.hoisted(() => {
+const { supabaseMock, postJournalsForSaleCompletedMock } = vi.hoisted(() => {
   const supabaseMock = {
     from: vi.fn(),
     rpc: vi.fn(),
@@ -19,11 +19,21 @@ const { supabaseMock } = vi.hoisted(() => {
       getUser: vi.fn(),
     },
   };
-  return { supabaseMock };
+  return {
+    supabaseMock,
+    postJournalsForSaleCompletedMock: vi.fn(),
+  };
 });
 
 vi.mock("@/lib/supabase", () => ({
   supabase: supabaseMock,
+}));
+
+vi.mock("./sale-accounting-service", () => ({
+  saleAccountingService: {
+    postJournalsForSaleCompleted: (...args: unknown[]) =>
+      postJournalsForSaleCompletedMock(...args),
+  },
 }));
 
 import { salesService } from "./sales-service";
@@ -988,5 +998,106 @@ describe("salesService sale line mutations (DEV-035)", () => {
     expect(insertMock).not.toHaveBeenCalled();
     expect(updateMock).not.toHaveBeenCalled();
     expect(deleteMock).not.toHaveBeenCalled();
+  });
+});
+
+const ACCOUNTING_CONTEXT = {
+  fiscalPeriod: {
+    id: "period-1",
+    name: "FY2026",
+    start_date: "2026-01-01",
+    end_date: "2026-12-31",
+    status: "open" as const,
+    closed_at: null,
+    created_at: "2026-01-01T00:00:00.000Z",
+  },
+  accountRoleBindings: [],
+  baseCurrency: "EUR",
+  transactionCurrency: "EUR",
+  exchangeRate: 1,
+  rateDate: "2026-08-03",
+};
+
+describe("salesService.confirmSaleAndPostJournals (DEV-109)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    insertMock.mockReset();
+    updateMock.mockReset();
+    deleteMock.mockReset();
+    postJournalsForSaleCompletedMock.mockReset();
+    supabaseMock.auth.getUser.mockResolvedValue({
+      data: { user: { id: USER_ID } },
+      error: null,
+    });
+  });
+
+  it("returns ok() with the posted journal when confirm and posting both succeed", async () => {
+    mockSaleReload();
+    supabaseMock.rpc.mockResolvedValue({
+      data: rpcConfirmPayload(18.75),
+      error: null,
+    });
+    postJournalsForSaleCompletedMock.mockResolvedValue({
+      data: {
+        sale: { id: SALE_ID },
+        total_cogs: 18.75,
+        revenue: { status: "posted" },
+        cogs: { status: "posted" },
+      },
+      error: null,
+    });
+
+    const result = await salesService.confirmSaleAndPostJournals(
+      SALE_ID,
+      ACCOUNTING_CONTEXT,
+    );
+
+    expect(result.error).toBeNull();
+    expect(result.data?.sale.id).toBe(SALE_ID);
+    expect(result.data?.total_cogs).toBe(18.75);
+    expect(result.data?.posting).not.toBeNull();
+    expect(result.data?.postingError).toBeNull();
+  });
+
+  it("still returns ok() with the confirmed sale when posting fails — never discards a successful confirm", async () => {
+    mockSaleReload();
+    supabaseMock.rpc.mockResolvedValue({
+      data: rpcConfirmPayload(18.75),
+      error: null,
+    });
+    postJournalsForSaleCompletedMock.mockResolvedValue({
+      data: null,
+      error: "No open fiscal period covers today's date.",
+    });
+
+    const result = await salesService.confirmSaleAndPostJournals(
+      SALE_ID,
+      ACCOUNTING_CONTEXT,
+    );
+
+    expect(result.error).toBeNull();
+    expect(result.data?.sale.id).toBe(SALE_ID);
+    expect(result.data?.sale.status).toBe("confirmed");
+    expect(result.data?.total_cogs).toBe(18.75);
+    expect(result.data?.posting).toBeNull();
+    expect(result.data?.postingError).toBe(
+      "No open fiscal period covers today's date.",
+    );
+  });
+
+  it("returns fail() and never calls posting when confirmSale itself fails", async () => {
+    supabaseMock.rpc.mockResolvedValue({
+      data: null,
+      error: { message: "Only draft sales can be confirmed." },
+    });
+
+    const result = await salesService.confirmSaleAndPostJournals(
+      SALE_ID,
+      ACCOUNTING_CONTEXT,
+    );
+
+    expect(result.data).toBeNull();
+    expect(result.error).toBe("Only draft sales can be confirmed.");
+    expect(postJournalsForSaleCompletedMock).not.toHaveBeenCalled();
   });
 });

@@ -822,6 +822,14 @@ export const salesService = {
    *
    * Uses frozen confirm_sale COGS + sale commercial totals — never recalculates.
    * Existing confirmSale (hooks/UI) remains unchanged.
+   *
+   * confirmSale has already succeeded and is durable by the time posting is
+   * attempted — a posting failure must never look like the whole operation
+   * failed (that would silently discard a real confirmed sale from the
+   * caller's point of view). So this only ever returns fail(...) when
+   * confirmSale itself fails; once that succeeds, the result is always
+   * ok(...), with posting/postingError reporting whether the accounting
+   * entry was actually created.
    */
   async confirmSaleAndPostJournals(
     saleId: string,
@@ -830,7 +838,8 @@ export const salesService = {
     ServiceResult<{
       sale: SaleWithLines;
       total_cogs: number;
-      posting: SaleJournalPostings;
+      posting: SaleJournalPostings | null;
+      postingError: string | null;
     }>
   > {
     const confirmed = await this.confirmSale(saleId);
@@ -844,15 +853,20 @@ export const salesService = {
     );
 
     if (posting.error || !posting.data) {
-      return fail(
-        posting.error ?? "Sale confirmed but accounting posting failed.",
-      );
+      return ok({
+        sale: confirmed.data.sale,
+        total_cogs: confirmed.data.total_cogs,
+        posting: null,
+        postingError:
+          posting.error ?? "Sale confirmed but accounting posting failed.",
+      });
     }
 
     return ok({
       sale: confirmed.data.sale,
       total_cogs: confirmed.data.total_cogs,
       posting: posting.data,
+      postingError: null,
     });
   },
 };

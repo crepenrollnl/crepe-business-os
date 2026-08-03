@@ -840,6 +840,14 @@ export const productionSessionService = {
    *
    * Uses frozen RPC / plan total_cost — never recalculates.
    * Existing completeSession (hooks/UI) remains unchanged.
+   *
+   * completeSession has already succeeded and is durable by the time
+   * posting is attempted — a posting failure must never look like the
+   * whole operation failed (that would silently discard a real completed
+   * session from the caller's point of view). So this only ever returns
+   * fail(...) when completeSession itself fails; once that succeeds, the
+   * result is always ok(...), with posting/postingError reporting whether
+   * the accounting entry was actually created.
    */
   async completeSessionAndPostJournal(
     sessionId: string,
@@ -848,7 +856,8 @@ export const productionSessionService = {
   ): Promise<
     ServiceResult<{
       session: ProductionSessionWithRelations;
-      posting: ProductionJournalPosting;
+      posting: ProductionJournalPosting | null;
+      postingError: string | null;
     }>
   > {
     const completed = await this.completeSession(sessionId, input);
@@ -884,15 +893,19 @@ export const productionSessionService = {
     );
 
     if (posting.error || !posting.data) {
-      return fail(
-        posting.error ??
+      return ok({
+        session: completed.data,
+        posting: null,
+        postingError:
+          posting.error ??
           "Production completed but accounting posting failed.",
-      );
+      });
     }
 
     return ok({
       session: completed.data,
       posting: posting.data,
+      postingError: null,
     });
   },
 };

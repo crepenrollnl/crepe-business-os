@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { accountingContextService } from "@/features/accounting/services/accounting-context-service";
 import { saleAccountingService } from "../services/sale-accounting-service";
 import { saleCogsService } from "../services/sale-cogs-service";
 import { saleProfitService } from "../services/sale-profit-service";
@@ -26,6 +27,7 @@ export function useSale(saleId: string) {
   const [confirming, setConfirming] = useState(false);
   const [mutating, setMutating] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [postingError, setPostingError] = useState<string | null>(null);
   const [lastConfirmCogs, setLastConfirmCogs] = useState<number | null>(null);
   const [cogsSummary, setCogsSummary] = useState<SaleCostSummary | null>(null);
   const [cogsLoading, setCogsLoading] = useState(false);
@@ -317,16 +319,42 @@ export function useSale(saleId: string) {
   const confirm = useCallback(async () => {
     setConfirming(true);
     setActionError(null);
+    setPostingError(null);
 
-    const confirmResult = await salesService.confirmSale(saleId);
+    const contextResult =
+      await accountingContextService.getCurrentAccountingContext();
 
-    if (confirmResult.error || !confirmResult.data) {
-      setActionError(confirmResult.error ?? "Failed to confirm sale");
-      setConfirming(false);
-      return false;
+    if (contextResult.error || !contextResult.data) {
+      // Accounting infra not ready (e.g. no open fiscal period) — the sale
+      // must still confirm; only the journal is skipped, surfaced via
+      // postingError rather than blocking the confirmation itself.
+      const fallback = await salesService.confirmSale(saleId);
+
+      if (fallback.error || !fallback.data) {
+        setActionError(fallback.error ?? "Failed to confirm sale");
+        setConfirming(false);
+        return false;
+      }
+
+      setLastConfirmCogs(fallback.data.total_cogs);
+      setPostingError(
+        contextResult.error ?? "Accounting posting was skipped.",
+      );
+    } else {
+      const posted = await salesService.confirmSaleAndPostJournals(
+        saleId,
+        contextResult.data,
+      );
+
+      if (posted.error || !posted.data) {
+        setActionError(posted.error ?? "Failed to confirm sale");
+        setConfirming(false);
+        return false;
+      }
+
+      setLastConfirmCogs(posted.data.total_cogs);
+      setPostingError(posted.data.postingError);
     }
-
-    setLastConfirmCogs(confirmResult.data.total_cogs);
 
     const reloadResult = await salesReadService.getSale(saleId);
 
@@ -354,6 +382,7 @@ export function useSale(saleId: string) {
     confirming,
     mutating,
     actionError,
+    postingError,
     lastConfirmCogs,
     cogsSummary,
     cogsLoading,

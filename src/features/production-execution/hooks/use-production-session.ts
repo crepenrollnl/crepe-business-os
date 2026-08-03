@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { accountingContextService } from "@/features/accounting/services/accounting-context-service";
 import { productionSessionService } from "../services/production-session-service";
 import type { ProductionSessionWithRelations } from "../types/production-session";
 import {
@@ -45,6 +46,7 @@ export function useProductionSession(sessionId: string) {
   const [saving, setSaving] = useState(false);
   const [finishing, setFinishing] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [postingError, setPostingError] = useState<string | null>(null);
 
   const applySession = useCallback((next: ProductionSessionWithRelations) => {
     setSession(next);
@@ -194,10 +196,39 @@ export function useProductionSession(sessionId: string) {
 
     setFinishing(true);
     setActionError(null);
+    setPostingError(null);
 
-    const result = await productionSessionService.completeSession(
+    const contextResult =
+      await accountingContextService.getCurrentAccountingContext();
+
+    if (contextResult.error || !contextResult.data) {
+      // Accounting infra not ready (e.g. no open fiscal period) — the
+      // production session must still complete; only the journal is
+      // skipped, surfaced via postingError rather than blocking the
+      // physical completion of production.
+      const fallback = await productionSessionService.completeSession(
+        sessionId,
+        payload,
+      );
+
+      if (fallback.error || !fallback.data) {
+        setActionError(fallback.error ?? "Failed to finish production session");
+        setFinishing(false);
+        return;
+      }
+
+      applySession(fallback.data);
+      setPostingError(
+        contextResult.error ?? "Accounting posting was skipped.",
+      );
+      setFinishing(false);
+      return;
+    }
+
+    const result = await productionSessionService.completeSessionAndPostJournal(
       sessionId,
       payload,
+      contextResult.data,
     );
 
     if (result.error || !result.data) {
@@ -206,7 +237,19 @@ export function useProductionSession(sessionId: string) {
       return;
     }
 
-    applySession(result.data);
+    // Reload: the session snapshot inside result.data is taken before
+    // posting runs, so accounting_posting_status on it is always stale
+    // ("pending") even when posting just succeeded.
+    const reloadResult = await productionSessionService.getSessionById(
+      sessionId,
+    );
+
+    applySession(
+      !reloadResult.error && reloadResult.data
+        ? reloadResult.data
+        : result.data.session,
+    );
+    setPostingError(result.data.postingError);
     setFinishing(false);
   }, [applySession, buildPayload, canFinish, sessionId]);
 
@@ -227,6 +270,7 @@ export function useProductionSession(sessionId: string) {
     saving,
     finishing,
     actionError,
+    postingError,
     onNotesChange,
     onProducedChange,
     saveProgress,
