@@ -1,45 +1,17 @@
+import { formatDate, formatDateTime } from "@/lib/date";
+import { formatMoney } from "@/lib/money";
 import type { SaleStatus } from "../types/sale";
 
 export function formatSaleDate(value: string | null | undefined): string {
-  if (!value) {
-    return "—";
-  }
-
-  const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) {
-    return "—";
-  }
-
-  return date.toLocaleDateString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
+  return formatDate(value);
 }
 
 export function formatSaleDateTime(value: string | null | undefined): string {
-  if (!value) {
-    return "—";
-  }
-
-  const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) {
-    return "—";
-  }
-
-  return date.toLocaleString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  return formatDateTime(value);
 }
 
 export function formatSaleMoney(value: number): string {
-  return `€${value.toFixed(2)}`;
+  return formatMoney(value);
 }
 
 export function formatSaleStatus(status: SaleStatus): string {

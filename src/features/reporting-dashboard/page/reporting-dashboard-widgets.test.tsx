@@ -12,6 +12,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
+import { formatDateTime } from "@/lib/date";
 import type { ReportingWorkspace } from "@/features/reporting-workspace/types/reporting-workspace";
 import type { ReportingOverview } from "@/features/reporting-api/types/reporting-api";
 import { ReportingDashboardComposition } from "../components/reporting-dashboard-composition";
@@ -247,7 +248,9 @@ describe("ReportingDashboardComposition (DEV-078 UI)", () => {
         name: "Reporting dashboards",
       }),
     ).toBeInTheDocument();
-    expect(screen.getByText("2026-07-25T16:00:00.000Z")).toBeInTheDocument();
+    expect(
+      screen.getByText(formatDateTime("2026-07-25T16:00:00.000Z")),
+    ).toBeInTheDocument();
     expect(screen.getByText("Company Health")).toBeInTheDocument();
     expect(screen.getByText("Gross Revenue")).toBeInTheDocument();
     expect(screen.getByText("Ada Admin")).toBeInTheDocument();

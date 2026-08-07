@@ -6,6 +6,7 @@ import {
   formatNumericInput,
   parseNumericInput,
 } from "@/components/ui/numeric-input";
+import { formatMoney } from "@/lib/money";
 import { PurchaseAccountingPreview } from "./purchase-accounting-preview";
 import { purchaseTaxService } from "../services/purchase-tax-service";
 import type {
@@ -783,10 +784,10 @@ function PurchaseDocumentForm({
                             : "—"}
                         </td>
                         <td className="px-3 py-3 text-right align-top text-sm text-zinc-700">
-                          €{(taxLine?.tax_amount ?? 0).toFixed(2)}
+                          {formatMoney(taxLine?.tax_amount ?? 0)}
                         </td>
                         <td className="px-3 py-3 text-right align-top text-sm font-medium text-zinc-900">
-                          €{lineTotal.toFixed(2)}
+                          {formatMoney(lineTotal)}
                         </td>
                         {!isReadOnly && (
                           <td className="px-3 py-3 text-right align-top">
@@ -822,18 +823,18 @@ function PurchaseDocumentForm({
             <p className="text-sm text-zinc-500">
               Subtotal{" "}
               <span className="font-medium text-zinc-800">
-                €{netAmount.toFixed(2)}
+                {formatMoney(netAmount)}
               </span>
             </p>
             <p className="text-sm text-zinc-500">
               Tax total{" "}
               <span className="font-medium text-zinc-800">
-                €{taxTotal.toFixed(2)}
+                {formatMoney(taxTotal)}
               </span>
             </p>
             <p className="text-sm text-zinc-500">Grand total</p>
             <p className="text-2xl font-semibold text-zinc-900">
-              €{grandTotal.toFixed(2)}
+              {formatMoney(grandTotal)}
             </p>
           </div>
         </div>

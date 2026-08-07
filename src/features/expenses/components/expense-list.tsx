@@ -1,3 +1,5 @@
+import { formatDate } from "@/lib/date";
+import { formatMoney } from "@/lib/money";
 import type { ExpenseEntryWithRelations } from "../types/expense";
 
 interface ExpenseListProps {
@@ -36,18 +38,6 @@ function ExpenseListEmptyState() {
   );
 }
 
-function formatDate(isoDate: string): string {
-  return new Date(`${isoDate}T00:00:00`).toLocaleDateString("en-GB", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  });
-}
-
-function formatEuro(value: number): string {
-  return `€${value.toFixed(2)}`;
-}
-
 function ExpenseRow({ expense }: { expense: ExpenseEntryWithRelations }) {
   return (
     <tr className="border-t border-zinc-200">
@@ -63,7 +53,7 @@ function ExpenseRow({ expense }: { expense: ExpenseEntryWithRelations }) {
         {expense.supplier ?? "—"}
       </td>
       <td className="px-4 py-4 text-right text-sm font-medium text-zinc-900">
-        {formatEuro(expense.gross_amount)}
+        {formatMoney(expense.gross_amount)}
       </td>
       <td className="px-4 py-4 text-right text-sm">
         {expense.posting_number ? (

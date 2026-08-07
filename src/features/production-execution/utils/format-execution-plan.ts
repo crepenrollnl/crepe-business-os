@@ -1,3 +1,4 @@
+import { formatDate, formatDateTime } from "@/lib/date";
 import type { ProductionPlanListItem } from "@/features/production/types/production";
 import {
   EXECUTABLE_PLAN_STATUS,
@@ -25,43 +26,13 @@ export function getExecutablePlanStatusBadgeClass(
 }
 
 export function formatExecutionDate(value: string | undefined | null): string {
-  if (!value) {
-    return "—";
-  }
-
-  const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) {
-    return "—";
-  }
-
-  return date.toLocaleDateString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
+  return formatDate(value);
 }
 
 export function formatExecutionDateTime(
   value: string | undefined | null,
 ): string {
-  if (!value) {
-    return "—";
-  }
-
-  const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) {
-    return "—";
-  }
-
-  return date.toLocaleString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  return formatDateTime(value);
 }
 
 /** Prefer shopping-list generation time; fall back to plan update/create. */

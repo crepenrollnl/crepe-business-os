@@ -5,16 +5,14 @@
  * Does not recalculate revenue, profit, or inventory forecasts.
  */
 
+import { formatDateTime } from "@/lib/date";
+import { formatMoney } from "@/lib/money";
 import type { DashboardReadModel } from "../types/dashboard-read-model";
 import type {
   BuildDashboardKpiCardsInput,
   DashboardKpiCard,
   DashboardKpiCardsModel,
 } from "../types/dashboard-kpi-cards";
-
-function formatMoney(value: number): string {
-  return `€${value.toFixed(2)}`;
-}
 
 function formatCount(value: number): string {
   return String(value);
@@ -110,7 +108,7 @@ function buildActiveShiftStatusCard(
     display_value: "Open",
     numeric_value: null,
     availability: "available",
-    detail: `Opened ${shift.opened_at}`,
+    detail: `Opened ${formatDateTime(shift.opened_at)}`,
   };
 }
 

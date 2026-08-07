@@ -48,7 +48,7 @@ describe("SaleProfitSection (DEV-110)", () => {
       />,
     );
 
-    expect(screen.getByTestId("sale-gross-profit")).toHaveTextContent("€-12.00");
+    expect(screen.getByTestId("sale-gross-profit")).toHaveTextContent("-€12.00");
     expect(screen.getByTestId("sale-gross-margin")).toHaveTextContent("—");
   });
 });

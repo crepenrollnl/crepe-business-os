@@ -3,6 +3,7 @@
  */
 
 import { describe, expect, it } from "vitest";
+import { formatDateTime } from "@/lib/date";
 import type { DashboardReadModel } from "../types/dashboard-read-model";
 import {
   buildOperationalDashboard,
@@ -53,7 +54,7 @@ describe("operational-dashboard-builder (DEV-124)", () => {
     const fields = byId(result.data.fields);
     expect(fields.current_shift_status?.display_value).toBe("Open");
     expect(fields.shift_opened_at?.display_value).toBe(
-      "2026-07-27T08:00:00.000Z",
+      formatDateTime("2026-07-27T08:00:00.000Z"),
     );
     expect(fields.sales_today?.availability).toBe("missing");
     expect(fields.net_revenue_today?.availability).toBe("missing");
@@ -91,7 +92,7 @@ describe("operational-dashboard-builder (DEV-124)", () => {
 
     expect(fields.current_shift_status?.display_value).toBe("Closed");
     expect(fields.shift_opened_at?.display_value).toBe(
-      "2026-07-26T08:00:00.000Z",
+      formatDateTime("2026-07-26T08:00:00.000Z"),
     );
     expect(fields.sales_today).toMatchObject({
       display_value: "5",
@@ -209,6 +210,6 @@ describe("operational-dashboard-builder (DEV-124)", () => {
       (field) => field.id === "cash_reconciliation_status",
     );
     expect(cash?.display_value).toBe("Difference");
-    expect(cash?.detail).toMatch(/€-2\.50/);
+    expect(cash?.detail).toMatch(/-€2\.50/);
   });
 });

@@ -1,23 +1,11 @@
+import { formatDate } from "@/lib/date";
+import { formatMoney } from "@/lib/money";
 import type { PurchaseListItem, PurchaseStatus } from "../types/purchase";
 
 type PurchaseRowProps = {
   item: PurchaseListItem;
   onOpen: (item: PurchaseListItem) => void;
 };
-
-function formatDate(value: string): string {
-  const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) {
-    return "—";
-  }
-
-  return date.toLocaleDateString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
-}
 
 function getStatusBadgeClass(status: PurchaseStatus): string {
   if (status === "received") {
@@ -58,7 +46,7 @@ export function PurchaseRow({ item, onOpen }: PurchaseRowProps) {
       </td>
       <td className="px-4 py-4 text-right text-zinc-600">{item.item_count}</td>
       <td className="px-4 py-4 text-right font-medium text-zinc-900">
-        €{item.total.toFixed(2)}
+        {formatMoney(item.total)}
       </td>
       <td className="px-4 py-4 text-right">
         <button

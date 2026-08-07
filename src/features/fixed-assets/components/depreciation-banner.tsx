@@ -1,3 +1,4 @@
+import { formatMoney } from "@/lib/money";
 import { formatDepreciationPeriods } from "../utils/format-depreciation-summary";
 import type { RunDepreciationResult } from "../types/fixed-asset";
 
@@ -17,7 +18,7 @@ export function DepreciationBanner({ result, onDismiss }: DepreciationBannerProp
     >
       <span>
         Depreciation posted for {result.entriesCreated} {entryWord}: {periods},
-        total €{result.totalAmount.toFixed(2)}.
+        total {formatMoney(result.totalAmount)}.
       </span>
       <button
         type="button"

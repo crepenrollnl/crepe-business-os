@@ -5,6 +5,7 @@
  * Never recalculates revenue, profit, cash, or inventory metrics.
  */
 
+import { formatMoney } from "@/lib/money";
 import type { DashboardCompletionModel } from "../types/dashboard-completion";
 import type { DashboardReadModel } from "../types/dashboard-read-model";
 import type { DashboardSnapshotField } from "../types/dashboard-completion";
@@ -12,10 +13,6 @@ import { buildBusinessHealthFromReadModel } from "./business-health-builder";
 import { buildDashboardKpiCardsFromReadModel } from "./dashboard-kpi-cards-builder";
 import { dedupeInformationalMessages } from "./dashboard-resilience";
 import { buildOperationalDashboardFromReadModel } from "./operational-dashboard-builder";
-
-function formatMoney(value: number): string {
-  return `€${value.toFixed(2)}`;
-}
 
 function buildInformationalMessages(
   readModel: DashboardReadModel,

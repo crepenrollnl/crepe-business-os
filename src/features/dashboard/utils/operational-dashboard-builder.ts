@@ -5,6 +5,8 @@
  * Does not recalculate sales, profit, cash, or inventory metrics.
  */
 
+import { formatDateTime } from "@/lib/date";
+import { formatMoney } from "@/lib/money";
 import type { DashboardReadModel } from "../types/dashboard-read-model";
 import type {
   BuildOperationalDashboardInput,
@@ -12,10 +14,6 @@ import type {
   OperationalDashboardModel,
   OperationalShiftContext,
 } from "../types/operational-dashboard";
-
-function formatMoney(value: number): string {
-  return `€${value.toFixed(2)}`;
-}
 
 function formatCount(value: number): string {
   return String(value);
@@ -92,7 +90,7 @@ function buildShiftOpenedAtField(
     return {
       id: "shift_opened_at",
       label: "Shift Opened At",
-      display_value: input.current_shift.opened_at,
+      display_value: formatDateTime(input.current_shift.opened_at),
       numeric_value: null,
       availability: "available",
       detail: null,
@@ -103,7 +101,7 @@ function buildShiftOpenedAtField(
     return {
       id: "shift_opened_at",
       label: "Shift Opened At",
-      display_value: input.latest_closed_shift.opened_at,
+      display_value: formatDateTime(input.latest_closed_shift.opened_at),
       numeric_value: null,
       availability: "available",
       detail: null,

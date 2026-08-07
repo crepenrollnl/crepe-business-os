@@ -78,9 +78,9 @@ describe("FixedAssetList", () => {
     );
 
     expect(screen.getByText("Food truck")).toBeInTheDocument();
-    expect(screen.getByText("€24000.00")).toBeInTheDocument();
-    expect(screen.getByText("€1200.00")).toBeInTheDocument();
-    expect(screen.getByText("€22800.00")).toBeInTheDocument();
+    expect(screen.getByText("€24,000.00")).toBeInTheDocument();
+    expect(screen.getByText("€1,200.00")).toBeInTheDocument();
+    expect(screen.getByText("€22,800.00")).toBeInTheDocument();
   });
 
   it("shows a fully depreciated asset with remaining value 0", () => {

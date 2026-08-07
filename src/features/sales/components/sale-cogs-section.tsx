@@ -1,3 +1,4 @@
+import { formatUnitCost } from "@/lib/money";
 import type { SaleCostSummary } from "../types/sale-cogs";
 import { formatSaleMoney } from "../utils/format-sale";
 
@@ -6,10 +7,6 @@ type SaleCogsSectionProps = {
   loading?: boolean;
   error?: string | null;
 };
-
-function formatUnitCost(value: number): string {
-  return `€${value.toFixed(4)}`;
-}
 
 function formatQuantity(value: number): string {
   return Number.isInteger(value) ? String(value) : value.toFixed(3);

@@ -15,6 +15,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
+import { formatDateTime } from "@/lib/date";
 import type { ReportingWorkspace } from "../types/reporting-workspace";
 import type { ReportingOverview } from "@/features/reporting-api/types/reporting-api";
 
@@ -284,7 +285,7 @@ describe("ReportingWorkspacePage (DEV-076 UI)", () => {
     ).toBeInTheDocument();
     expect(screen.getByText("1.0")).toBeInTheDocument();
     expect(
-      screen.getAllByText("2026-07-25T16:00:00.000Z").length,
+      screen.getAllByText(formatDateTime("2026-07-25T16:00:00.000Z")).length,
     ).toBeGreaterThan(0);
 
     expect(
@@ -323,7 +324,9 @@ describe("ReportingWorkspacePage (DEV-076 UI)", () => {
     expect(screen.getByText("Version")).toBeInTheDocument();
     expect(screen.getByText("1.0")).toBeInTheDocument();
     expect(screen.getByText("Generated")).toBeInTheDocument();
-    expect(screen.getByText("2026-07-25T18:45:00.000Z")).toBeInTheDocument();
+    expect(
+      screen.getByText(formatDateTime("2026-07-25T18:45:00.000Z")),
+    ).toBeInTheDocument();
   });
 
   it("renders navigation catalog rows without recalculation", async () => {
@@ -386,7 +389,7 @@ describe("ReportingWorkspacePage (DEV-076 UI)", () => {
 
     const section = overviewSection as HTMLElement;
     expect(
-      within(section).getByText("2026-07-25T16:00:00.000Z"),
+      within(section).getByText(formatDateTime("2026-07-25T16:00:00.000Z")),
     ).toBeInTheDocument();
     expect(within(section).getByText("kpi")).toBeInTheDocument();
     expect(within(section).getByText("KPI Dashboard")).toBeInTheDocument();

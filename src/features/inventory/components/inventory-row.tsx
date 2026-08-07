@@ -1,3 +1,5 @@
+import { formatDate } from "@/lib/date";
+import { formatMoney } from "@/lib/money";
 import type { PurchasingReviewRow } from "../types/purchasing-review";
 import type { IngredientWithRelations } from "../types/inventory";
 
@@ -75,30 +77,6 @@ function formatDaysRemaining(value: number | null | undefined): string {
     return "—";
   }
   return value.toFixed(1);
-}
-
-function formatPurchaseDate(value: string | null | undefined): string {
-  if (!value) {
-    return "—";
-  }
-
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return "—";
-  }
-
-  return date.toLocaleDateString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
-}
-
-function formatPurchasePrice(value: number | null | undefined): string {
-  if (value === null || value === undefined) {
-    return "—";
-  }
-  return `€${value.toFixed(2)}`;
 }
 
 function ForecastStatusLabel({
@@ -305,13 +283,15 @@ export function InventoryRow({
         className="px-4 py-4 text-right text-zinc-600"
         data-testid="last-purchase-price"
       >
-        {formatPurchasePrice(review?.last_purchase_price)}
+        {review?.last_purchase_price == null
+          ? "—"
+          : formatMoney(review.last_purchase_price)}
       </td>
       <td
         className="px-4 py-4 text-zinc-600"
         data-testid="last-purchase-date"
       >
-        {formatPurchaseDate(review?.last_purchase_date)}
+        {formatDate(review?.last_purchase_date)}
       </td>
       <td
         className="px-4 py-4 text-right text-zinc-600"
@@ -321,7 +301,7 @@ export function InventoryRow({
       </td>
       <td className="px-4 py-4 text-right text-zinc-600">{item.minimum_stock}</td>
       <td className="px-4 py-4 text-right font-medium text-zinc-900">
-        €{item.cost_per_unit.toFixed(2)}
+        {formatMoney(item.cost_per_unit)}
       </td>
       <td className="px-4 py-4 text-right">
         <div className="inline-flex items-center gap-2">

@@ -1,3 +1,4 @@
+import { formatDateTime } from "@/lib/date";
 import type { ReportingOverview } from "@/features/reporting-api/types/reporting-api";
 
 type ReportingWorkspaceOverviewProps = {
@@ -33,7 +34,7 @@ export function ReportingWorkspaceOverview({
         <p className="mt-1 text-sm text-zinc-600">
           Overview generated at{" "}
           <span className="tabular-nums text-zinc-800">
-            {overview.generated_at}
+            {formatDateTime(overview.generated_at)}
           </span>
           .
         </p>

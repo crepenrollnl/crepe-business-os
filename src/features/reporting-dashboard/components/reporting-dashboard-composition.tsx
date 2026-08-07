@@ -1,4 +1,5 @@
 import { memo } from "react";
+import { formatDateTime } from "@/lib/date";
 import type { ReportingOverview } from "@/features/reporting-api/types/reporting-api";
 import { ReportingDashboardDataBinding } from "./reporting-dashboard-data-binding";
 import { isSameOverviewProps } from "./reporting-dashboard-overview-equality";
@@ -32,7 +33,7 @@ export const ReportingDashboardComposition = memo(
               className={GENERATED_AT_TIME_CLASS_NAME}
               dateTime={overview.generated_at}
             >
-              {overview.generated_at}
+              {formatDateTime(overview.generated_at)}
             </time>
             .
           </>

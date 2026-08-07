@@ -2,6 +2,7 @@
 
 import { useState, type FormEvent } from "react";
 import { NumericInput, parseNumericInput } from "@/components/ui/numeric-input";
+import { formatMoney } from "@/lib/money";
 import { calculateExpenseBreakdown } from "../utils/calculate-expense-breakdown";
 import {
   EXPENSE_VAT_RATE_OPTIONS,
@@ -67,10 +68,6 @@ function draftToInput(draft: ExpenseFormDraft): RecordExpenseInput {
     description: draft.description.trim(),
     supplier: draft.supplier.trim() || null,
   };
-}
-
-function formatEuro(value: number): string {
-  return `€${value.toFixed(2)}`;
 }
 
 interface ExpenseFormProps {
@@ -256,8 +253,8 @@ export function ExpenseForm({
         </div>
 
         <div className="rounded-lg bg-zinc-50 px-4 py-3 text-sm text-zinc-600">
-          Net {formatEuro(breakdown.netAmount)} · VAT {formatEuro(breakdown.vatAmount)}{" "}
-          · Gross {formatEuro(breakdown.grossAmount)}
+          Net {formatMoney(breakdown.netAmount)} · VAT {formatMoney(breakdown.vatAmount)}{" "}
+          · Gross {formatMoney(breakdown.grossAmount)}
         </div>
 
         <div className="space-y-2">

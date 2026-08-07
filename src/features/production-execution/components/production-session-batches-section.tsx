@@ -1,3 +1,4 @@
+import { formatMoney, formatUnitCost } from "@/lib/money";
 import type { ProductionBatchWithProduct } from "../types/production-batch";
 import type { ProductionAccountingPostingStatus } from "../types/production-session";
 import { formatExecutionDateTime } from "../utils/format-execution-plan";
@@ -9,14 +10,6 @@ type ProductionSessionBatchesSectionProps = {
   /** Session-level accounting journal status (DEV-106). */
   accountingPostingStatus?: ProductionAccountingPostingStatus;
 };
-
-function formatMoney(value: number): string {
-  return `€${value.toFixed(2)}`;
-}
-
-function formatUnitCost(value: number): string {
-  return `€${value.toFixed(4)}`;
-}
 
 function formatQuantity(value: number, unit: string): string {
   const qty = Number.isInteger(value) ? String(value) : value.toFixed(3);

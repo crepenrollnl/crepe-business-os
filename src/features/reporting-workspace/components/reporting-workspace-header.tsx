@@ -1,3 +1,5 @@
+import { formatDateTime } from "@/lib/date";
+
 type ReportingWorkspaceHeaderProps = {
   title: string;
   reportingVersion: string;
@@ -30,7 +32,7 @@ export function ReportingWorkspaceHeader({
           </div>
           <div>
             <dt className="inline font-medium text-zinc-900">Generated </dt>
-            <dd className="inline tabular-nums">{generatedAt ?? "-"}</dd>
+            <dd className="inline tabular-nums">{formatDateTime(generatedAt)}</dd>
           </div>
         </dl>
       </div>

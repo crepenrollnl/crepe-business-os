@@ -7,6 +7,7 @@
 import { cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import "@testing-library/jest-dom/vitest";
+import { formatDateTime } from "@/lib/date";
 import type { SaleCostSummary } from "../types/sale-cogs";
 import type { SaleProfitSummary } from "../types/sale-profit";
 import type { SaleDetail } from "../types/sale";
@@ -112,16 +113,7 @@ describe("SaleReviewSection (DEV-111)", () => {
       "✓ Posted",
     );
 
-    const expectedDate = new Date("2026-07-26T14:30:00.000Z").toLocaleString(
-      undefined,
-      {
-        year: "numeric",
-        month: "short",
-        day: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-      },
-    );
+    const expectedDate = formatDateTime("2026-07-26T14:30:00.000Z");
     expect(screen.getByTestId("review-completion-date")).toHaveTextContent(
       expectedDate,
     );

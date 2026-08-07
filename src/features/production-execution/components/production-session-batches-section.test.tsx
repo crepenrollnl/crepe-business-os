@@ -7,6 +7,7 @@
 import { cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import "@testing-library/jest-dom/vitest";
+import { formatDateTime } from "@/lib/date";
 import { ProductionSessionBatchesSection } from "./production-session-batches-section";
 import type { ProductionBatchWithProduct } from "../types/production-batch";
 
@@ -191,16 +192,7 @@ describe("ProductionSessionBatchesSection (DEV-106)", () => {
       />,
     );
 
-    const expected = new Date("2026-07-26T14:30:00.000Z").toLocaleString(
-      undefined,
-      {
-        year: "numeric",
-        month: "short",
-        day: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-      },
-    );
+    const expected = formatDateTime("2026-07-26T14:30:00.000Z");
 
     expect(screen.getByTestId("production-completion-date")).toHaveTextContent(
       expected,

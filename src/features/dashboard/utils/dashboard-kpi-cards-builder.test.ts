@@ -3,6 +3,7 @@
  */
 
 import { describe, expect, it } from "vitest";
+import { formatDateTime } from "@/lib/date";
 import type { DashboardReadModel } from "../types/dashboard-read-model";
 import {
   buildDashboardKpiCards,
@@ -107,7 +108,7 @@ describe("dashboard-kpi-cards-builder (DEV-123)", () => {
     expect(shiftCard).toMatchObject({
       display_value: "Open",
       availability: "available",
-      detail: "Opened 2026-07-27T08:00:00.000Z",
+      detail: `Opened ${formatDateTime("2026-07-27T08:00:00.000Z")}`,
     });
   });
 

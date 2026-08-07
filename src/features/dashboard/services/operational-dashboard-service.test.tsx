@@ -5,6 +5,7 @@
 import React from "react";
 import { describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
+import { formatDateTime } from "@/lib/date";
 import { OperationalDashboardSection } from "../components/operational-dashboard-section";
 
 const { supabaseMock } = vi.hoisted(() => {
@@ -173,7 +174,7 @@ describe("OperationalDashboardSection rendering (DEV-124)", () => {
 
     expect(html).toContain("Shift Context");
     expect(html).toContain("Open");
-    expect(html).toContain("2026-07-27T08:00:00.000Z");
+    expect(html).toContain(formatDateTime("2026-07-27T08:00:00.000Z"));
     expect(html).not.toContain("Cash Reconciliation Status");
   });
 });

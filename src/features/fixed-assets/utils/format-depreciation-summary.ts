@@ -1,3 +1,4 @@
+import { formatMonthYear } from "@/lib/date";
 import type { DepreciationRunDetail } from "../types/fixed-asset";
 
 /**
@@ -11,12 +12,5 @@ export function formatDepreciationPeriods(
 ): string {
   const uniquePeriods = [...new Set(details.map((detail) => detail.period))].sort();
 
-  return uniquePeriods
-    .map((period) =>
-      new Date(`${period}T00:00:00`).toLocaleDateString("en-GB", {
-        month: "short",
-        year: "numeric",
-      }),
-    )
-    .join(", ");
+  return uniquePeriods.map((period) => formatMonthYear(period)).join(", ");
 }

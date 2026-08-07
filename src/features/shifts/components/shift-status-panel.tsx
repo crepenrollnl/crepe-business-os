@@ -1,6 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import { formatDateTime } from "@/lib/date";
+import { formatMoney } from "@/lib/money";
 import type { CashReconciliation } from "../types/cash-reconciliation";
 import type { DailyProfitSummary } from "../types/daily-profit-summary";
 import type { DailySalesSummary } from "../types/daily-sales-summary";
@@ -22,29 +24,6 @@ type ShiftStatusPanelProps = {
   onReconcileCash?: (countedCash: number) => void;
   onRetry?: () => void;
 };
-
-function formatDateTime(value: string | null | undefined): string {
-  if (!value) {
-    return "—";
-  }
-
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return "—";
-  }
-
-  return date.toLocaleString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
-function formatMoney(value: number): string {
-  return `€${value.toFixed(2)}`;
-}
 
 function formatMarginPercent(value: number | null): string {
   if (value === null) {

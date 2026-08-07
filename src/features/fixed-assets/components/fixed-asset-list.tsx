@@ -1,3 +1,5 @@
+import { formatDate } from "@/lib/date";
+import { formatMoney } from "@/lib/money";
 import type { FixedAssetWithDepreciation } from "../types/fixed-asset";
 
 interface FixedAssetListProps {
@@ -36,18 +38,6 @@ function FixedAssetListEmptyState() {
   );
 }
 
-function formatDate(isoDate: string): string {
-  return new Date(`${isoDate}T00:00:00`).toLocaleDateString("en-GB", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  });
-}
-
-function formatEuro(value: number): string {
-  return `€${value.toFixed(2)}`;
-}
-
 function FixedAssetRow({ asset }: { asset: FixedAssetWithDepreciation }) {
   return (
     <tr className="border-t border-zinc-200">
@@ -56,13 +46,13 @@ function FixedAssetRow({ asset }: { asset: FixedAssetWithDepreciation }) {
         {formatDate(asset.purchase_date)}
       </td>
       <td className="px-4 py-4 text-right text-sm text-zinc-700">
-        {formatEuro(asset.cost)}
+        {formatMoney(asset.cost)}
       </td>
       <td className="px-4 py-4 text-right text-sm text-zinc-700">
-        {formatEuro(asset.depreciated_amount)}
+        {formatMoney(asset.depreciated_amount)}
       </td>
       <td className="px-4 py-4 text-right text-sm font-medium text-zinc-900">
-        {formatEuro(asset.remaining_value)}
+        {formatMoney(asset.remaining_value)}
       </td>
     </tr>
   );

@@ -5,6 +5,7 @@
  * Never recalculates financial values in the UI.
  */
 
+import { formatUnitCost } from "@/lib/money";
 import type { SaleAccountingPostingStatus } from "../types/sale-accounting";
 import type { SaleCostSummary } from "../types/sale-cogs";
 import type { SaleProfitSummary } from "../types/sale-profit";
@@ -35,10 +36,6 @@ function formatPostingStatus(
   status: SaleAccountingPostingStatus | undefined,
 ): string {
   return status === "posted" ? "✓ Posted" : "Pending";
-}
-
-function formatUnitCost(value: number): string {
-  return `€${value.toFixed(4)}`;
 }
 
 function formatQuantity(value: number): string {

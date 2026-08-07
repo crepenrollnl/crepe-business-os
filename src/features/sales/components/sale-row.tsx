@@ -1,27 +1,11 @@
+import { formatDate } from "@/lib/date";
+import { formatMoney } from "@/lib/money";
 import type { SaleListItem, SaleStatus } from "../types/sale";
 
 type SaleRowProps = {
   item: SaleListItem;
   onOpen: (item: SaleListItem) => void;
 };
-
-function formatDate(value: string): string {
-  const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) {
-    return "—";
-  }
-
-  return date.toLocaleDateString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
-}
-
-function formatMoney(value: number): string {
-  return `€${value.toFixed(2)}`;
-}
 
 function getStatusBadgeClass(status: SaleStatus): string {
   if (status === "confirmed" || status === "paid") {

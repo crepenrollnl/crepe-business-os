@@ -217,7 +217,7 @@ describe("ShiftStatusPanel Close Day Review (DEV-116)", () => {
       />,
     );
 
-    expect(screen.getByTestId("cash-difference")).toHaveTextContent("€-10.00");
+    expect(screen.getByTestId("cash-difference")).toHaveTextContent("-€10.00");
     expect(screen.getByTestId("cash-reconciliation-status")).toHaveTextContent(
       "Difference",
     );
