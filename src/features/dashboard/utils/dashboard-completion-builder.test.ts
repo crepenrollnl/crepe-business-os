@@ -1,5 +1,5 @@
 /**
- * Pure builder coverage for Dashboard Completion (DEV-126).
+ * Pure builder coverage for Dashboard Completion (Dashboard redesign — 3 blocks).
  */
 
 import { describe, expect, it } from "vitest";
@@ -105,25 +105,15 @@ function fullClosedReadModel(): DashboardReadModel {
   });
 }
 
-describe("dashboard-completion-builder (DEV-126)", () => {
+describe("dashboard-completion-builder", () => {
   it("builds a full dashboard completion view", () => {
     const result = buildDashboardCompletion(fullClosedReadModel());
 
     expect(result.error).toBeNull();
-    expect(result.data?.kpi_cards).toHaveLength(4);
-    expect(result.data?.operational.shift_context).toBe("closed");
-    expect(result.data?.business_health.overall_level).toBe("critical");
+    expect(result.data?.money_today.source).toBe("closed_shift_summary");
+    expect(result.data?.money_today.revenue.display_value).toBe("€120.00");
+    expect(result.data?.money_today.profit.display_value).toBe("€60.00");
     expect(result.data?.low_stock_alerts).toHaveLength(1);
-
-    const snapshot = Object.fromEntries(
-      (result.data?.daily_snapshot.fields ?? []).map((field) => [
-        field.id,
-        field,
-      ]),
-    );
-    expect(snapshot.daily_revenue?.display_value).toBe("€120.00");
-    expect(snapshot.daily_profit?.display_value).toBe("€60.00");
-    expect(snapshot.cash_status?.display_value).toBe("Balanced");
     expect(result.data?.informational_messages).toEqual([]);
   });
 
@@ -131,7 +121,7 @@ describe("dashboard-completion-builder (DEV-126)", () => {
     const result = buildDashboardCompletion(emptyReadModel());
 
     expect(result.error).toBeNull();
-    expect(result.data?.operational.shift_context).toBe("none");
+    expect(result.data?.money_today.source).toBe("unavailable");
     expect(result.data?.low_stock_alerts).toBeNull();
     // Shift / inventory ownership is not duplicated in dashboard info.
     expect(result.data?.informational_messages.join(" ")).not.toMatch(
@@ -161,19 +151,10 @@ describe("dashboard-completion-builder (DEV-126)", () => {
       }),
     );
 
-    expect(result.data?.operational.shift_context).toBe("open");
-    expect(result.data?.business_health.overall_level).toBe("healthy");
+    expect(result.data?.money_today.source).toBe("pending");
+    expect(result.data?.money_today.revenue.availability).toBe("missing");
+    expect(result.data?.money_today.profit.availability).toBe("missing");
     expect(result.data?.low_stock_alerts).toEqual([]);
-
-    const snapshot = Object.fromEntries(
-      (result.data?.daily_snapshot.fields ?? []).map((field) => [
-        field.id,
-        field,
-      ]),
-    );
-    expect(snapshot.daily_revenue?.availability).toBe("missing");
-    expect(snapshot.daily_profit?.availability).toBe("missing");
-    expect(snapshot.cash_status?.availability).toBe("not_applicable");
     expect(result.data?.informational_messages.join(" ")).toMatch(
       /overview metrics/i,
     );
@@ -199,6 +180,9 @@ describe("dashboard-completion-builder (DEV-126)", () => {
     expect(messages.join(" ")).toMatch(/daily close summaries/i);
     expect(messages.join(" ")).toMatch(/overview metrics/i);
     expect(messages.join(" ")).not.toMatch(/Foundation KPI row/i);
+
+    // Money Today reflects the same "figures pending" gap.
+    expect(result.data?.money_today.source).toBe("pending");
   });
 
   it("asserts historical consistency for identical read models", () => {

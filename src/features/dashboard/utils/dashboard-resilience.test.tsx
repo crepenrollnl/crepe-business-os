@@ -53,9 +53,8 @@ describe("dashboard-resilience (DEV-126.1)", () => {
     const result = buildDashboardCompletion(shell);
 
     expect(result.error).toBeNull();
-    expect(result.data?.kpi_cards.length).toBe(4);
-    expect(result.data?.operational).toBeTruthy();
-    expect(result.data?.business_health).toBeTruthy();
+    expect(result.data?.money_today).toBeTruthy();
+    expect(result.data?.money_today.source).toBe("unavailable");
     expect(result.data?.low_stock_alerts).toBeNull();
     // No duplicated shift/inventory ownership copy in dashboard info.
     expect(result.data?.informational_messages.join(" ")).not.toMatch(

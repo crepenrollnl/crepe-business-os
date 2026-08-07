@@ -4,8 +4,6 @@ import { useState } from "react";
 import { formatDateTime } from "@/lib/date";
 import { formatMoney } from "@/lib/money";
 import type { CashReconciliation } from "../types/cash-reconciliation";
-import type { DailyProfitSummary } from "../types/daily-profit-summary";
-import type { DailySalesSummary } from "../types/daily-sales-summary";
 import type { Shift } from "../types/shift";
 import { getCashReconciliationStatus } from "../utils/cash-reconciliation";
 
@@ -13,8 +11,6 @@ type ShiftStatusPanelProps = {
   activeShift: Shift | null;
   closedShift?: Shift | null;
   reconciliation?: CashReconciliation | null;
-  dailySalesSummary?: DailySalesSummary | null;
-  dailyProfitSummary?: DailyProfitSummary | null;
   loading?: boolean;
   mutating?: boolean;
   error?: string | null;
@@ -24,20 +20,6 @@ type ShiftStatusPanelProps = {
   onReconcileCash?: (countedCash: number) => void;
   onRetry?: () => void;
 };
-
-function formatMarginPercent(value: number | null): string {
-  if (value === null) {
-    return "—";
-  }
-  return `${value.toFixed(2)}%`;
-}
-
-function formatItemsSold(value: number): string {
-  if (Number.isInteger(value)) {
-    return String(value);
-  }
-  return value.toFixed(3).replace(/\.?0+$/, "");
-}
 
 function formatCashStatus(difference: number): string {
   return getCashReconciliationStatus(difference) === "balanced"
@@ -71,8 +53,6 @@ export function ShiftStatusPanel({
   activeShift,
   closedShift = null,
   reconciliation = null,
-  dailySalesSummary = null,
-  dailyProfitSummary = null,
   loading = false,
   mutating = false,
   error = null,
@@ -85,7 +65,11 @@ export function ShiftStatusPanel({
   const [countedCashInput, setCountedCashInput] = useState("");
   const isOpen = Boolean(activeShift);
   const reviewedShift = activeShift ?? closedShift;
-  const statusLabel = isOpen ? "OPEN" : reviewedShift ? "CLOSED" : "CLOSED";
+  const statusLabel = isOpen
+    ? "OPEN"
+    : reviewedShift
+      ? "CLOSED"
+      : "NEVER OPENED";
   const showClosedReview = !isOpen && Boolean(closedShift);
   const cashStatus = reconciliation
     ? formatCashStatus(reconciliation.difference)
@@ -201,88 +185,6 @@ export function ShiftStatusPanel({
             Immutable stored values only. Missing summaries are shown as
             informational states and are never recalculated here.
           </p>
-
-          <div
-            className="mt-6"
-            data-testid="daily-sales-summary-section"
-          >
-            <h5 className="text-sm font-semibold text-zinc-800">
-              Daily Sales Summary
-            </h5>
-            {dailySalesSummary ? (
-              <dl className="mt-3 grid gap-3 text-sm text-zinc-700 sm:grid-cols-2 lg:grid-cols-4">
-                <ReviewField
-                  label="Sales Count"
-                  value={String(dailySalesSummary.sales_count)}
-                  testId="sales-count"
-                />
-                <ReviewField
-                  label="Items Sold"
-                  value={formatItemsSold(dailySalesSummary.items_sold)}
-                  testId="items-sold"
-                />
-                <ReviewField
-                  label="Gross Revenue"
-                  value={formatMoney(dailySalesSummary.gross_revenue)}
-                  testId="gross-revenue"
-                />
-                <ReviewField
-                  label="Net Revenue"
-                  value={formatMoney(dailySalesSummary.net_revenue)}
-                  testId="net-revenue"
-                />
-              </dl>
-            ) : (
-              <p
-                className="mt-3 text-sm text-zinc-500"
-                data-testid="missing-sales-summary"
-              >
-                Daily sales summary is not available for this shift.
-              </p>
-            )}
-          </div>
-
-          <div
-            className="mt-6"
-            data-testid="daily-profit-summary-section"
-          >
-            <h5 className="text-sm font-semibold text-zinc-800">
-              Daily Profit Summary
-            </h5>
-            {dailyProfitSummary ? (
-              <dl className="mt-3 grid gap-3 text-sm text-zinc-700 sm:grid-cols-2 lg:grid-cols-4">
-                <ReviewField
-                  label="Net Revenue"
-                  value={formatMoney(dailyProfitSummary.net_revenue)}
-                  testId="profit-net-revenue"
-                />
-                <ReviewField
-                  label="Total COGS"
-                  value={formatMoney(dailyProfitSummary.total_cogs)}
-                  testId="profit-total-cogs"
-                />
-                <ReviewField
-                  label="Gross Profit"
-                  value={formatMoney(dailyProfitSummary.gross_profit)}
-                  testId="profit-gross-profit"
-                />
-                <ReviewField
-                  label="Gross Margin %"
-                  value={formatMarginPercent(
-                    dailyProfitSummary.gross_margin_percent,
-                  )}
-                  testId="profit-gross-margin"
-                />
-              </dl>
-            ) : (
-              <p
-                className="mt-3 text-sm text-zinc-500"
-                data-testid="missing-profit-summary"
-              >
-                Daily profit summary is not available for this shift.
-              </p>
-            )}
-          </div>
 
           <div
             className="mt-6"

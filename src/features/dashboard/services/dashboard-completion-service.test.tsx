@@ -1,13 +1,12 @@
 /**
- * Service + section rendering coverage for Dashboard Completion (DEV-126).
+ * Service + section rendering coverage for Dashboard Completion
+ * (Dashboard redesign — 3 blocks).
  */
 
 import React from "react";
 import { describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
-import { BusinessHealthPanel } from "../components/business-health-panel";
-import { DashboardKpiCards } from "../components/dashboard-kpi-cards";
-import { OperationalDashboardSection } from "../components/operational-dashboard-section";
+import { DashboardMoneyTodaySection } from "../components/dashboard-money-today-section";
 
 const { supabaseMock } = vi.hoisted(() => {
   const supabaseMock = {
@@ -51,7 +50,7 @@ function readModel(
   };
 }
 
-describe("dashboardCompletionService (DEV-126)", () => {
+describe("dashboardCompletionService", () => {
   it("composes a full dashboard from the read model", () => {
     const result = dashboardCompletionService.buildFromReadModel(
       readModel({
@@ -99,14 +98,9 @@ describe("dashboardCompletionService (DEV-126)", () => {
     );
 
     expect(result.error).toBeNull();
-    expect(result.data?.kpi_cards.length).toBe(4);
-    expect(result.data?.operational).toBeTruthy();
-    expect(result.data?.business_health.overall_level).toBe("critical");
-    expect(
-      result.data?.daily_snapshot.fields.find(
-        (field) => field.id === "daily_revenue",
-      )?.display_value,
-    ).toBe("€90.00");
+    expect(result.data?.money_today.source).toBe("closed_shift_summary");
+    expect(result.data?.money_today.revenue.display_value).toBe("€90.00");
+    expect(result.data?.money_today.profit.display_value).toBe("€45.00");
   });
 
   it("loads through dashboard read model only", async () => {
@@ -118,13 +112,13 @@ describe("dashboardCompletionService (DEV-126)", () => {
     const result = await dashboardCompletionService.getDashboardCompletion();
 
     expect(result.error).toBeNull();
-    expect(result.data?.operational.shift_context).toBe("none");
+    expect(result.data?.money_today.source).toBe("unavailable");
     expect(dashboardService.getDashboardReadModel).toHaveBeenCalledTimes(1);
   });
 });
 
-describe("Dashboard completion section rendering (DEV-126)", () => {
-  it("renders KPI, operational, and business health sections", () => {
+describe("Dashboard completion section rendering", () => {
+  it("renders the Money Today section from the composed model", () => {
     const built = dashboardCompletionService.buildFromReadModel(
       readModel({
         current_shift: {
@@ -140,21 +134,11 @@ describe("Dashboard completion section rendering (DEV-126)", () => {
     );
 
     const model = built.data!;
-    const kpiHtml = renderToStaticMarkup(
-      <DashboardKpiCards cards={model.kpi_cards} />,
-    );
-    const operationalHtml = renderToStaticMarkup(
-      <OperationalDashboardSection model={model.operational} />,
-    );
-    const healthHtml = renderToStaticMarkup(
-      <BusinessHealthPanel model={model.business_health} />,
+    const moneyTodayHtml = renderToStaticMarkup(
+      <DashboardMoneyTodaySection model={model.money_today} />,
     );
 
-    expect(kpiHtml).toContain("dashboard-kpi-cards");
-    expect(kpiHtml).toContain("Active Shift Status");
-    expect(operationalHtml).toContain("Shift Context");
-    expect(operationalHtml).toContain("Open");
-    expect(healthHtml).toContain("Business Health");
-    expect(healthHtml).toContain("Healthy");
+    expect(moneyTodayHtml).toContain("dashboard-money-today");
+    expect(moneyTodayHtml).toContain("Shift not closed yet");
   });
 });

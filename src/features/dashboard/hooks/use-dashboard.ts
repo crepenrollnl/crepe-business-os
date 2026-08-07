@@ -6,24 +6,19 @@ import { dailyProfitSummaryService } from "@/features/shifts/services/daily-prof
 import { dailySalesSummaryService } from "@/features/shifts/services/daily-sales-summary-service";
 import { shiftService } from "@/features/shifts/services/shift-service";
 import type { CashReconciliation } from "@/features/shifts/types/cash-reconciliation";
-import type { DailyProfitSummary } from "@/features/shifts/types/daily-profit-summary";
-import type { DailySalesSummary } from "@/features/shifts/types/daily-sales-summary";
 import type { Shift } from "@/features/shifts/types/shift";
 import type { LowStockAlert } from "@/features/inventory/types/low-stock-alert";
 import { dashboardCompletionService } from "../services/dashboard-completion-service";
 import { dashboardService } from "../services/dashboard-service";
-import type { BusinessHealthModel } from "../types/business-health";
-import type { DashboardKpiCard } from "../types/dashboard-kpi-cards";
-import type { DashboardSnapshotField } from "../types/dashboard-completion";
+import type { MoneyTodayModel } from "../types/dashboard-completion";
 import type { DashboardSummary } from "../types/dashboard";
-import type { OperationalDashboardModel } from "../types/operational-dashboard";
 import {
   classifyDashboardLoadFailure,
   createUnavailableModulesReadModel,
 } from "../utils/dashboard-resilience";
 
 /**
- * Dashboard UI orchestration (DEV-043 … DEV-126.1).
+ * Dashboard UI orchestration (DEV-043 … Dashboard redesign 3-block).
  *
  * Reads via dashboardService.getDashboardReadModel.
  * Module-owned failures stay isolated; global fatal only when the read model
@@ -31,14 +26,7 @@ import {
  */
 export function useDashboard() {
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
-  const [kpiCards, setKpiCards] = useState<DashboardKpiCard[]>([]);
-  const [operationalDashboard, setOperationalDashboard] =
-    useState<OperationalDashboardModel | null>(null);
-  const [businessHealth, setBusinessHealth] =
-    useState<BusinessHealthModel | null>(null);
-  const [dailySnapshotFields, setDailySnapshotFields] = useState<
-    DashboardSnapshotField[]
-  >([]);
+  const [moneyToday, setMoneyToday] = useState<MoneyTodayModel | null>(null);
   const [informationalMessages, setInformationalMessages] = useState<string[]>(
     [],
   );
@@ -46,10 +34,6 @@ export function useDashboard() {
   const [closedShift, setClosedShift] = useState<Shift | null>(null);
   const [reconciliation, setReconciliation] =
     useState<CashReconciliation | null>(null);
-  const [dailySalesSummary, setDailySalesSummary] =
-    useState<DailySalesSummary | null>(null);
-  const [dailyProfitSummary, setDailyProfitSummary] =
-    useState<DailyProfitSummary | null>(null);
   const [lowStockAlerts, setLowStockAlerts] = useState<LowStockAlert[] | null>(
     null,
   );
@@ -63,16 +47,11 @@ export function useDashboard() {
 
   const clearDashboardState = useCallback(() => {
     setSummary(null);
-    setKpiCards([]);
-    setOperationalDashboard(null);
-    setBusinessHealth(null);
-    setDailySnapshotFields([]);
+    setMoneyToday(null);
     setInformationalMessages([]);
     setActiveShift(null);
     setClosedShift(null);
     setReconciliation(null);
-    setDailySalesSummary(null);
-    setDailyProfitSummary(null);
     setLowStockAlerts(null);
   }, []);
 
@@ -93,8 +72,6 @@ export function useDashboard() {
         setActiveShift(model.current_shift);
         setClosedShift(model.latest_closed_shift);
         setReconciliation(model.cash_reconciliation);
-        setDailySalesSummary(model.daily_sales_summary);
-        setDailyProfitSummary(model.daily_profit_summary);
         setLowStockAlerts(model.low_stock_alerts);
         setSummary(model.kpi_summary);
         return;
@@ -105,13 +82,8 @@ export function useDashboard() {
       setActiveShift(completion.read_model.current_shift);
       setClosedShift(completion.read_model.latest_closed_shift);
       setReconciliation(completion.read_model.cash_reconciliation);
-      setDailySalesSummary(completion.read_model.daily_sales_summary);
-      setDailyProfitSummary(completion.read_model.daily_profit_summary);
       setLowStockAlerts(completion.low_stock_alerts);
-      setKpiCards(completion.kpi_cards);
-      setOperationalDashboard(completion.operational);
-      setBusinessHealth(completion.business_health);
-      setDailySnapshotFields(completion.daily_snapshot.fields);
+      setMoneyToday(completion.money_today);
       setInformationalMessages(completion.informational_messages);
     },
     [clearDashboardState],
@@ -254,16 +226,11 @@ export function useDashboard() {
 
   return {
     summary,
-    kpiCards,
-    operationalDashboard,
-    businessHealth,
-    dailySnapshotFields,
+    moneyToday,
     informationalMessages,
     activeShift,
     closedShift,
     reconciliation,
-    dailySalesSummary,
-    dailyProfitSummary,
     lowStockAlerts,
     loading,
     mutating,
