@@ -430,6 +430,21 @@ function mapConfirmSaleRpcError(message: string): string | null {
     return "Product was not found.";
   }
 
+  // Assembly line fulfillment failure (sql/085): names the specific missing
+  // component and the dish being assembled. Must be checked before the
+  // generic "insufficient finished goods stock" case below — this message
+  // also contains that substring (it wraps the underlying allocation
+  // failure via SQLERRM), so the generic check would otherwise shadow it
+  // and discard the component name.
+  const assemblyComponentMatch = message.match(
+    /failed to allocate component "([^"]+)" while assembling "([^"]+)"/i,
+  );
+
+  if (assemblyComponentMatch) {
+    const [, componentName, dishName] = assemblyComponentMatch;
+    return `Not enough "${componentName}" in stock to assemble "${dishName}".`;
+  }
+
   if (normalized.includes("insufficient finished goods stock")) {
     return "Not enough finished goods in stock.";
   }

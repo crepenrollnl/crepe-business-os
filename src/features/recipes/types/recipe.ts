@@ -29,6 +29,19 @@ export interface RecipeIngredientOption {
   unit: string;
 }
 
+/**
+ * A recipe is either a pre-produced sub-component (dough, filling, sauce)
+ * or an assembly sold to the customer and built from components at sale
+ * time. See docs/BATCH_CONSUMPTION.md / Critical Finding #4.
+ */
+export const RECIPE_ROLES = ["component", "assembly"] as const;
+export type RecipeRole = (typeof RECIPE_ROLES)[number];
+export const DEFAULT_RECIPE_ROLE: RecipeRole = "assembly";
+
+export function isRecipeRole(value: string): value is RecipeRole {
+  return (RECIPE_ROLES as readonly string[]).includes(value);
+}
+
 export interface Recipe {
   id: string;
   name: string;
@@ -36,6 +49,7 @@ export interface Recipe {
   yield_quantity: number;
   yield_unit: string;
   is_active: boolean;
+  recipe_role: RecipeRole;
   created_at: string;
   updated_at?: string;
 }
@@ -52,8 +66,28 @@ export interface RecipeItemWithRelations extends RecipeItem {
   ingredient: RecipeIngredientOption | null;
 }
 
+/** A recipe eligible to be picked as a component in an assembly's BOM. */
+export interface ComponentRecipeOption {
+  id: string;
+  name: string;
+  yield_unit: string;
+}
+
+/** recipe_components has no id column of its own — composite PK. */
+export interface RecipeComponent {
+  assembly_recipe_id: string;
+  component_recipe_id: string;
+  quantity: number;
+  unit: string;
+}
+
+export interface RecipeComponentWithRelations extends RecipeComponent {
+  component: ComponentRecipeOption | null;
+}
+
 export interface RecipeWithRelations extends Recipe {
   items: RecipeItemWithRelations[];
+  components: RecipeComponentWithRelations[];
 }
 
 export interface RecipeListItem extends Recipe {
@@ -67,6 +101,13 @@ export interface RecipeLineInput {
   unit: string;
 }
 
+export interface RecipeComponentLineInput {
+  component_recipe_id: string;
+  /** null means the field is empty in the form (not submitted until filled). */
+  quantity: number | null;
+  unit: string;
+}
+
 export interface RecipeFormValues {
   name: string;
   description: string;
@@ -74,7 +115,11 @@ export interface RecipeFormValues {
   yield_quantity: number | null;
   yield_unit: RecipeYieldUnit;
   is_active: boolean;
+  recipe_role: RecipeRole;
+  /** Used when recipe_role = 'component'. */
   lines: RecipeLineInput[];
+  /** Used when recipe_role = 'assembly'. */
+  components: RecipeComponentLineInput[];
 }
 
 export interface SaveRecipeInput extends RecipeFormValues {

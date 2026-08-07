@@ -13,6 +13,7 @@ export function RecipesPage() {
     totalCount,
     hasActiveFilters,
     ingredients,
+    componentRecipes,
     loading,
     error,
     search,
@@ -77,6 +78,7 @@ export function RecipesPage() {
           recipe={editingRecipe}
           initialValues={initialFormValues}
           ingredients={ingredients}
+          componentRecipes={componentRecipes}
           isLoading={isLoadingRecipe}
           isSaving={isSaving}
           error={actionError}

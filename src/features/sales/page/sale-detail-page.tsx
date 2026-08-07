@@ -71,7 +71,14 @@ export function SaleDetailPage({ saleId }: SaleDetailPageProps) {
 
       setProducts(
         result.data
-          .filter((recipe) => recipe.is_active)
+          // Components (pre-produced sub-items like dough) are never sold
+          // directly to the customer — only assembly dishes are offered
+          // here. confirm_sale / allocate_finished_goods_fifo still
+          // support a direct component sale at the RPC level (kept as
+          // compatibility); this only narrows what the picker offers.
+          .filter(
+            (recipe) => recipe.is_active && recipe.recipe_role === "assembly",
+          )
           .map((recipe) => ({
             id: recipe.id,
             name: recipe.name,

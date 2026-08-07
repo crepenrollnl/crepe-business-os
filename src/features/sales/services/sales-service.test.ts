@@ -313,6 +313,23 @@ describe("salesService.confirmSale (DEV-027)", () => {
     expect(supabaseMock.from).not.toHaveBeenCalled();
   });
 
+  it("maps assembly component shortage RPC errors, naming the missing component and dish", async () => {
+    supabaseMock.rpc.mockResolvedValue({
+      data: null,
+      error: {
+        message:
+          'Failed to allocate component "Dough" while assembling "Chicken Crepe": Insufficient finished goods stock for this product.',
+      },
+    });
+
+    const result = await salesService.confirmSale(SALE_ID);
+
+    expect(result.data).toBeNull();
+    expect(result.error).toBe(
+      'Not enough "Dough" in stock to assemble "Chicken Crepe".',
+    );
+  });
+
   it("maps not-found RPC errors", async () => {
     supabaseMock.rpc.mockResolvedValue({
       data: null,

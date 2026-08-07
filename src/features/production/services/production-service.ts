@@ -865,10 +865,14 @@ async function maybeMarkReadyToProduce(
 export const productionService = {
   async getRecipeOptions(): Promise<ServiceResult<ProductionRecipeOption[]>> {
     try {
+      // Only pre-produced components are planned/produced ahead of time —
+      // assembly dishes are built from components at sale time and are
+      // never selectable here (Critical Finding #4).
       const { data, error } = await supabase
         .from("recipes")
         .select("id, name, yield_quantity, yield_unit, is_active")
         .eq("is_active", true)
+        .eq("recipe_role", "component")
         .order("name");
 
       if (error) {

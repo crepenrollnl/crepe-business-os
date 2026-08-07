@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { recipeService } from "../services/recipe-service";
 import type {
+  ComponentRecipeOption,
   RecipeFormValues,
   RecipeIngredientOption,
   RecipeListItem,
@@ -11,6 +12,7 @@ import type {
   RecipeWithRelations,
 } from "../types/recipe";
 import {
+  DEFAULT_RECIPE_ROLE,
   DEFAULT_RECIPE_YIELD_UNIT,
   isRecipeYieldUnit,
 } from "../types/recipe";
@@ -37,15 +39,24 @@ function compareRecipes(
 }
 
 async function fetchRecipesState() {
-  const [recipesResult, ingredientsResult] = await Promise.all([
-    recipeService.getRecipes(),
-    recipeService.getIngredients(),
-  ]);
+  const [recipesResult, ingredientsResult, componentRecipesResult] =
+    await Promise.all([
+      recipeService.getRecipes(),
+      recipeService.getIngredients(),
+      recipeService.getComponentRecipes(),
+    ]);
 
   return {
     items: recipesResult.error ? [] : (recipesResult.data ?? []),
     ingredients: ingredientsResult.error ? [] : (ingredientsResult.data ?? []),
-    error: recipesResult.error ?? ingredientsResult.error ?? null,
+    componentRecipes: componentRecipesResult.error
+      ? []
+      : (componentRecipesResult.data ?? []),
+    error:
+      recipesResult.error ??
+      ingredientsResult.error ??
+      componentRecipesResult.error ??
+      null,
   };
 }
 
@@ -56,7 +67,9 @@ function emptyFormValues(): RecipeFormValues {
     yield_quantity: null,
     yield_unit: DEFAULT_RECIPE_YIELD_UNIT,
     is_active: true,
+    recipe_role: DEFAULT_RECIPE_ROLE,
     lines: [{ ingredient_id: "", quantity: null, unit: "" }],
+    components: [{ component_recipe_id: "", quantity: null, unit: "" }],
   };
 }
 
@@ -69,6 +82,7 @@ function recipeToFormValues(recipe: RecipeWithRelations): RecipeFormValues {
       ? recipe.yield_unit
       : DEFAULT_RECIPE_YIELD_UNIT,
     is_active: recipe.is_active,
+    recipe_role: recipe.recipe_role,
     lines:
       recipe.items.length > 0
         ? recipe.items.map((item) => ({
@@ -77,12 +91,23 @@ function recipeToFormValues(recipe: RecipeWithRelations): RecipeFormValues {
             unit: item.unit,
           }))
         : [{ ingredient_id: "", quantity: null, unit: "" }],
+    components:
+      recipe.components.length > 0
+        ? recipe.components.map((component) => ({
+            component_recipe_id: component.component_recipe_id,
+            quantity: component.quantity,
+            unit: component.unit,
+          }))
+        : [{ component_recipe_id: "", quantity: null, unit: "" }],
   };
 }
 
 export function useRecipes() {
   const [items, setItems] = useState<RecipeListItem[]>([]);
   const [ingredients, setIngredients] = useState<RecipeIngredientOption[]>([]);
+  const [componentRecipes, setComponentRecipes] = useState<
+    ComponentRecipeOption[]
+  >([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
@@ -102,6 +127,7 @@ export function useRecipes() {
     (state: Awaited<ReturnType<typeof fetchRecipesState>>) => {
       setItems(state.items);
       setIngredients(state.ingredients);
+      setComponentRecipes(state.componentRecipes);
       setError(state.error);
     },
     [],
@@ -256,6 +282,7 @@ export function useRecipes() {
     totalCount: items.length,
     hasActiveFilters,
     ingredients,
+    componentRecipes,
     loading,
     error,
     search,
