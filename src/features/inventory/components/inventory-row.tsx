@@ -6,6 +6,7 @@ import type { IngredientWithRelations } from "../types/inventory";
 type InventoryRowProps = {
   item: IngredientWithRelations;
   review?: PurchasingReviewRow | null;
+  showAll: boolean;
   onEdit: (item: IngredientWithRelations) => void;
   onDelete: (item: IngredientWithRelations) => void;
 };
@@ -139,7 +140,11 @@ function RecommendationStatusLabel({
 
   if (review.recommendation_status === "none") {
     return (
-      <span className="text-zinc-500" data-testid="recommendation-status">
+      <span
+        className="text-zinc-500"
+        data-testid="recommendation-status"
+        title={review.recommendation_reason ?? undefined}
+      >
         None
       </span>
     );
@@ -150,6 +155,7 @@ function RecommendationStatusLabel({
       <span
         className="font-semibold text-red-700"
         data-testid="recommendation-status"
+        title={review.recommendation_reason ?? undefined}
       >
         Urgent
       </span>
@@ -160,6 +166,7 @@ function RecommendationStatusLabel({
     <span
       className="font-semibold text-amber-700"
       data-testid="recommendation-status"
+      title={review.recommendation_reason ?? undefined}
     >
       Recommended
     </span>
@@ -205,6 +212,7 @@ function AlertLevelLabel({
 export function InventoryRow({
   item,
   review = null,
+  showAll,
   onEdit,
   onDelete,
 }: InventoryRowProps) {
@@ -216,8 +224,12 @@ export function InventoryRow({
     <tr className={`border-t transition-colors ${getRowClassName(stockStatus)}`}>
       <td className="px-4 py-4 font-medium text-zinc-900">{item.name}</td>
       <td className="px-4 py-4 text-zinc-600">{item.category?.name ?? "—"}</td>
-      <td className="px-4 py-4 text-zinc-600">{item.supplier?.name ?? "—"}</td>
-      <td className="px-4 py-4 text-zinc-600">{item.unit}</td>
+      {showAll && (
+        <td className="px-4 py-4 text-zinc-600">
+          {item.supplier?.name ?? "—"}
+        </td>
+      )}
+      {showAll && <td className="px-4 py-4 text-zinc-600">{item.unit}</td>}
       <td className="px-4 py-4 text-right">
         <span
           className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-sm font-semibold ${getStockBadgeClass(
@@ -229,80 +241,96 @@ export function InventoryRow({
           {formatQuantity(currentQuantity)}
         </span>
       </td>
-      <td
-        className="px-4 py-4 text-right text-zinc-600"
-        data-testid="avg-daily-usage"
-      >
-        {review?.average_daily_usage == null
-          ? "—"
-          : formatQuantity(review.average_daily_usage)}
-      </td>
-      <td className="px-4 py-4 text-right">
-        <div className="inline-flex flex-col items-end gap-0.5">
-          <span
-            className="font-medium text-zinc-900"
-            data-testid="days-remaining"
-          >
-            {formatDaysRemaining(review?.days_remaining)}
-          </span>
-          <ForecastStatusLabel review={review} />
-        </div>
-      </td>
-      <td
-        className="px-4 py-4 text-right font-medium text-zinc-900"
-        data-testid="recommended-quantity"
-      >
-        {review?.suggested_order_quantity == null
-          ? "—"
-          : formatQuantity(review.suggested_order_quantity)}
-      </td>
-      <td
-        className="px-4 py-4 text-right text-zinc-600"
-        data-testid="target-stock"
-      >
-        {review?.target_stock == null
-          ? "—"
-          : formatQuantity(review.target_stock)}
+      {showAll && (
+        <td
+          className="px-4 py-4 text-right text-zinc-600"
+          data-testid="avg-daily-usage"
+        >
+          {review?.average_daily_usage == null
+            ? "—"
+            : formatQuantity(review.average_daily_usage)}
+        </td>
+      )}
+      {showAll && (
+        <td className="px-4 py-4 text-right">
+          <div className="inline-flex flex-col items-end gap-0.5">
+            <span
+              className="font-medium text-zinc-900"
+              data-testid="days-remaining"
+            >
+              {formatDaysRemaining(review?.days_remaining)}
+            </span>
+            <ForecastStatusLabel review={review} />
+          </div>
+        </td>
+      )}
+      {showAll && (
+        <td
+          className="px-4 py-4 text-right font-medium text-zinc-900"
+          data-testid="recommended-quantity"
+        >
+          {review?.suggested_order_quantity == null
+            ? "—"
+            : formatQuantity(review.suggested_order_quantity)}
+        </td>
+      )}
+      {showAll && (
+        <td
+          className="px-4 py-4 text-right text-zinc-600"
+          data-testid="target-stock"
+        >
+          {review?.target_stock == null
+            ? "—"
+            : formatQuantity(review.target_stock)}
+        </td>
+      )}
+      <td className="px-4 py-4">
+        <AlertLevelLabel review={review} />
       </td>
       <td className="px-4 py-4">
         <RecommendationStatusLabel review={review} />
       </td>
-      <td
-        className="max-w-[14rem] px-4 py-4 text-sm text-zinc-600"
-        data-testid="recommendation-reason"
-      >
-        {review?.recommendation_reason ?? "—"}
-      </td>
-      <td className="px-4 py-4">
-        <AlertLevelLabel review={review} />
-      </td>
-      <td className="px-4 py-4 text-zinc-600" data-testid="last-supplier">
-        {review?.last_supplier_name ?? "—"}
-      </td>
-      <td
-        className="px-4 py-4 text-right text-zinc-600"
-        data-testid="last-purchase-price"
-      >
-        {review?.last_purchase_price == null
-          ? "—"
-          : formatMoney(review.last_purchase_price)}
-      </td>
-      <td
-        className="px-4 py-4 text-zinc-600"
-        data-testid="last-purchase-date"
-      >
-        {formatDate(review?.last_purchase_date)}
-      </td>
-      <td
-        className="px-4 py-4 text-right text-zinc-600"
-        data-testid="purchase-count"
-      >
-        {review?.purchase_count == null ? "—" : review.purchase_count}
-      </td>
-      <td className="px-4 py-4 text-right text-zinc-600">{item.minimum_stock}</td>
-      <td className="px-4 py-4 text-right font-medium text-zinc-900">
-        {formatMoney(item.cost_per_unit)}
-      </td>
+      {showAll && (
+        <td className="px-4 py-4 text-zinc-600" data-testid="last-supplier">
+          {review?.last_supplier_name ?? "—"}
+        </td>
+      )}
+      {showAll && (
+        <td
+          className="px-4 py-4 text-right text-zinc-600"
+          data-testid="last-purchase-price"
+        >
+          {review?.last_purchase_price == null
+            ? "—"
+            : formatMoney(review.last_purchase_price)}
+        </td>
+      )}
+      {showAll && (
+        <td
+          className="px-4 py-4 text-zinc-600"
+          data-testid="last-purchase-date"
+        >
+          {formatDate(review?.last_purchase_date)}
+        </td>
+      )}
+      {showAll && (
+        <td
+          className="px-4 py-4 text-right text-zinc-600"
+          data-testid="purchase-count"
+        >
+          {review?.purchase_count == null ? "—" : review.purchase_count}
+        </td>
+      )}
+      {showAll && (
+        <td className="px-4 py-4 text-right text-zinc-600">
+          {item.minimum_stock}
+        </td>
+      )}
+      {showAll && (
+        <td className="px-4 py-4 text-right font-medium text-zinc-900">
+          {formatMoney(item.cost_per_unit)}
+        </td>
+      )}
       <td className="px-4 py-4 text-right">
         <div className="inline-flex items-center gap-2">
           <button

@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { PurchasingReviewRow } from "../types/purchasing-review";
 import type {
   IngredientWithRelations,
@@ -22,14 +23,17 @@ type InventoryTableProps = {
   onDelete: (item: IngredientWithRelations) => void;
 };
 
-const COLUMN_COUNT = 19;
+/** Always visible: Name, Category, Current Quantity, Alert, Recommendation, Actions. */
+const COMPACT_COLUMN_COUNT = 6;
+/** All columns, "Show more columns" expanded (Reason folded into Recommendation's tooltip, so 19 - 1). */
+const EXPANDED_COLUMN_COUNT = 18;
 
-function InventoryTableSkeleton() {
+function InventoryTableSkeleton({ columnCount }: { columnCount: number }) {
   return (
     <>
       {Array.from({ length: 5 }).map((_, index) => (
         <tr key={index} className="border-t border-zinc-200">
-          {Array.from({ length: COLUMN_COUNT }).map((__, cellIndex) => (
+          {Array.from({ length: columnCount }).map((__, cellIndex) => (
             <td key={cellIndex} className="px-4 py-4">
               <div className="h-4 animate-pulse rounded bg-zinc-200" />
             </td>
@@ -64,15 +68,17 @@ function EmptyStateIcon() {
 type InventoryEmptyStateProps = {
   hasActiveFilters: boolean;
   onAddClick: () => void;
+  columnCount: number;
 };
 
 function InventoryEmptyState({
   hasActiveFilters,
   onAddClick,
+  columnCount,
 }: InventoryEmptyStateProps) {
   return (
     <tr>
-      <td colSpan={COLUMN_COUNT} className="px-4 py-16 text-center">
+      <td colSpan={columnCount} className="px-4 py-16 text-center">
         <div className="mx-auto max-w-sm">
           <EmptyStateIcon />
           <p className="mt-4 text-base font-medium text-zinc-900">
@@ -163,6 +169,9 @@ export function InventoryTable({
   onEdit,
   onDelete,
 }: InventoryTableProps) {
+  const [showAll, setShowAll] = useState(false);
+  const columnCount = showAll ? EXPANDED_COLUMN_COUNT : COMPACT_COLUMN_COUNT;
+
   if (error) {
     return (
       <div className="rounded-xl border border-red-200 bg-red-50 p-8 text-center">
@@ -183,6 +192,16 @@ export function InventoryTable({
 
   return (
     <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-sm">
+      <div className="flex items-center justify-end border-b border-zinc-200 bg-zinc-50 px-4 py-2">
+        <button
+          type="button"
+          onClick={() => setShowAll((prev) => !prev)}
+          aria-expanded={showAll}
+          className="text-sm font-medium text-amber-700 transition-colors hover:text-amber-800"
+        >
+          {showAll ? "Show fewer columns" : "Show more columns"}
+        </button>
+      </div>
       <div className="overflow-x-auto">
         <table className="min-w-full">
           <thead className="bg-zinc-50">
@@ -197,12 +216,16 @@ export function InventoryTable({
               <th className="px-4 py-3 text-left text-sm font-semibold text-zinc-700">
                 Category
               </th>
-              <th className="px-4 py-3 text-left text-sm font-semibold text-zinc-700">
-                Supplier
-              </th>
-              <th className="px-4 py-3 text-left text-sm font-semibold text-zinc-700">
-                Unit
-              </th>
+              {showAll && (
+                <th className="px-4 py-3 text-left text-sm font-semibold text-zinc-700">
+                  Supplier
+                </th>
+              )}
+              {showAll && (
+                <th className="px-4 py-3 text-left text-sm font-semibold text-zinc-700">
+                  Unit
+                </th>
+              )}
               <SortableHeader
                 label="Current Quantity"
                 field="current_stock"
@@ -211,55 +234,72 @@ export function InventoryTable({
                 align="right"
                 onSort={onSort}
               />
-              <th className="px-4 py-3 text-right text-sm font-semibold text-zinc-700">
-                Avg Daily Usage
-              </th>
-              <th className="px-4 py-3 text-right text-sm font-semibold text-zinc-700">
-                Days Remaining
-              </th>
-              <th className="px-4 py-3 text-right text-sm font-semibold text-zinc-700">
-                Recommended Qty
-              </th>
-              <th className="px-4 py-3 text-right text-sm font-semibold text-zinc-700">
-                Target Stock
-              </th>
-              <th className="px-4 py-3 text-left text-sm font-semibold text-zinc-700">
-                Recommendation
-              </th>
-              <th className="px-4 py-3 text-left text-sm font-semibold text-zinc-700">
-                Reason
-              </th>
+              {showAll && (
+                <th className="px-4 py-3 text-right text-sm font-semibold text-zinc-700">
+                  Avg Daily Usage
+                </th>
+              )}
+              {showAll && (
+                <th className="px-4 py-3 text-right text-sm font-semibold text-zinc-700">
+                  Days Remaining
+                </th>
+              )}
+              {showAll && (
+                <th className="px-4 py-3 text-right text-sm font-semibold text-zinc-700">
+                  Recommended Qty
+                </th>
+              )}
+              {showAll && (
+                <th className="px-4 py-3 text-right text-sm font-semibold text-zinc-700">
+                  Target Stock
+                </th>
+              )}
               <th className="px-4 py-3 text-left text-sm font-semibold text-zinc-700">
                 Alert
               </th>
               <th className="px-4 py-3 text-left text-sm font-semibold text-zinc-700">
-                Last Supplier
+                Recommendation
               </th>
-              <th className="px-4 py-3 text-right text-sm font-semibold text-zinc-700">
-                Last Price
-              </th>
-              <th className="px-4 py-3 text-left text-sm font-semibold text-zinc-700">
-                Last Purchase
-              </th>
-              <th className="px-4 py-3 text-right text-sm font-semibold text-zinc-700">
-                Purchase Count
-              </th>
-              <SortableHeader
-                label="Minimum Stock"
-                field="minimum_stock"
-                sortField={sortField}
-                sortDirection={sortDirection}
-                align="right"
-                onSort={onSort}
-              />
-              <SortableHeader
-                label="Price"
-                field="cost_per_unit"
-                sortField={sortField}
-                sortDirection={sortDirection}
-                align="right"
-                onSort={onSort}
-              />
+              {showAll && (
+                <th className="px-4 py-3 text-left text-sm font-semibold text-zinc-700">
+                  Last Supplier
+                </th>
+              )}
+              {showAll && (
+                <th className="px-4 py-3 text-right text-sm font-semibold text-zinc-700">
+                  Last Price
+                </th>
+              )}
+              {showAll && (
+                <th className="px-4 py-3 text-left text-sm font-semibold text-zinc-700">
+                  Last Purchase
+                </th>
+              )}
+              {showAll && (
+                <th className="px-4 py-3 text-right text-sm font-semibold text-zinc-700">
+                  Purchase Count
+                </th>
+              )}
+              {showAll && (
+                <SortableHeader
+                  label="Minimum Stock"
+                  field="minimum_stock"
+                  sortField={sortField}
+                  sortDirection={sortDirection}
+                  align="right"
+                  onSort={onSort}
+                />
+              )}
+              {showAll && (
+                <SortableHeader
+                  label="Price"
+                  field="cost_per_unit"
+                  sortField={sortField}
+                  sortDirection={sortDirection}
+                  align="right"
+                  onSort={onSort}
+                />
+              )}
               <th className="px-4 py-3 text-right text-sm font-semibold text-zinc-700">
                 Actions
               </th>
@@ -267,11 +307,12 @@ export function InventoryTable({
           </thead>
           <tbody>
             {loading ? (
-              <InventoryTableSkeleton />
+              <InventoryTableSkeleton columnCount={columnCount} />
             ) : items.length === 0 ? (
               <InventoryEmptyState
                 hasActiveFilters={hasActiveFilters && totalCount > 0}
                 onAddClick={onAddClick}
+                columnCount={columnCount}
               />
             ) : (
               items.map((item) => (
@@ -279,6 +320,7 @@ export function InventoryTable({
                   key={item.id}
                   item={item}
                   review={purchasingReviews.get(item.id) ?? null}
+                  showAll={showAll}
                   onEdit={onEdit}
                   onDelete={onDelete}
                 />
