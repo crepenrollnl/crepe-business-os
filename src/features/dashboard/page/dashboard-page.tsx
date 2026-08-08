@@ -1,7 +1,7 @@
 "use client";
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
-import { ShiftStatusPanel } from "@/features/shifts/components/shift-status-panel";
+import { ShiftStatusPanel } from "@/components/shift-status-panel";
 import { DashboardInfo } from "../components/dashboard-info";
 import { DashboardLowStockAlertsSection } from "../components/dashboard-low-stock-alerts-section";
 import { DashboardMoneyTodaySection } from "../components/dashboard-money-today-section";
