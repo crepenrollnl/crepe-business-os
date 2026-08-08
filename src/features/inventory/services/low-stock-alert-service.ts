@@ -18,6 +18,18 @@ import {
 import { inventoryForecastService } from "./inventory-forecast-service";
 import { purchaseRecommendationService } from "./purchase-recommendation-service";
 
+/**
+ * `instanceof Map` alone doesn't narrow `Iterable<V> | ReadonlyMap<K, V>`,
+ * because `ReadonlyMap` lacks Map's mutator methods and so isn't assignable
+ * to `Map<any, any>` for TS to exclude it from the non-Map branch. A
+ * user-defined type predicate narrows both branches correctly.
+ */
+function isReadonlyMap<K, V>(
+  value: Iterable<V> | ReadonlyMap<K, V>,
+): value is ReadonlyMap<K, V> {
+  return value instanceof Map;
+}
+
 export const lowStockAlertService = {
   buildLowStockAlert,
   buildLowStockAlerts,
@@ -35,20 +47,20 @@ export const lowStockAlertService = {
       | ReadonlyMap<string, PurchaseRecommendation>;
   }): ServiceResult<LowStockAlert[]> {
     try {
-      const forecasts =
-        input.forecasts instanceof Map
-          ? input.forecasts.values()
-          : input.forecasts;
+      const forecasts = isReadonlyMap(input.forecasts)
+        ? input.forecasts.values()
+        : input.forecasts;
 
-      const recommendationsByIngredientId =
-        input.recommendations instanceof Map
-          ? input.recommendations
-          : new Map(
-              [...input.recommendations].map((row) => [
-                row.ingredient_id,
-                row,
-              ]),
-            );
+      const recommendationsByIngredientId = isReadonlyMap(
+        input.recommendations,
+      )
+        ? input.recommendations
+        : new Map(
+            [...input.recommendations].map((row) => [
+              row.ingredient_id,
+              row,
+            ]),
+          );
 
       const built = buildLowStockAlerts({
         forecasts,

@@ -173,7 +173,10 @@ export const dashboardService = {
         return fail("Dashboard summary was not found.");
       }
 
-      return ok(mapDashboardRow(data as DashboardSummarySqlRow));
+      // DASHBOARD_SELECT is a runtime-joined string, not a literal type, so
+      // Supabase's client can't infer a row shape from it and falls back to
+      // GenericStringError -- the cast below is intentional, not a mistake.
+      return ok(mapDashboardRow(data as unknown as DashboardSummarySqlRow));
     } catch (error) {
       return fail(mapReadError(error, "Failed to load dashboard summary"));
     }

@@ -242,43 +242,54 @@ export const finishedGoodsReadService = {
         return fail("One or more batch ids are invalid.");
       }
 
-      let builder = supabase
+      // Each select is awaited and cast independently (not kept as one
+      // reassigned variable) because AVAILABILITY_SELECT and
+      // AVAILABILITY_SELECT_LEGACY are different string literals, so
+      // Supabase infers a different, structurally incompatible row type for
+      // each -- same pattern as the primary/fallback split in
+      // selectAvailability() above.
+      const primary = await supabase
         .from(AVAILABILITY_VIEW)
         .select(AVAILABILITY_SELECT)
         .in("production_batch_id", ids)
         .order("produced_at", { ascending: true })
         .order("production_batch_id", { ascending: true });
 
-      let result = await builder;
+      let rows = primary.data as AvailabilityRow[] | null;
+      let responseError = primary.error;
 
-      if (result.error) {
+      if (responseError) {
         const message =
-          typeof result.error === "object" &&
-          result.error !== null &&
-          "message" in result.error &&
-          typeof (result.error as { message: unknown }).message === "string"
-            ? (result.error as { message: string }).message
+          typeof responseError === "object" &&
+          responseError !== null &&
+          "message" in responseError &&
+          typeof (responseError as { message: unknown }).message === "string"
+            ? (responseError as { message: string }).message
             : "";
 
         if (isMissingValuationColumnError(message)) {
-          result = await supabase
+          const fallback = await supabase
             .from(AVAILABILITY_VIEW)
             .select(AVAILABILITY_SELECT_LEGACY)
             .in("production_batch_id", ids)
             .order("produced_at", { ascending: true })
             .order("production_batch_id", { ascending: true });
+
+          rows = fallback.data as AvailabilityRow[] | null;
+          responseError = fallback.error;
         }
       }
 
-      if (result.error) {
+      if (responseError) {
         return fail(
-          mapReadError(result.error, "Failed to load finished goods availability"),
+          mapReadError(
+            responseError,
+            "Failed to load finished goods availability",
+          ),
         );
       }
 
-      return ok(
-        ((result.data as AvailabilityRow[] | null) ?? []).map(mapAvailabilityRow),
-      );
+      return ok((rows ?? []).map(mapAvailabilityRow));
     } catch (error) {
       return fail(
         mapReadError(error, "Failed to load finished goods availability"),

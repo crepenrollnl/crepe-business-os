@@ -371,7 +371,14 @@ describe("reportingWorkspaceService.getReportingWorkspace (DEV-075)", () => {
       executive: {
         company_health: "critical",
         inventory_value: 999.99,
+        low_stock_count: 1,
+        total_sales: 2,
+        total_purchases: 3,
+        total_batches: 4,
         sales_growth: -3.25,
+        last_sale_date: "2026-07-25T16:00:00.000Z",
+        last_purchase_date: "2026-07-24T10:00:00.000Z",
+        last_production_date: "2026-07-23T12:00:00.000Z",
       },
     } satisfies Partial<ReportingOverview>);
     expectReadOnly("get_reporting_workspace");

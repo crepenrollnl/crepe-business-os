@@ -24,6 +24,20 @@ function roundMarginPercent(value: number): number {
   return Math.round(value * factor) / factor;
 }
 
+/**
+ * Neither `instanceof Set` nor the bare `Array.isArray(existing)` narrows
+ * both branches of `ReadonlySet<string> | readonly string[]`: each built-in
+ * guard is declared against a *mutable* type (`Set<any>` / `any[]`), and
+ * neither readonly interface is assignable to its mutable counterpart, so
+ * TS can't exclude it from the other branch. A user-defined predicate
+ * sidesteps that and narrows correctly both ways.
+ */
+function isReadonlyArray<T>(
+  value: ReadonlySet<T> | readonly T[],
+): value is readonly T[] {
+  return Array.isArray(value);
+}
+
 function hasExistingShiftId(
   shiftId: string,
   existing?: ReadonlySet<string> | readonly string[],
@@ -31,10 +45,10 @@ function hasExistingShiftId(
   if (!existing) {
     return false;
   }
-  if (existing instanceof Set) {
-    return existing.has(shiftId);
+  if (isReadonlyArray(existing)) {
+    return existing.includes(shiftId);
   }
-  return existing.includes(shiftId);
+  return existing.has(shiftId);
 }
 
 export function validateDailyProfitSaleFact(

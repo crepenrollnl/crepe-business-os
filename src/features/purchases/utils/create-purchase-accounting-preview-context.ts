@@ -24,7 +24,10 @@ function openPeriodForDate(dateIso: string): FiscalPeriod {
 }
 
 function previewBindings(asOf: string): AccountRoleBinding[] {
-  return [
+  // Explicitly typed so each `role` literal is checked against
+  // PostingAccountRole here -- without it, the array literal has no
+  // contextual type and TS widens `role` to plain `string`.
+  const bindings: AccountRoleBinding[] = [
     {
       id: "preview-bind-inventory",
       role: "inventory_asset",
@@ -52,7 +55,9 @@ function previewBindings(asOf: string): AccountRoleBinding[] {
       is_active: true,
       created_at: "2020-01-01T00:00:00.000Z",
     },
-  ].map((row) => ({
+  ];
+
+  return bindings.map((row) => ({
     ...row,
     // Keep bindings valid for the purchase date window.
     effective_from: row.effective_from < asOf ? row.effective_from : asOf,

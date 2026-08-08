@@ -30,6 +30,7 @@ import type {
   ReportingSection,
   ReportingSectionCatalogItem,
 } from "../types/reporting-api";
+import type { ExecutiveDashboard } from "@/features/executive-dashboard/types/executive-dashboard";
 
 const insertMock = vi.fn();
 const updateMock = vi.fn();
@@ -47,7 +48,9 @@ function catalogItem(
   };
 }
 
-function executivePayload(overrides?: Record<string, unknown>) {
+function executivePayload(
+  overrides?: Partial<ExecutiveDashboard>,
+): ExecutiveDashboard {
   return {
     company_health: "ok",
     inventory_value: 100,
