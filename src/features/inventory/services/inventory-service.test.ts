@@ -13,12 +13,11 @@
  * per AGENTS.md's stock-mutation-authority table) -- this service is a
  * plain reference-data CRUD, not a stock ledger.
  *
- * One test below deliberately documents existing, NOT-fixed-here behavior
- * flagged in Фаза 2 tech debt: deleteIngredient's toUserError has no `map`
- * for foreign-key violations (only for duplicate names), so a raw Postgres
- * error message reaches the caller unchanged when deletion is blocked by a
- * reference from purchases/recipes. See AGENTS.md / plan Фаза 2 entry
- * "Сырые технические сообщения об ошибках при удалении".
+ * deleteIngredient's toUserError now also maps foreign-key-violation
+ * deletes (via the shared `mapDeletionBlockedByReference` helper in
+ * `@/lib/service-errors`) to a friendly per-table message instead of
+ * letting the raw Postgres error reach the caller. See AGENTS.md / plan
+ * Фаза 2 entry "Сырые технические сообщения об ошибках при удалении".
  */
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -544,7 +543,7 @@ describe("inventoryService", () => {
       expect(result.error).toBe("delete failed");
     });
 
-    it("DOCUMENTS EXISTING BEHAVIOR (Фаза 2 tech debt, not fixed here): a foreign-key violation surfaces its raw Postgres message unchanged, not a friendly one -- deleteIngredient's toUserError only maps 23505 duplicate-name errors, not 23503 FK violations", async () => {
+    it("maps a foreign-key violation from purchases to a friendly message instead of the raw Postgres text", async () => {
       mockTables({
         ingredients: {
           data: null,
@@ -559,10 +558,48 @@ describe("inventoryService", () => {
       const result = await inventoryService.deleteIngredient(INGREDIENT_ID);
 
       expect(result.data).toBeNull();
-      // Raw Postgres text reaches the caller as-is -- this is the tracked
-      // gap, not a regression introduced by this test file.
       expect(result.error).toBe(
-        'update or delete on table "ingredients" violates foreign key constraint "purchase_items_ingredient_id_fkey" on table "purchase_items"',
+        "This ingredient is used in purchases and cannot be deleted.",
+      );
+    });
+
+    it("maps a foreign-key violation from recipes to a friendly message", async () => {
+      mockTables({
+        ingredients: {
+          data: null,
+          error: {
+            code: "23503",
+            message:
+              'update or delete on table "ingredients" violates foreign key constraint "recipe_items_ingredient_id_fkey" on table "recipe_items"',
+          },
+        },
+      });
+
+      const result = await inventoryService.deleteIngredient(INGREDIENT_ID);
+
+      expect(result.data).toBeNull();
+      expect(result.error).toBe(
+        "This ingredient is used in recipes and cannot be deleted.",
+      );
+    });
+
+    it("falls back to a generic 'used elsewhere' message for a referencing table with no specific phrase", async () => {
+      mockTables({
+        ingredients: {
+          data: null,
+          error: {
+            code: "23503",
+            message:
+              'update or delete on table "ingredients" violates foreign key constraint "some_future_table_ingredient_id_fkey" on table "some_future_table"',
+          },
+        },
+      });
+
+      const result = await inventoryService.deleteIngredient(INGREDIENT_ID);
+
+      expect(result.data).toBeNull();
+      expect(result.error).toBe(
+        "This ingredient is used elsewhere in the system and cannot be deleted.",
       );
     });
 

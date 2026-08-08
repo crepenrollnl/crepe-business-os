@@ -1,4 +1,8 @@
-import { toUserError as mapServiceError } from "@/lib/service-errors";
+import {
+  toUserError as mapServiceError,
+  mapDeletionBlockedByReference,
+  type DeletionBlockedMessages,
+} from "@/lib/service-errors";
 import { supabase } from "@/lib/supabase";
 import type { ServiceResult } from "@/types/service";
 import type {
@@ -35,9 +39,33 @@ function isDuplicateNameError(error: unknown): boolean {
   );
 }
 
+const INGREDIENT_DELETE_BLOCKED_MESSAGES: DeletionBlockedMessages = {
+  fallback:
+    "This ingredient is used elsewhere in the system and cannot be deleted.",
+  byTable: {
+    purchase_items:
+      "This ingredient is used in purchases and cannot be deleted.",
+    recipe_items:
+      "This ingredient is used in recipes and cannot be deleted.",
+    production_plan_ingredients:
+      "This ingredient is used in a production plan and cannot be deleted.",
+    production_plan_shopping_items:
+      "This ingredient is on a production plan's shopping list and cannot be deleted.",
+    stock_movements:
+      "This ingredient has stock movement history and cannot be deleted.",
+  },
+};
+
+const mapIngredientDeletionBlocked = mapDeletionBlockedByReference(
+  INGREDIENT_DELETE_BLOCKED_MESSAGES,
+);
+
 function toUserError(error: unknown, fallback: string): string {
   return mapServiceError(error, fallback, {
-    map: (value) => (isDuplicateNameError(value) ? DUPLICATE_NAME_ERROR : null),
+    map: (value) =>
+      isDuplicateNameError(value)
+        ? DUPLICATE_NAME_ERROR
+        : mapIngredientDeletionBlocked(value),
   });
 }
 

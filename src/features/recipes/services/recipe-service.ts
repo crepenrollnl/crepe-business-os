@@ -1,4 +1,8 @@
-import { toUserError as mapServiceError } from "@/lib/service-errors";
+import {
+  toUserError as mapServiceError,
+  mapDeletionBlockedByReference,
+  type DeletionBlockedMessages,
+} from "@/lib/service-errors";
 import { supabase } from "@/lib/supabase";
 import type { ServiceResult } from "@/types/service";
 import type {
@@ -121,6 +125,24 @@ function isDuplicateComponentError(error: unknown): boolean {
   );
 }
 
+const RECIPE_DELETE_BLOCKED_MESSAGES: DeletionBlockedMessages = {
+  fallback: "This recipe is used elsewhere in the system and cannot be deleted.",
+  byTable: {
+    production_plan_products:
+      "This recipe is used in a production plan and cannot be deleted.",
+    production_session_lines:
+      "This recipe has production session history and cannot be deleted.",
+    production_batches:
+      "This recipe has production batch history and cannot be deleted.",
+    recipe_components:
+      "This recipe is used as a component in another recipe and cannot be deleted.",
+  },
+};
+
+const mapRecipeDeletionBlocked = mapDeletionBlockedByReference(
+  RECIPE_DELETE_BLOCKED_MESSAGES,
+);
+
 function toUserError(error: unknown, fallback: string): string {
   return mapServiceError(error, fallback, {
     map: (value) => {
@@ -133,7 +155,7 @@ function toUserError(error: unknown, fallback: string): string {
       if (isDuplicateComponentError(value)) {
         return DUPLICATE_COMPONENT_ERROR;
       }
-      return null;
+      return mapRecipeDeletionBlocked(value);
     },
   });
 }
