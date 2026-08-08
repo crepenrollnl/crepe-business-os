@@ -86,13 +86,13 @@ Reports is a layered read-only stack. The registered nav module host is `reporti
 
 | Package | Folder | Role |
 |---|---|---|
-| Reporting Workspace | `src/features/reporting-workspace` | Live `/reports` host; `get_reporting_workspace` |
-| Reporting Dashboard | `src/features/reporting-dashboard` | Presentational composition / widgets |
-| Reporting API | `src/features/reporting-api` | `get_reporting_overview` / `get_reporting_section` |
-| Reporting Home | `src/features/reporting-home` | `get_reporting_home` |
+| Reporting Workspace | `src/features/reporting-workspace` | Live `/reports` host; `get_reporting_workspace`; also owns the presentational composition / widgets absorbed from the retired Reporting Dashboard package (feature-sprawl consolidation, 08.08.2026) |
+| Reporting API | `src/features/reporting-api` | Shared `ReportingOverview`/`ReportingSectionCatalogItem`/`ReportingSectionName` DTO types only — its `get_reporting_overview` / `get_reporting_section` service was dead code (zero consumers) and was removed 08.08.2026 |
 | Reports (summary views) | `src/features/reports` | Legacy `report_*_summary` view reads (DEV-041) |
 
-SQL composition: `reporting_workspace` aggregates `reporting_home`, `dashboard_navigation`, and `reporting_api`. UI reads the workspace RPC only.
+Retired 08.08.2026 (feature-sprawl consolidation — see Plan_Deystviy_V1.txt): **Reporting Dashboard** (`src/features/reporting-dashboard`, presentational composition/widgets, merged into Reporting Workspace) and **Reporting Home** (`src/features/reporting-home`, `get_reporting_home`, dead code with zero consumers anywhere). The 8 per-section satellite dashboard packages (`alerts-dashboard`, `audit-dashboard`, `company-dashboard`, `executive-dashboard`, `inventory-dashboard`, `kpi-dashboard`, `production-dashboard`, `user-activity-dashboard`) also lost their dead `services/` layer the same day — only their `types/` remain, still consumed by Reporting API's DTO union and by Reporting Workspace's per-section widgets.
+
+SQL composition: `reporting_workspace`'s RPC still aggregates the same underlying SQL objects as before (`reporting_home`, `dashboard_navigation`, `reporting_api` views/functions) — this consolidation only removed unused TypeScript service wrappers, no SQL/database objects were touched. UI reads the workspace RPC only.
 
 ### Production Planning domain package
 

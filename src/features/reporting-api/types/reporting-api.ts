@@ -52,25 +52,4 @@ export interface ReportingOverview {
   alerts: AlertsDashboard;
 }
 
-/**
- * Mapped section payload from get_reporting_section.
- * data preserves the embedded dashboard JSON object from SQL.
- */
-export interface ReportingSection {
-  section_name: ReportingSectionName;
-  title: string;
-  source_view: string;
-  source_rpc: string;
-  data:
-    | ExecutiveDashboard
-    | KpiDashboard
-    | CompanyDashboard
-    | InventoryDashboard
-    | ProductionDashboard
-    | AuditDashboard
-    | UserActivityDashboard
-    | AlertsDashboard
-    | Record<string, never>;
-}
-
 export type { ServiceResult } from "@/types/service";

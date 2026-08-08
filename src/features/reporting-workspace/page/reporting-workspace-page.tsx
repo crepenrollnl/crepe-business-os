@@ -1,8 +1,8 @@
 "use client";
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
-import { ReportingDashboardCards } from "@/features/reporting-dashboard/components/reporting-dashboard-cards";
-import { ReportingDashboardEmptyOverview } from "@/features/reporting-dashboard/components/reporting-dashboard-empty-overview";
+import { ReportingDashboardCards } from "../components/reporting-dashboard-cards";
+import { ReportingDashboardEmptyOverview } from "../components/reporting-dashboard-empty-overview";
 import { ReportingWorkspaceEmptyState } from "../components/reporting-workspace-empty-state";
 import { ReportingWorkspaceErrorState } from "../components/reporting-workspace-error-state";
 import { ReportingWorkspaceHeader } from "../components/reporting-workspace-header";

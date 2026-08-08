@@ -1,88 +1,25 @@
 /**
- * UI coverage for Reporting Dashboard performance polish.
+ * UI coverage for the Composition -> DataBinding -> Widgets memo chain.
+ *
+ * Moved from reporting-dashboard/page/reporting-dashboard-performance.test.tsx
+ * (feature-sprawl consolidation, 08.08.2026) -- only the component-level
+ * memo-boundary describe block survived the move (its sibling pure-logic
+ * describe block moved to reporting-dashboard-overview-equality.test.ts in
+ * this same directory). The "workspace integration" describe block that
+ * used to sit alongside these re-tested loading/error/nav-highlight/
+ * read-only-ness already covered end to end by
+ * reporting-workspace-page.test.tsx and by the composition/data-binding
+ * component tests kept here -- dropped as duplicate, not moved.
  */
 
-import {
-  act,
-  cleanup,
-  render,
-  screen,
-  within,
-} from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { cleanup, render, screen, within } from "@testing-library/react";
+import { afterEach, describe, expect, it } from "vitest";
 import "@testing-library/jest-dom/vitest";
-import type { ReportingWorkspace } from "@/features/reporting-workspace/types/reporting-workspace";
 import type { ReportingOverview } from "@/features/reporting-api/types/reporting-api";
-import { ReportingDashboardCards } from "../components/reporting-dashboard-cards";
-import { ReportingDashboardComposition } from "../components/reporting-dashboard-composition";
-import { ReportingDashboardDataBinding } from "../components/reporting-dashboard-data-binding";
-import { isSameOverviewProps } from "../components/reporting-dashboard-overview-equality";
-import { ReportingDashboardWidgets } from "../components/widgets/reporting-dashboard-widgets";
-
-const { getReportingWorkspaceMock, fromMock, rpcMock } = vi.hoisted(() => ({
-  getReportingWorkspaceMock: vi.fn(),
-  fromMock: vi.fn(),
-  rpcMock: vi.fn(),
-}));
-
-vi.mock("next/link", () => ({
-  default: ({
-    children,
-    href,
-    ...props
-  }: {
-    children: React.ReactNode;
-    href: string;
-    onClick?: () => void;
-    className?: string;
-    "aria-current"?: "page";
-  }) => (
-    <a href={href} {...props}>
-      {children}
-    </a>
-  ),
-}));
-
-vi.mock("@/lib/supabase", () => ({
-  supabase: {
-    from: fromMock,
-    rpc: rpcMock,
-  },
-}));
-
-vi.mock("@/features/search/components/global-search", () => ({
-  GlobalSearch: () => <div data-testid="global-search" />,
-}));
-
-vi.mock("@/features/auth/hooks/use-auth", () => ({
-  useAuth: () => ({ user: null, loading: false, signOut: vi.fn() }),
-}));
-
-vi.mock("next/navigation", () => ({
-  useRouter: () => ({ replace: vi.fn() }),
-}));
-
-vi.mock("@/features/reporting-workspace/services/reporting-workspace-service", () => ({
-  reportingWorkspaceService: {
-    getReportingWorkspace: (...args: unknown[]) =>
-      getReportingWorkspaceMock(...args),
-  },
-}));
-
-import { ReportingDashboardPage } from "./reporting-dashboard-page";
-
-function navigationItem(overrides?: Record<string, unknown>) {
-  return {
-    dashboard_key: "executive",
-    display_name: "Executive Dashboard",
-    category: "overview",
-    description: "Highest-level company health, growth, and operating signals.",
-    sort_order: 10,
-    icon_identifier: "executive",
-    availability: "available",
-    ...overrides,
-  };
-}
+import { ReportingDashboardCards } from "./reporting-dashboard-cards";
+import { ReportingDashboardComposition } from "./reporting-dashboard-composition";
+import { ReportingDashboardDataBinding } from "./reporting-dashboard-data-binding";
+import { ReportingDashboardWidgets } from "./widgets/reporting-dashboard-widgets";
 
 function overview(overrides?: Partial<ReportingOverview>): ReportingOverview {
   return {
@@ -188,51 +125,6 @@ function overview(overrides?: Partial<ReportingOverview>): ReportingOverview {
   };
 }
 
-function workspace(overrides?: Partial<ReportingWorkspace>): ReportingWorkspace {
-  return {
-    workspace_title: "Reporting Workspace",
-    reporting_version: "1.0",
-    available_dashboards: [navigationItem()],
-    navigation_catalog: [navigationItem()],
-    reporting_overview: overview(),
-    generated_at: "2026-07-25T16:00:00.000Z",
-    ...overrides,
-  };
-}
-
-async function flushMicrotasks() {
-  await act(async () => {
-    await Promise.resolve();
-    await Promise.resolve();
-  });
-}
-
-async function renderSettled() {
-  const view = render(<ReportingDashboardPage />);
-  await flushMicrotasks();
-  return view;
-}
-
-describe("Reporting Dashboard performance equality helper (DEV-081 UI)", () => {
-  it("treats identical overview object references as equal", () => {
-    const data = overview();
-
-    expect(
-      isSameOverviewProps({ overview: data }, { overview: data }),
-    ).toBe(true);
-  });
-
-  it("treats different overview object identities as unequal", () => {
-    const first = overview();
-    const second = overview();
-
-    expect(first).not.toBe(second);
-    expect(
-      isSameOverviewProps({ overview: first }, { overview: second }),
-    ).toBe(false);
-  });
-});
-
 describe("Reporting Dashboard performance memo boundaries (DEV-081 UI)", () => {
   afterEach(() => {
     cleanup();
@@ -332,70 +224,5 @@ describe("Reporting Dashboard performance memo boundaries (DEV-081 UI)", () => {
     expect(
       within(updatedExecutive).getByLabelText("Company Health: critical"),
     ).toBeInTheDocument();
-  });
-});
-
-describe("Reporting Dashboard performance workspace integration (DEV-081 UI)", () => {
-  beforeEach(() => {
-    getReportingWorkspaceMock.mockReset();
-    fromMock.mockReset();
-    rpcMock.mockReset();
-  });
-
-  afterEach(() => {
-    cleanup();
-  });
-
-  it("preserves accessibility landmarks through the performance-integrated path", async () => {
-    getReportingWorkspaceMock.mockResolvedValue({
-      data: workspace(),
-      error: null,
-    });
-
-    await renderSettled();
-
-    expect(
-      screen.getByRole("heading", {
-        level: 3,
-        name: "Reporting dashboards",
-      }),
-    ).toHaveAttribute("id", "reporting-dashboards-heading");
-    expect(
-      screen.getByRole("region", {
-        name: "Bound reporting dashboard overview",
-      }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("list", {
-        name: "Reporting dashboard section widgets",
-      }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("heading", {
-        level: 2,
-        name: "Reporting Workspace",
-      }),
-    ).toBeInTheDocument();
-
-    const reportsLink = screen.getByRole("link", { name: "Reports" });
-    expect(reportsLink).toHaveAttribute("href", "/reports");
-    expect(reportsLink).toHaveAttribute("aria-current", "page");
-  });
-
-  it("is read-only and only calls getReportingWorkspace", async () => {
-    getReportingWorkspaceMock.mockResolvedValue({
-      data: workspace(),
-      error: null,
-    });
-
-    await renderSettled();
-
-    expect(getReportingWorkspaceMock).toHaveBeenCalledTimes(1);
-    expect(getReportingWorkspaceMock).toHaveBeenCalledWith();
-    expect(fromMock).not.toHaveBeenCalled();
-    expect(rpcMock).not.toHaveBeenCalled();
-    expect(
-      screen.queryByRole("button", { name: /save|edit|delete|create/i }),
-    ).not.toBeInTheDocument();
   });
 });

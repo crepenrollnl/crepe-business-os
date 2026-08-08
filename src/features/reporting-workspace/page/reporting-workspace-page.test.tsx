@@ -409,6 +409,13 @@ describe("ReportingWorkspacePage (DEV-076 UI)", () => {
 
     await renderSettled();
 
+    // Consolidated from the dropped reporting-dashboard integration test
+    // suite (feature-sprawl cleanup, 08.08.2026) -- this was the only place
+    // asserting the dashboard-cards slot's own empty copy, distinct from
+    // the navigation/overview empty copy already checked below.
+    expect(
+      screen.getByText("No reporting dashboard cards are available yet."),
+    ).toBeInTheDocument();
     expect(
       screen.getByText("No dashboard navigation entries are available yet."),
     ).toBeInTheDocument();
