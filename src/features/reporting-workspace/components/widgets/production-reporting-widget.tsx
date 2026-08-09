@@ -1,5 +1,6 @@
 import { memo } from "react";
 import type { ProductionDashboard } from "@/features/production-dashboard/types/production-dashboard";
+import { formatDateTime } from "@/lib/date";
 import { ReportingDashboardMetric } from "./reporting-dashboard-metric";
 import { ReportingSectionWidget } from "./reporting-section-widget";
 
@@ -33,7 +34,7 @@ export const ProductionReportingWidget = memo(function ProductionReportingWidget
       />
       <ReportingDashboardMetric
         label="Last Production Date"
-        value={data.last_production_date}
+        value={formatDateTime(data.last_production_date)}
       />
       <ReportingDashboardMetric
         label="Average Batch Duration"

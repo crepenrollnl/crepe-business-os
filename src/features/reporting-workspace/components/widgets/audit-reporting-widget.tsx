@@ -1,5 +1,6 @@
 import { memo } from "react";
 import type { AuditDashboard } from "@/features/audit-dashboard/types/audit-dashboard";
+import { formatDateTime } from "@/lib/date";
 import { ReportingDashboardMetric } from "./reporting-dashboard-metric";
 import { ReportingSectionWidget } from "./reporting-section-widget";
 
@@ -53,7 +54,7 @@ export const AuditReportingWidget = memo(function AuditReportingWidget({
       />
       <ReportingDashboardMetric
         label="Last Audit Event At"
-        value={data.last_audit_event_at}
+        value={formatDateTime(data.last_audit_event_at)}
       />
     </ReportingSectionWidget>
   );

@@ -1,5 +1,6 @@
 import { memo } from "react";
 import type { CompanyDashboard } from "@/features/company-dashboard/types/company-dashboard";
+import { formatDateTime } from "@/lib/date";
 import { ReportingDashboardMetric } from "./reporting-dashboard-metric";
 import { ReportingSectionWidget } from "./reporting-section-widget";
 
@@ -46,15 +47,15 @@ export const CompanyReportingWidget = memo(function CompanyReportingWidget({
       />
       <ReportingDashboardMetric
         label="Last Sale Date"
-        value={data.last_sale_date}
+        value={formatDateTime(data.last_sale_date)}
       />
       <ReportingDashboardMetric
         label="Last Purchase Date"
-        value={data.last_purchase_date}
+        value={formatDateTime(data.last_purchase_date)}
       />
       <ReportingDashboardMetric
         label="Last Production Date"
-        value={data.last_production_date}
+        value={formatDateTime(data.last_production_date)}
       />
     </ReportingSectionWidget>
   );

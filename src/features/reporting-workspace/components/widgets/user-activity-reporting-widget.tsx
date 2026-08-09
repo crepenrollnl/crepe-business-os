@@ -1,5 +1,6 @@
 import { memo } from "react";
 import type { UserActivityDashboard } from "@/features/user-activity-dashboard/types/user-activity-dashboard";
+import { formatDateTime } from "@/lib/date";
 import { ReportingDashboardMetric } from "./reporting-dashboard-metric";
 import { ReportingSectionWidget } from "./reporting-section-widget";
 
@@ -46,7 +47,7 @@ export const UserActivityReportingWidget = memo(
         />
         <ReportingDashboardMetric
           label="Last User Activity At"
-          value={data.last_user_activity_at}
+          value={formatDateTime(data.last_user_activity_at)}
         />
         <ReportingDashboardMetric
           label="Most Active User"
