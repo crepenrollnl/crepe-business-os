@@ -285,7 +285,6 @@ function installMock(state: MockDbState) {
   supabaseMock.from.mockImplementation((table: string) => {
     if (table === "journal_entries") {
       const api: Record<string, unknown> = {};
-      const self = () => api;
 
       api.select = vi.fn((columns?: string) => {
         journalSelectCount += 1;
@@ -294,7 +293,7 @@ function installMock(state: MockDbState) {
         const selectApi: Record<string, unknown> = {};
         const selectSelf = () => selectApi;
 
-        selectApi.eq = vi.fn((col: string, value: unknown) => {
+        selectApi.eq = vi.fn((col: string) => {
           const eqApi: Record<string, unknown> = {};
           const eqSelf = () => eqApi;
 

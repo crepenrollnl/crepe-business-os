@@ -15,7 +15,18 @@ export function ResetPasswordForm() {
   const router = useRouter();
   const { loading, isPasswordRecovery, signOut } = useAuth();
 
-  const [linkStatus, setLinkStatus] = useState<LinkStatus>("checking");
+  // "valid" is derived directly from isPasswordRecovery at render time.
+  // The effect below only owns the "invalid after grace period" timer —
+  // a genuine external-timer subscription, not state derivable from props.
+  const [timedOut, setTimedOut] = useState(false);
+  const linkStatus: LinkStatus = isPasswordRecovery
+    ? "valid"
+    : loading
+      ? "checking"
+      : timedOut
+        ? "invalid"
+        : "checking";
+
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [passwordError, setPasswordError] = useState<string | null>(null);
@@ -24,12 +35,7 @@ export function ResetPasswordForm() {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
-    if (isPasswordRecovery) {
-      setLinkStatus("valid");
-      return;
-    }
-
-    if (loading) {
+    if (isPasswordRecovery || loading) {
       return;
     }
 
@@ -37,7 +43,7 @@ export function ResetPasswordForm() {
     // session check resolves — wait out a short grace period before treating
     // the link as invalid rather than failing on the first render.
     const timer = setTimeout(() => {
-      setLinkStatus("invalid");
+      setTimedOut(true);
     }, RECOVERY_GRACE_PERIOD_MS);
 
     return () => clearTimeout(timer);

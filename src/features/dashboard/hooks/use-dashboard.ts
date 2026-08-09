@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
+import { useAsyncEffect } from "@/hooks/use-async-effect";
 import { cashReconciliationService } from "@/features/shifts/services/cash-reconciliation-service";
 import { dailyProfitSummaryService } from "@/features/shifts/services/daily-profit-summary-service";
 import { dailySalesSummaryService } from "@/features/shifts/services/daily-sales-summary-service";
@@ -125,9 +126,7 @@ export function useDashboard() {
     setLoading(false);
   }, [applyReadModel, clearDashboardState]);
 
-  useEffect(() => {
-    void loadDashboard();
-  }, [loadDashboard]);
+  useAsyncEffect(loadDashboard, [loadDashboard]);
 
   const openShift = useCallback(async () => {
     setMutating(true);

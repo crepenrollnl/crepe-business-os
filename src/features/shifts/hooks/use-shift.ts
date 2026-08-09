@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
+import { useAsyncEffect } from "@/hooks/use-async-effect";
 import { cashReconciliationService } from "../services/cash-reconciliation-service";
 import { dailyProfitSummaryService } from "../services/daily-profit-summary-service";
 import { dailySalesSummaryService } from "../services/daily-sales-summary-service";
@@ -156,9 +157,7 @@ export function useShift() {
     setLoading(false);
   }, [clearClosedExtras, loadClosedShiftExtras]);
 
-  useEffect(() => {
-    void loadShiftState();
-  }, [loadShiftState]);
+  useAsyncEffect(loadShiftState, [loadShiftState]);
 
   const openShift = useCallback(async () => {
     setMutating(true);

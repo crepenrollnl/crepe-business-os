@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
+import { useAsyncEffect } from "@/hooks/use-async-effect";
 import { expenseService } from "../services/expense-service";
 import type {
   ExpenseAccountOption,
@@ -54,9 +55,7 @@ export function useExpenses() {
     }));
   }, []);
 
-  useEffect(() => {
-    void load();
-  }, [load]);
+  useAsyncEffect(load, [load]);
 
   const submitExpense = useCallback(async (input: RecordExpenseInput) => {
     setState((prev) => ({ ...prev, isSaving: true, formError: null }));

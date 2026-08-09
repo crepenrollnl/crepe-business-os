@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
+import { useAsyncEffect } from "@/hooks/use-async-effect";
 import { reportingWorkspaceService } from "../services/reporting-workspace-service";
 import type { ReportingWorkspace } from "../types/reporting-workspace";
 
@@ -31,9 +32,7 @@ export function useReportingWorkspace() {
     setLoading(false);
   }, []);
 
-  useEffect(() => {
-    void loadWorkspace();
-  }, [loadWorkspace]);
+  useAsyncEffect(loadWorkspace, [loadWorkspace]);
 
   return {
     workspace,

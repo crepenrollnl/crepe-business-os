@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
+import { useState, type FormEvent } from "react";
 import {
   NumericInput,
   formatNumericInput,
@@ -39,6 +39,16 @@ function productLabel(
   return match?.name ?? productId;
 }
 
+function buildQuantityDrafts(
+  lines: SaleDetailLine[],
+): Record<string, string> {
+  const next: Record<string, string> = {};
+  for (const line of lines) {
+    next[line.line_id] = formatNumericInput(line.quantity);
+  }
+  return next;
+}
+
 export function SaleLinesSection({
   lines,
   products,
@@ -49,21 +59,23 @@ export function SaleLinesSection({
   onDeleteLine,
 }: SaleLinesSectionProps) {
   const [quantityDrafts, setQuantityDrafts] = useState<Record<string, string>>(
-    {},
+    () => buildQuantityDrafts(lines),
   );
+  const [prevLines, setPrevLines] = useState(lines);
   const [addProductId, setAddProductId] = useState("");
   const [addQuantity, setAddQuantity] = useState("");
   const [addUnitPrice, setAddUnitPrice] = useState("");
   const [addError, setAddError] = useState<string | null>(null);
   const [rowError, setRowError] = useState<string | null>(null);
 
-  useEffect(() => {
-    const next: Record<string, string> = {};
-    for (const line of lines) {
-      next[line.line_id] = formatNumericInput(line.quantity);
-    }
-    setQuantityDrafts(next);
-  }, [lines]);
+  // Reset local quantity drafts to match the server-provided lines whenever
+  // they change (e.g. after a save) — adjusted during render per
+  // https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes,
+  // instead of an effect, since it's a pure reaction to a prop change.
+  if (lines !== prevLines) {
+    setPrevLines(lines);
+    setQuantityDrafts(buildQuantityDrafts(lines));
+  }
 
   const handleUpdateQuantity = async (lineId: string) => {
     setRowError(null);

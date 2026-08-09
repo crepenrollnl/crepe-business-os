@@ -189,7 +189,7 @@ describe("cashReconciliationService (DEV-113)", () => {
       });
 
       let call = 0;
-      supabaseMock.from.mockImplementation((table: string) => {
+      supabaseMock.from.mockImplementation(() => {
         call += 1;
         if (call === 1) {
           return { select: shiftLookup.select };

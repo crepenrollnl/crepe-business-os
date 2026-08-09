@@ -227,23 +227,32 @@ function PurchaseDocumentForm({
   const isDraftValid = Object.keys(draftFieldErrors).length === 0;
   const isReceiveValid = Object.keys(receiveFieldErrors).length === 0;
 
-  const [taxPreview, setTaxPreview] = useState<{
+  const [taxPreviewState, setTaxPreview] = useState<{
     error: string | null;
     data: PurchaseTaxResult | null;
   } | null>(null);
-  const [isTaxPreviewLoading, setIsTaxPreviewLoading] = useState(false);
+  const [isTaxPreviewLoadingState, setIsTaxPreviewLoading] = useState(false);
+
+  // The RPC preview only applies once the draft has enough content to price
+  // (matches validateDraft's own requirements) — that check is pure
+  // derivation from formValues, so it happens at render time, not in the
+  // effect. The effect below owns only the genuine external subscription:
+  // debouncing edits and awaiting the tax preview RPC.
+  const hasTaxPreviewInputs =
+    formValues.lines.length > 0 && Boolean(formValues.purchased_at);
 
   // Debounced: re-requests the tax preview RPC after edits settle, instead
   // of calculating in-browser synchronously on every keystroke.
   useEffect(() => {
-    const values = draftToValues(formValues);
-    if (values.lines.length === 0 || !values.purchased_at) {
-      setTaxPreview(null);
-      setIsTaxPreviewLoading(false);
+    if (!hasTaxPreviewInputs) {
       return;
     }
 
+    const values = draftToValues(formValues);
     let cancelled = false;
+    // Marks the start of the debounce+RPC subscription below, not derived
+    // state — there's no render-time value "pending fetch" can come from.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setIsTaxPreviewLoading(true);
 
     const timerId = window.setTimeout(() => {
@@ -273,7 +282,10 @@ function PurchaseDocumentForm({
       cancelled = true;
       window.clearTimeout(timerId);
     };
-  }, [formValues, purchase?.id, suppliers]);
+  }, [hasTaxPreviewInputs, formValues, purchase?.id, suppliers]);
+
+  const taxPreview = hasTaxPreviewInputs ? taxPreviewState : null;
+  const isTaxPreviewLoading = hasTaxPreviewInputs && isTaxPreviewLoadingState;
 
   const subtotal = useMemo(() => {
     return roundMoney(

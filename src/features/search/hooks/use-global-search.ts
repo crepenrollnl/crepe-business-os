@@ -13,10 +13,10 @@ const MIN_QUERY_LENGTH = 2;
  */
 export function useGlobalSearch() {
   const [query, setQuery] = useState("");
-  const [results, setResults] = useState<SearchResult[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [hasSearched, setHasSearched] = useState(false);
+  const [rawResults, setResults] = useState<SearchResult[]>([]);
+  const [rawLoading, setLoading] = useState(false);
+  const [rawError, setError] = useState<string | null>(null);
+  const [rawHasSearched, setHasSearched] = useState(false);
 
   const runSearch = useCallback(async (value: string) => {
     const trimmed = value.trim();
@@ -48,17 +48,19 @@ export function useGlobalSearch() {
     setHasSearched(true);
   }, []);
 
-  useEffect(() => {
-    const trimmed = query.trim();
+  // Below MIN_QUERY_LENGTH there is nothing to search — derived directly
+  // from `query` at render time rather than reset via effect.
+  const isQueryTooShort = query.trim().length < MIN_QUERY_LENGTH;
 
-    if (trimmed.length < MIN_QUERY_LENGTH) {
-      setResults([]);
-      setError(null);
-      setLoading(false);
-      setHasSearched(false);
+  useEffect(() => {
+    if (isQueryTooShort) {
       return;
     }
 
+    // Marks the start of the debounce+search subscription below, not
+    // derived state — there's no render-time value "pending search" can
+    // come from.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true);
     const timer = window.setTimeout(() => {
       void runSearch(query);
@@ -67,7 +69,12 @@ export function useGlobalSearch() {
     return () => {
       window.clearTimeout(timer);
     };
-  }, [query, runSearch]);
+  }, [isQueryTooShort, query, runSearch]);
+
+  const results = isQueryTooShort ? [] : rawResults;
+  const error = isQueryTooShort ? null : rawError;
+  const loading = !isQueryTooShort && rawLoading;
+  const hasSearched = !isQueryTooShort && rawHasSearched;
 
   const clear = useCallback(() => {
     setQuery("");

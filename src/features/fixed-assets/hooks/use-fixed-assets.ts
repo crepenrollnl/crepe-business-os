@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
+import { useAsyncEffect } from "@/hooks/use-async-effect";
 import { fixedAssetService } from "../services/fixed-asset-service";
 import type {
   FixedAssetWithDepreciation,
@@ -77,9 +78,7 @@ export function useFixedAssets() {
     }));
   }, []);
 
-  useEffect(() => {
-    void load();
-  }, [load]);
+  useAsyncEffect(load, [load]);
 
   const submitAsset = useCallback(async (input: RegisterFixedAssetInput) => {
     setState((prev) => ({ ...prev, isSaving: true, formError: null }));
