@@ -20,6 +20,9 @@ type IngredientModalProps = {
   suppliers: Supplier[];
   isSaving: boolean;
   error: string | null;
+  /** Number of recipes referencing `item`'s ingredient; null while unknown/not applicable. */
+  recipeUsageCount: number | null;
+  isCheckingRecipeUsage: boolean;
   onClose: () => void;
   onSave: (values: IngredientFormValues) => Promise<boolean>;
 };
@@ -133,6 +136,8 @@ function IngredientModalForm({
   suppliers,
   isSaving,
   error,
+  recipeUsageCount,
+  isCheckingRecipeUsage,
   onClose,
   onSave,
 }: IngredientModalFormProps) {
@@ -174,6 +179,16 @@ function IngredientModalForm({
 
   const inputClassName =
     "block w-full rounded-lg border border-zinc-300 bg-white px-3 py-2.5 text-sm text-zinc-900 shadow-sm outline-none transition-colors placeholder:text-zinc-400 focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20";
+
+  // Locked while the usage check is in flight too, so the field doesn't
+  // briefly appear editable before flipping to disabled.
+  const isUnitLocked =
+    isCheckingRecipeUsage || (recipeUsageCount !== null && recipeUsageCount > 0);
+  const unitLockTitle = isCheckingRecipeUsage
+    ? "Checking recipe usage..."
+    : recipeUsageCount !== null && recipeUsageCount > 0
+      ? `Unit is locked — used in ${recipeUsageCount} recipe${recipeUsageCount === 1 ? "" : "s"}. Remove the ingredient from those recipes first to change the unit.`
+      : undefined;
 
   const nameError = showFieldError("name");
   const categoryError = showFieldError("category_id");
@@ -285,11 +300,19 @@ function IngredientModalForm({
             value={formValues.unit}
             onChange={(event) => updateField("unit", event.target.value)}
             onBlur={() => setTouched((current) => ({ ...current, unit: true }))}
-            className={inputClassName}
+            className={`${inputClassName} disabled:cursor-not-allowed disabled:bg-zinc-50 disabled:text-zinc-500`}
             placeholder="e.g. kg, L, pcs"
             aria-invalid={Boolean(unitError)}
+            disabled={isUnitLocked}
+            title={unitLockTitle}
           />
           {unitError && <p className="text-sm text-red-600">{unitError}</p>}
+          {!unitError && recipeUsageCount !== null && recipeUsageCount > 0 && (
+            <p className="text-sm text-zinc-500">
+              Used in {recipeUsageCount} recipe
+              {recipeUsageCount === 1 ? "" : "s"} — unit is locked.
+            </p>
+          )}
         </div>
 
         <div className="grid gap-4 sm:grid-cols-3">
@@ -387,6 +410,8 @@ export function IngredientModal({
   suppliers,
   isSaving,
   error,
+  recipeUsageCount,
+  isCheckingRecipeUsage,
   onClose,
   onSave,
 }: IngredientModalProps) {
@@ -411,6 +436,8 @@ export function IngredientModal({
         suppliers={suppliers}
         isSaving={isSaving}
         error={error}
+        recipeUsageCount={recipeUsageCount}
+        isCheckingRecipeUsage={isCheckingRecipeUsage}
         onClose={onClose}
         onSave={onSave}
       />

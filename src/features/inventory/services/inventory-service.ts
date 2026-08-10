@@ -69,6 +69,93 @@ function toUserError(error: unknown, fallback: string): string {
   });
 }
 
+function unitChangeBlockedByRecipesError(usageCount: number): string {
+  return `Cannot change unit: this ingredient is used in ${usageCount} recipe${
+    usageCount === 1 ? "" : "s"
+  }. Recipes lock in the unit when saved — remove the ingredient from those recipes first to change it.`;
+}
+
+async function countRecipeItemsForIngredient(
+  ingredientId: string,
+): Promise<ServiceResult<number>> {
+  try {
+    const { count, error } = await supabase
+      .from("recipe_items")
+      .select("id", { count: "exact", head: true })
+      .eq("ingredient_id", ingredientId);
+
+    if (error) {
+      return {
+        data: null,
+        error: toUserError(error, "Failed to check recipe usage"),
+      };
+    }
+
+    return { data: count ?? 0, error: null };
+  } catch (error) {
+    return {
+      data: null,
+      error: toUserError(error, "Failed to check recipe usage"),
+    };
+  }
+}
+
+/**
+ * Unit is a free-text snapshot on recipe_items (no FK/CHECK to
+ * ingredients.unit), copied only when a recipe line is created or its
+ * ingredient re-selected. Changing an ingredient's unit after recipes
+ * already reference it leaves those recipes silently stale, which can
+ * later sum mismatched units during requirement aggregation. Block the
+ * change at the source instead. recipe_components has no ingredient_id
+ * column (it links recipe-to-recipe for the assembly layer), so only
+ * recipe_items needs checking.
+ */
+async function validateUnitChange(
+  id: string,
+  requestedUnit: string,
+): Promise<ServiceResult<true>> {
+  try {
+    const { data: current, error } = await supabase
+      .from("ingredients")
+      .select("unit")
+      .eq("id", id)
+      .single();
+
+    if (error) {
+      return {
+        data: null,
+        error: toUserError(error, "Failed to validate unit change"),
+      };
+    }
+
+    if (current.unit === requestedUnit) {
+      return { data: true, error: null };
+    }
+
+    const usageResult = await countRecipeItemsForIngredient(id);
+
+    if (usageResult.error) {
+      return { data: null, error: usageResult.error };
+    }
+
+    const usageCount = usageResult.data ?? 0;
+
+    if (usageCount > 0) {
+      return {
+        data: null,
+        error: unitChangeBlockedByRecipesError(usageCount),
+      };
+    }
+
+    return { data: true, error: null };
+  } catch (error) {
+    return {
+      data: null,
+      error: toUserError(error, "Failed to validate unit change"),
+    };
+  }
+}
+
 async function findDuplicateName(
   name: string,
   excludeId?: string,
@@ -333,6 +420,12 @@ export const inventoryService = {
         return { data: null, error: DUPLICATE_NAME_ERROR };
       }
 
+      const unitChangeResult = await validateUnitChange(id, input.unit.trim());
+
+      if (unitChangeResult.error) {
+        return { data: null, error: unitChangeResult.error };
+      }
+
       const referenceResult = getReferenceData(await fetchReferenceData());
 
       if ("error" in referenceResult) {
@@ -366,6 +459,17 @@ export const inventoryService = {
         error: toUserError(error, "Failed to update ingredient"),
       };
     }
+  },
+
+  /**
+   * Number of recipe_items rows referencing this ingredient — used by the
+   * edit form to lock the Unit field before the user hits an error on save,
+   * not just as a save-time guard.
+   */
+  async getIngredientRecipeUsageCount(
+    id: string,
+  ): Promise<ServiceResult<number>> {
+    return countRecipeItemsForIngredient(id);
   },
 
   async deleteIngredient(id: string): Promise<ServiceResult<null>> {

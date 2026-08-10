@@ -30,6 +30,8 @@ export function InventoryPage() {
     toggleSort,
     isModalOpen,
     editingItem,
+    recipeUsageCount,
+    isCheckingRecipeUsage,
     deleteTarget,
     isSaving,
     isDeleting,
@@ -96,6 +98,8 @@ export function InventoryPage() {
           suppliers={suppliers}
           isSaving={isSaving}
           error={actionError}
+          recipeUsageCount={recipeUsageCount}
+          isCheckingRecipeUsage={isCheckingRecipeUsage}
           onClose={closeModal}
           onSave={saveIngredient}
         />

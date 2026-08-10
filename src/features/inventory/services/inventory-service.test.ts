@@ -40,7 +40,7 @@ const INGREDIENT_ID = "11111111-1111-4111-8111-111111111111";
 const CATEGORY_ID = "22222222-2222-4222-8222-222222222222";
 const SUPPLIER_ID = "33333333-3333-4333-8333-333333333333";
 
-type QueryResult = { data: unknown; error: unknown };
+type QueryResult = { data: unknown; error: unknown; count?: number | null };
 
 /**
  * Minimal thenable query-builder stub matching supabase-js's chainable
@@ -519,6 +519,163 @@ describe("inventoryService", () => {
 
       expect(result.data).toBeNull();
       expect(result.error).toBe("timeout");
+    });
+
+    describe("unit change guard", () => {
+      it("blocks changing the unit when the ingredient is used in recipes, with a clear message instead of a raw Postgres error", async () => {
+        mockTables({
+          ingredients: [
+            { data: [{ id: INGREDIENT_ID, name: "Flour" }], error: null }, // duplicate-name check
+            { data: { unit: "kg" }, error: null }, // current-unit lookup
+          ],
+          recipe_items: { data: null, error: null, count: 2 },
+        });
+
+        const result = await inventoryService.updateIngredient(INGREDIENT_ID, {
+          ...updateInput,
+          unit: "g",
+        });
+
+        expect(result.data).toBeNull();
+        expect(result.error).toBe(
+          "Cannot change unit: this ingredient is used in 2 recipes. Recipes lock in the unit when saved — remove the ingredient from those recipes first to change it.",
+        );
+        // Never reached the actual UPDATE / reference-data load.
+        expect(supabaseMock.from).not.toHaveBeenCalledWith(
+          "ingredient_categories",
+        );
+      });
+
+      it("uses singular phrasing for exactly one recipe", async () => {
+        mockTables({
+          ingredients: [
+            { data: [{ id: INGREDIENT_ID, name: "Flour" }], error: null },
+            { data: { unit: "kg" }, error: null },
+          ],
+          recipe_items: { data: null, error: null, count: 1 },
+        });
+
+        const result = await inventoryService.updateIngredient(INGREDIENT_ID, {
+          ...updateInput,
+          unit: "g",
+        });
+
+        expect(result.error).toBe(
+          "Cannot change unit: this ingredient is used in 1 recipe. Recipes lock in the unit when saved — remove the ingredient from those recipes first to change it.",
+        );
+      });
+
+      it("allows changing the unit when the ingredient is not used in any recipe", async () => {
+        mockTables({
+          ingredients: [
+            { data: [{ id: INGREDIENT_ID, name: "Flour" }], error: null },
+            { data: { unit: "kg" }, error: null },
+            { data: ingredientRow({ unit: "g" }), error: null }, // the update itself
+          ],
+          recipe_items: { data: null, error: null, count: 0 },
+          ingredient_categories: { data: [], error: null },
+          suppliers: { data: [], error: null },
+        });
+
+        const result = await inventoryService.updateIngredient(INGREDIENT_ID, {
+          ...updateInput,
+          unit: "g",
+        });
+
+        expect(result.error).toBeNull();
+        expect(result.data?.unit).toBe("g");
+      });
+
+      it("does not check recipe usage at all when unit is unchanged, even if the ingredient is used in recipes elsewhere", async () => {
+        mockTables({
+          ingredients: [
+            { data: [{ id: INGREDIENT_ID, name: "Flour" }], error: null },
+            { data: { unit: "kg" }, error: null },
+            { data: ingredientRow({ minimum_stock: 5 }), error: null },
+          ],
+          ingredient_categories: { data: [], error: null },
+          suppliers: { data: [], error: null },
+        });
+
+        const result = await inventoryService.updateIngredient(INGREDIENT_ID, {
+          ...updateInput,
+          unit: "kg", // same as current — no change
+          minimum_stock: 5,
+        });
+
+        expect(result.error).toBeNull();
+        expect(result.data?.minimum_stock).toBe(5);
+        expect(supabaseMock.from).not.toHaveBeenCalledWith("recipe_items");
+      });
+
+      it("propagates an error from the current-unit lookup itself", async () => {
+        mockTables({
+          ingredients: [
+            { data: [], error: null },
+            { data: null, error: { message: "unit lookup failed" } },
+          ],
+        });
+
+        const result = await inventoryService.updateIngredient(INGREDIENT_ID, {
+          ...updateInput,
+          unit: "g",
+        });
+
+        expect(result.data).toBeNull();
+        expect(result.error).toBe("unit lookup failed");
+      });
+
+      it("propagates an error from the recipe-usage count query", async () => {
+        mockTables({
+          ingredients: [
+            { data: [], error: null },
+            { data: { unit: "kg" }, error: null },
+          ],
+          recipe_items: { data: null, error: { message: "count failed" } },
+        });
+
+        const result = await inventoryService.updateIngredient(INGREDIENT_ID, {
+          ...updateInput,
+          unit: "g",
+        });
+
+        expect(result.data).toBeNull();
+        expect(result.error).toBe("count failed");
+      });
+    });
+  });
+
+  describe("getIngredientRecipeUsageCount", () => {
+    it("returns the count of recipe_items rows referencing the ingredient", async () => {
+      mockTables({ recipe_items: { data: null, error: null, count: 3 } });
+
+      const result =
+        await inventoryService.getIngredientRecipeUsageCount(INGREDIENT_ID);
+
+      expect(result.error).toBeNull();
+      expect(result.data).toBe(3);
+    });
+
+    it("returns 0 when the ingredient is not referenced by any recipe", async () => {
+      mockTables({ recipe_items: { data: null, error: null, count: 0 } });
+
+      const result =
+        await inventoryService.getIngredientRecipeUsageCount(INGREDIENT_ID);
+
+      expect(result.error).toBeNull();
+      expect(result.data).toBe(0);
+    });
+
+    it("propagates a query error", async () => {
+      mockTables({
+        recipe_items: { data: null, error: { message: "count query failed" } },
+      });
+
+      const result =
+        await inventoryService.getIngredientRecipeUsageCount(INGREDIENT_ID);
+
+      expect(result.data).toBeNull();
+      expect(result.error).toBe("count query failed");
     });
   });
 

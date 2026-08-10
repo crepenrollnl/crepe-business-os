@@ -141,6 +141,10 @@ export function useInventory() {
   const [editingItem, setEditingItem] = useState<IngredientWithRelations | null>(
     null,
   );
+  const [recipeUsageCount, setRecipeUsageCount] = useState<number | null>(
+    null,
+  );
+  const [isCheckingRecipeUsage, setIsCheckingRecipeUsage] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<IngredientWithRelations | null>(
     null,
   );
@@ -263,22 +267,41 @@ export function useInventory() {
     [sortField],
   );
 
+  const loadRecipeUsage = useCallback(async (ingredientId: string) => {
+    setRecipeUsageCount(null);
+    setIsCheckingRecipeUsage(true);
+
+    const result =
+      await inventoryService.getIngredientRecipeUsageCount(ingredientId);
+
+    setRecipeUsageCount(result.error ? 0 : (result.data ?? 0));
+    setIsCheckingRecipeUsage(false);
+  }, []);
+
   const openCreateModal = useCallback(() => {
     setEditingItem(null);
+    setRecipeUsageCount(null);
+    setIsCheckingRecipeUsage(false);
     setActionError(null);
     setIsModalOpen(true);
   }, []);
 
-  const openEditModal = useCallback((item: IngredientWithRelations) => {
-    setEditingItem(item);
-    setActionError(null);
-    setIsModalOpen(true);
-  }, []);
+  const openEditModal = useCallback(
+    (item: IngredientWithRelations) => {
+      setEditingItem(item);
+      setActionError(null);
+      setIsModalOpen(true);
+      void loadRecipeUsage(item.id);
+    },
+    [loadRecipeUsage],
+  );
 
   const closeModal = useCallback(() => {
     setIsModalOpen(false);
     setEditingItem(null);
     setActionError(null);
+    setRecipeUsageCount(null);
+    setIsCheckingRecipeUsage(false);
   }, []);
 
   const openDeleteDialog = useCallback((item: IngredientWithRelations) => {
@@ -356,6 +379,8 @@ export function useInventory() {
     toggleSort,
     isModalOpen,
     editingItem,
+    recipeUsageCount,
+    isCheckingRecipeUsage,
     deleteTarget,
     isSaving,
     isDeleting,
