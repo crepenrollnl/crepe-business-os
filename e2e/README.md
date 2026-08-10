@@ -32,9 +32,27 @@ file via `storageState` instead of logging in again.
 
 ## Test data policy
 
-No ingredients/recipes/suppliers/etc. are seeded or asserted on. Specs that
-need business data should create it themselves with an unmistakable prefix
-(e.g. `TEST `, matching the manual SQL verification scenarios used
-elsewhere this session) and clean it up, since there is no per-test
-transaction rollback available across real HTTP requests the way there is
-for a single SQL session.
+No ingredients/recipes/suppliers/etc. are seeded ahead of time. Specs that
+need business data (unlike `shift.spec.ts`, which only toggles a single
+status field and leaves nothing behind) create it themselves through the
+real UI, with an unmistakable prefix (`TEST `) on every name/label.
+
+**Decision (09.08.2026): specs do NOT delete this data afterward.** An
+earlier draft of this policy said specs should "clean it up" — that turned
+out to be unenforceable with the app's actual capabilities, discovered
+while building `purchase-receive.spec.ts`: `deleteIngredient` refuses once
+an ingredient is used in a purchase (even a draft), there is no
+`deleteSupplier` in the codebase at all, and `purchaseService` has no
+user-facing purchase deletion (only an internal rollback of a row it just
+inserted, immediately, on the same request). So instead:
+
+- Every spec creates fresh `TEST `-prefixed rows on every run (no shared
+  fixtures assumed to exist, no dependence on a previous run's leftovers)
+  so repeated/parallel runs never collide.
+- Nothing is deleted at the end of a spec. This is a deliberate accepted
+  tradeoff, not an oversight — the shared dev Supabase project will
+  accumulate `TEST `-prefixed rows over time.
+- Periodic manual cleanup is a separate, human-triggered step:
+  [`scripts/e2e-cleanup.sql`](../scripts/e2e-cleanup.sql), run by hand in
+  the Supabase SQL Editor whenever the clutter is worth clearing. It is
+  never run automatically (not from CI, not from any test).
