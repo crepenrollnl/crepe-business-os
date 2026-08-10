@@ -1,4 +1,12 @@
+import path from "node:path";
+import dotenv from "dotenv";
 import { defineConfig, devices } from "@playwright/test";
+
+// Load .env.local for local runs (auth.setup.ts reads E2E_TEST_EMAIL/
+// E2E_TEST_PASSWORD from process.env). In CI the file doesn't exist and
+// the secrets are already in process.env via GitHub Secrets -- dotenv
+// no-ops on a missing file and never overwrites an existing env var.
+dotenv.config({ path: path.resolve(__dirname, ".env.local") });
 
 const PORT = 3000;
 const baseURL = `http://localhost:${PORT}`;
