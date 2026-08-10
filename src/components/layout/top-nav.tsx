@@ -1,4 +1,5 @@
-import { UserAvatar } from "@/components/ui/user-avatar";
+import { LogoutButton } from "@/features/auth/components/logout-button";
+import { GlobalSearch } from "@/features/search/components/global-search";
 
 type TopNavProps = {
   onMenuClick: () => void;
@@ -6,8 +7,8 @@ type TopNavProps = {
 
 export function TopNav({ onMenuClick }: TopNavProps) {
   return (
-    <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-zinc-200 bg-white px-4 sm:px-6 lg:px-8">
-      <div className="flex items-center gap-4">
+    <header className="sticky top-0 z-30 flex h-16 items-center justify-between gap-3 border-b border-zinc-200 bg-white px-4 sm:px-6 lg:px-8">
+      <div className="flex shrink-0 items-center gap-4">
         <button
           type="button"
           aria-label="Open navigation menu"
@@ -31,12 +32,18 @@ export function TopNav({ onMenuClick }: TopNavProps) {
           </svg>
         </button>
 
-        <h1 className="text-lg font-semibold tracking-tight text-zinc-900 sm:text-xl">
+        <h1 className="hidden text-lg font-semibold tracking-tight text-zinc-900 sm:block sm:text-xl">
           Crepe&apos;n Roll OS
         </h1>
       </div>
 
-      <UserAvatar />
+      <div className="min-w-0 flex-1 max-w-xl">
+        <GlobalSearch />
+      </div>
+
+      <div className="shrink-0">
+        <LogoutButton />
+      </div>
     </header>
   );
 }

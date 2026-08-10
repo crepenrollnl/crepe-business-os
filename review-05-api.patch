@@ -1,0 +1,4 @@
+﻿# review-05-api.patch
+# DEV-015 / PRD-001: no API / Routes / Controllers changes in this task.
+# Existing thin App Router pages under src/app/production-execution/ were not modified.
+# Completion is invoked from the feature hook/service layer (productionSessionService.completeSession).

@@ -5,14 +5,13 @@ export type NavItem = {
 
 export const navItems: NavItem[] = [
   { label: "Dashboard", href: "/" },
-  { label: "Events", href: "#" },
-  { label: "Sales", href: "#" },
-  { label: "Products", href: "#" },
-  { label: "Ingredients", href: "#" },
-  { label: "Recipes", href: "#" },
-  { label: "Production", href: "#" },
-  { label: "Inventory", href: "#" },
-  { label: "Suppliers", href: "#" },
-  { label: "Reports", href: "#" },
-  { label: "Settings", href: "#" },
+  { label: "Inventory", href: "/inventory" },
+  { label: "Recipes", href: "/recipes" },
+  { label: "Purchases", href: "/purchases" },
+  { label: "Production Planning", href: "/production-planning" },
+  { label: "Production Execution", href: "/production-execution" },
+  { label: "Sales", href: "/sales" },
+  { label: "Expenses", href: "/expenses" },
+  { label: "Fixed Assets", href: "/fixed-assets" },
+  { label: "Reports", href: "/reports" },
 ];

@@ -1,0 +1,254 @@
+diff --git a/src/features/reporting-dashboard/components/reporting-dashboard-cards.tsx b/src/features/reporting-dashboard/components/reporting-dashboard-cards.tsx
+new file mode 100644
+index 0000000..ae1e0c6
+--- /dev/null
++++ b/src/features/reporting-dashboard/components/reporting-dashboard-cards.tsx
+@@ -0,0 +1,5 @@
++/**
++ * Workspace-compatible entry for the Reporting Dashboard composition.
++ * Same component identity as ReportingDashboardComposition - no passthrough wrapper.
++ */
++export { ReportingDashboardComposition as ReportingDashboardCards } from "./reporting-dashboard-composition";
+diff --git a/src/features/reporting-dashboard/components/reporting-dashboard-composition.tsx b/src/features/reporting-dashboard/components/reporting-dashboard-composition.tsx
+new file mode 100644
+index 0000000..1516695
+--- /dev/null
++++ b/src/features/reporting-dashboard/components/reporting-dashboard-composition.tsx
+@@ -0,0 +1,47 @@
++import { memo } from "react";
++import type { ReportingOverview } from "@/features/reporting-api/types/reporting-api";
++import { ReportingDashboardDataBinding } from "./reporting-dashboard-data-binding";
++import { isSameOverviewProps } from "./reporting-dashboard-overview-equality";
++import { ReportingDashboardPanel } from "./reporting-dashboard-panel";
++
++type ReportingDashboardCompositionProps = {
++  overview: ReportingOverview;
++};
++
++const PANEL_HEADING_ID = "reporting-dashboards-heading";
++const PANEL_TITLE = "Reporting dashboards";
++const GENERATED_AT_TIME_CLASS_NAME =
++  "font-medium tabular-nums text-zinc-800";
++
++/**
++ * Final presentational composition for Reporting Dashboard widgets.
++ * Hosted by the approved Reporting Workspace page - no duplicate page shell.
++ * Values come from approved overview DTOs - never recalculated.
++ */
++export const ReportingDashboardComposition = memo(
++  function ReportingDashboardComposition({
++    overview,
++  }: ReportingDashboardCompositionProps) {
++    return (
++      <ReportingDashboardPanel
++        headingId={PANEL_HEADING_ID}
++        title={PANEL_TITLE}
++        description={
++          <>
++            Overview values from the reporting API generated at{" "}
++            <time
++              className={GENERATED_AT_TIME_CLASS_NAME}
++              dateTime={overview.generated_at}
++            >
++              {overview.generated_at}
++            </time>
++            .
++          </>
++        }
++      >
++        <ReportingDashboardDataBinding overview={overview} />
++      </ReportingDashboardPanel>
++    );
++  },
++  isSameOverviewProps,
++);
+diff --git a/src/features/reporting-dashboard/components/reporting-dashboard-data-binding.tsx b/src/features/reporting-dashboard/components/reporting-dashboard-data-binding.tsx
+new file mode 100644
+index 0000000..1db0cef
+--- /dev/null
++++ b/src/features/reporting-dashboard/components/reporting-dashboard-data-binding.tsx
+@@ -0,0 +1,33 @@
++import { memo } from "react";
++import type { ReportingOverview } from "@/features/reporting-api/types/reporting-api";
++import { isSameOverviewProps } from "./reporting-dashboard-overview-equality";
++import { ReportingDashboardWidgets } from "./widgets/reporting-dashboard-widgets";
++
++type ReportingDashboardDataBindingProps = {
++  overview: ReportingOverview;
++};
++
++const REGION_ARIA_LABEL = "Bound reporting dashboard overview";
++const REGION_CLASS_NAME = "min-w-0";
++
++/**
++ * Final UI integration for approved Reporting Dashboard data bindings.
++ * Layout spacing is owned by ReportingDashboardPanel - this layer binds DTOs only.
++ */
++export const ReportingDashboardDataBinding = memo(
++  function ReportingDashboardDataBinding({
++    overview,
++  }: ReportingDashboardDataBindingProps) {
++    return (
++      <div
++        role="region"
++        aria-label={REGION_ARIA_LABEL}
++        data-reporting-generated-at={overview.generated_at}
++        className={REGION_CLASS_NAME}
++      >
++        <ReportingDashboardWidgets overview={overview} />
++      </div>
++    );
++  },
++  isSameOverviewProps,
++);
+diff --git a/src/features/reporting-dashboard/components/reporting-dashboard-empty-overview.tsx b/src/features/reporting-dashboard/components/reporting-dashboard-empty-overview.tsx
+new file mode 100644
+index 0000000..7fad7aa
+--- /dev/null
++++ b/src/features/reporting-dashboard/components/reporting-dashboard-empty-overview.tsx
+@@ -0,0 +1,25 @@
++import { memo } from "react";
++import { ReportingDashboardPanel } from "./reporting-dashboard-panel";
++
++const EMPTY_HEADING_ID = "reporting-dashboards-empty-heading";
++const PANEL_TITLE = "Reporting dashboards";
++const EMPTY_MESSAGE_CLASS_NAME = "text-sm leading-relaxed text-zinc-600";
++const EMPTY_MESSAGE = "No reporting dashboard cards are available yet.";
++
++const EMPTY_OVERVIEW_BODY = (
++  <p className={EMPTY_MESSAGE_CLASS_NAME}>{EMPTY_MESSAGE}</p>
++);
++
++/**
++ * Presentational empty state when Reporting API overview is unavailable.
++ * Reuses the same panel shell as the bound composition - no duplicate containers.
++ */
++export const ReportingDashboardEmptyOverview = memo(
++  function ReportingDashboardEmptyOverview() {
++    return (
++      <ReportingDashboardPanel headingId={EMPTY_HEADING_ID} title={PANEL_TITLE}>
++        {EMPTY_OVERVIEW_BODY}
++      </ReportingDashboardPanel>
++    );
++  },
++);
+diff --git a/src/features/reporting-dashboard/components/reporting-dashboard-overview-equality.ts b/src/features/reporting-dashboard/components/reporting-dashboard-overview-equality.ts
+new file mode 100644
+index 0000000..3f769a3
+--- /dev/null
++++ b/src/features/reporting-dashboard/components/reporting-dashboard-overview-equality.ts
+@@ -0,0 +1,16 @@
++import type { ReportingOverview } from "@/features/reporting-api/types/reporting-api";
++
++type OverviewProps = {
++  overview: ReportingOverview;
++};
++
++/**
++ * Memo boundary for Composition ??? DataBinding ??? Widgets.
++ * Compares the approved overview object identity only - no field recalculation.
++ */
++export function isSameOverviewProps(
++  previous: OverviewProps,
++  next: OverviewProps,
++): boolean {
++  return previous.overview === next.overview;
++}
+diff --git a/src/features/reporting-dashboard/components/widgets/reporting-dashboard-widgets.tsx b/src/features/reporting-dashboard/components/widgets/reporting-dashboard-widgets.tsx
+new file mode 100644
+index 0000000..aacdb65
+--- /dev/null
++++ b/src/features/reporting-dashboard/components/widgets/reporting-dashboard-widgets.tsx
+@@ -0,0 +1,92 @@
++import { memo } from "react";
++import type { ReportingOverview } from "@/features/reporting-api/types/reporting-api";
++import { isSameOverviewProps } from "../reporting-dashboard-overview-equality";
++import { AlertsReportingWidget } from "./alerts-reporting-widget";
++import { AuditReportingWidget } from "./audit-reporting-widget";
++import { CompanyReportingWidget } from "./company-reporting-widget";
++import { ExecutiveReportingWidget } from "./executive-reporting-widget";
++import { InventoryReportingWidget } from "./inventory-reporting-widget";
++import { KpiReportingWidget } from "./kpi-reporting-widget";
++import { ProductionReportingWidget } from "./production-reporting-widget";
++import { UserActivityReportingWidget } from "./user-activity-reporting-widget";
++
++type ReportingDashboardWidgetsProps = {
++  overview: ReportingOverview;
++};
++
++const SECTION_TITLES = {
++  executive: "Executive Dashboard",
++  kpi: "KPI Dashboard",
++  company: "Company Dashboard",
++  inventory: "Inventory Dashboard",
++  production: "Production Dashboard",
++  alerts: "Alerts Dashboard",
++  audit: "Audit Dashboard",
++  user_activity: "User Activity Dashboard",
++} as const;
++
++const LIST_CLASS_NAME = "space-y-6 sm:space-y-8";
++const LIST_ARIA_LABEL = "Reporting dashboard section widgets";
++const LIST_ITEM_CLASS_NAME = "min-w-0";
++
++/**
++ * Reusable presentational widgets for Reporting API overview sections.
++ * Owns section list spacing only - outer panel spacing stays in ReportingDashboardPanel.
++ */
++export const ReportingDashboardWidgets = memo(function ReportingDashboardWidgets({
++  overview,
++}: ReportingDashboardWidgetsProps) {
++  return (
++    <div
++      className={LIST_CLASS_NAME}
++      role="list"
++      aria-label={LIST_ARIA_LABEL}
++    >
++      <div role="listitem" className={LIST_ITEM_CLASS_NAME}>
++        <ExecutiveReportingWidget
++          title={SECTION_TITLES.executive}
++          data={overview.executive}
++        />
++      </div>
++      <div role="listitem" className={LIST_ITEM_CLASS_NAME}>
++        <KpiReportingWidget title={SECTION_TITLES.kpi} data={overview.kpi} />
++      </div>
++      <div role="listitem" className={LIST_ITEM_CLASS_NAME}>
++        <CompanyReportingWidget
++          title={SECTION_TITLES.company}
++          data={overview.company}
++        />
++      </div>
++      <div role="listitem" className={LIST_ITEM_CLASS_NAME}>
++        <InventoryReportingWidget
++          title={SECTION_TITLES.inventory}
++          data={overview.inventory}
++        />
++      </div>
++      <div role="listitem" className={LIST_ITEM_CLASS_NAME}>
++        <ProductionReportingWidget
++          title={SECTION_TITLES.production}
++          data={overview.production}
++        />
++      </div>
++      <div role="listitem" className={LIST_ITEM_CLASS_NAME}>
++        <AlertsReportingWidget
++          title={SECTION_TITLES.alerts}
++          data={overview.alerts}
++        />
++      </div>
++      <div role="listitem" className={LIST_ITEM_CLASS_NAME}>
++        <AuditReportingWidget
++          title={SECTION_TITLES.audit}
++          data={overview.audit}
++        />
++      </div>
++      <div role="listitem" className={LIST_ITEM_CLASS_NAME}>
++        <UserActivityReportingWidget
++          title={SECTION_TITLES.user_activity}
++          data={overview.user_activity}
++        />
++      </div>
++    </div>
++  );
++}, isSameOverviewProps);
