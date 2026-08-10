@@ -8,6 +8,7 @@ import type {
   PlanningRecipeIngredient,
   ResolvedRecipeBom,
 } from "../types/recipe";
+import type { PlanValidationIssue } from "../types/validation";
 
 export interface IngredientRequirementDraft {
   ingredientId: EntityId;
@@ -48,22 +49,39 @@ export interface AggregateIngredientNeedsOptions {
 }
 
 /**
+ * Discriminated result of `aggregateIngredientNeeds`. `recipe_items.unit`
+ * is a free-text snapshot (see planning-mappers module docs / AGENTS.md
+ * unit-consistency finding) that can drift from an ingredient's current
+ * unit once any one recipe is re-saved. Summing raw quantities across
+ * recipes that disagree on unit for the same ingredient would silently
+ * produce a meaningless number, so a conflict is surfaced as an issue
+ * instead of guessing which unit is "right".
+ */
+export type AggregateIngredientNeedsResult =
+  | { ok: true; drafts: IngredientRequirementDraft[] }
+  | { ok: false; issues: readonly PlanValidationIssue[] };
+
+/**
  * Aggregate raw ingredient needs from plan lines and resolved BOMs.
  * Lines whose recipe is missing from `bomsByRecipeId` are skipped
  * (callers should validate first).
  *
- * Aggregation happens before inventory comparison.
+ * Aggregation happens before inventory comparison. Every distinct unit
+ * seen per ingredient is tracked; an ingredient aggregated from BOM rows
+ * that disagree on unit fails with `inconsistent_ingredient_unit` instead
+ * of silently summing mismatched units under the first unit encountered.
+ *
  * Complexity: O(lines × ingredients) with Map lookups — O(n) over BOM rows.
  */
 export function aggregateIngredientNeeds(
   lines: readonly ProductionPlanLine[],
   bomsByRecipeId: ReadonlyMap<EntityId, ResolvedRecipeBom>,
   options?: AggregateIngredientNeedsOptions,
-): IngredientRequirementDraft[] {
+): AggregateIngredientNeedsResult {
   const decimalPlaces = options?.quantityDecimalPlaces;
   const byIngredient = new Map<
     EntityId,
-    { requiredQuantity: Quantity; unit: Unit }
+    { requiredQuantity: Quantity; unit: Unit; units: Set<Unit> }
   >();
 
   for (const line of lines) {
@@ -86,13 +104,33 @@ export function aggregateIngredientNeeds(
           scaled,
           decimalPlaces,
         );
+        existing.units.add(ingredient.unit);
       } else {
         byIngredient.set(ingredient.ingredientId, {
           requiredQuantity: scaled,
           unit: ingredient.unit,
+          units: new Set([ingredient.unit]),
         });
       }
     }
+  }
+
+  const issues: PlanValidationIssue[] = [];
+  for (const [ingredientId, value] of byIngredient) {
+    if (value.units.size > 1) {
+      const conflictingUnits = [...value.units]
+        .map((unit) => `"${unit}"`)
+        .join(", ");
+      issues.push({
+        code: "inconsistent_ingredient_unit",
+        message: `Ingredient has inconsistent units across recipes: found ${conflictingUnits}. Fix the affected recipes (each recipe line stores the ingredient's unit as it was when saved) before planning.`,
+        ingredientId,
+      });
+    }
+  }
+
+  if (issues.length > 0) {
+    return { ok: false, issues };
   }
 
   const drafts: IngredientRequirementDraft[] = [];
@@ -103,7 +141,7 @@ export function aggregateIngredientNeeds(
       unit: value.unit,
     });
   }
-  return drafts;
+  return { ok: true, drafts };
 }
 
 export interface MapIngredientRequirementsOptions {

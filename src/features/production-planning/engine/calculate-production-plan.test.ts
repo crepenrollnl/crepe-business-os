@@ -197,6 +197,81 @@ describe("calculateProductionPlan", () => {
     expect(output.result.ingredientRequirements[0].shortageQuantity).toBe(0);
   });
 
+  it("rejects aggregation when the same ingredient appears with different units across recipes", () => {
+    const output = calculateProductionPlan(
+      baseInput({
+        recipes: [
+          makeRecipe({ id: "recipe-a", finishedGoodId: "fg-a", yieldQuantity: 1 }),
+          makeRecipe({ id: "recipe-b", finishedGoodId: "fg-b", yieldQuantity: 1 }),
+        ],
+        recipeIngredients: [
+          makeIngredient({
+            recipeId: "recipe-a",
+            ingredientId: "flour",
+            quantityPerYield: 2,
+            unit: "kg",
+          }),
+          makeIngredient({
+            recipeId: "recipe-b",
+            ingredientId: "flour",
+            quantityPerYield: 500,
+            unit: "g",
+          }),
+        ],
+        lines: [
+          makeLine({ finishedGoodId: "fg-a", recipeId: "recipe-a", plannedQuantity: 1 }),
+          makeLine({ finishedGoodId: "fg-b", recipeId: "recipe-b", plannedQuantity: 1 }),
+        ],
+        inventory: makeInventory([["flour", 10]]),
+      }),
+    );
+
+    expect(output.ok).toBe(false);
+    if (output.ok) return;
+
+    const issue = output.issues.find(
+      (candidate) => candidate.code === "inconsistent_ingredient_unit",
+    );
+    expect(issue).toBeDefined();
+    expect(issue?.ingredientId).toBe("flour");
+    expect(issue?.message).toContain('"kg"');
+    expect(issue?.message).toContain('"g"');
+  });
+
+  it("does not flag ingredients that share the same unit across every recipe (no false positive)", () => {
+    // Same setup as "aggregates shared ingredients across recipes" above —
+    // both recipes use "kg" for flour, so this must stay ok.
+    const output = calculateProductionPlan(
+      baseInput({
+        recipes: [
+          makeRecipe({ id: "recipe-a", finishedGoodId: "fg-a", yieldQuantity: 1 }),
+          makeRecipe({ id: "recipe-b", finishedGoodId: "fg-b", yieldQuantity: 1 }),
+        ],
+        recipeIngredients: [
+          makeIngredient({
+            recipeId: "recipe-a",
+            ingredientId: "flour",
+            quantityPerYield: 2,
+            unit: "kg",
+          }),
+          makeIngredient({
+            recipeId: "recipe-b",
+            ingredientId: "flour",
+            quantityPerYield: 3,
+            unit: "kg",
+          }),
+        ],
+        lines: [
+          makeLine({ finishedGoodId: "fg-a", recipeId: "recipe-a", plannedQuantity: 1 }),
+          makeLine({ finishedGoodId: "fg-b", recipeId: "recipe-b", plannedQuantity: 1 }),
+        ],
+        inventory: makeInventory([["flour", 10]]),
+      }),
+    );
+
+    expect(output.ok).toBe(true);
+  });
+
   it("reports zero shortages when available equals required", () => {
     const output = calculateProductionPlan(
       baseInput({

@@ -244,6 +244,9 @@ DECLARE
   v_batch_count integer := 0;
   v_line_count integer := 0;
   v_updated integer;
+  v_conflict_ingredient_id uuid;
+  v_conflict_ingredient_name text;
+  v_conflict_units text;
 BEGIN
   IF p_session_id IS NULL THEN
     RAISE EXCEPTION 'Production session id is required.';
@@ -352,6 +355,39 @@ BEGIN
   ) <> v_line_count THEN
     RAISE EXCEPTION
       'Enter an actual produced quantity for every product before finishing.';
+  END IF;
+
+  -- Reject inconsistent units across the recipes actually being produced in
+  -- this session, for the same raw ingredient, before any consumption is
+  -- computed or any stock is touched. recipe_items.unit is a free-text
+  -- snapshot per recipe line (no FK/CHECK to ingredients.unit) copied only
+  -- when a recipe line is saved -- it can drift from an ingredient's
+  -- current unit, or disagree between two recipes saved at different
+  -- times. The consumption loop below sums raw recipe_items.quantity per
+  -- ingredient across every recipe in this session (tmp_production_consumption's
+  -- ON CONFLICT ... quantity = c.quantity + EXCLUDED.quantity); if two of
+  -- those rows disagreed on unit, that sum would be meaningless and would
+  -- still be fed straight into decrement_ingredient_stock as if it were
+  -- correct. Scoped with the same actual_produced_quantity IS NOT NULL /
+  -- > 0 filter the consumption loop uses below, so a line that will be
+  -- skipped there can't trigger a false conflict here.
+  SELECT ri.ingredient_id, i.name, string_agg(DISTINCT ri.unit, ', ' ORDER BY ri.unit)
+  INTO v_conflict_ingredient_id, v_conflict_ingredient_name, v_conflict_units
+  FROM production_session_lines psl
+  JOIN recipe_items ri ON ri.recipe_id = psl.recipe_id
+  JOIN ingredients i ON i.id = ri.ingredient_id
+  WHERE psl.production_session_id = p_session_id
+    AND psl.actual_produced_quantity IS NOT NULL
+    AND psl.actual_produced_quantity > 0
+  GROUP BY ri.ingredient_id, i.name
+  HAVING COUNT(DISTINCT ri.unit) > 1
+  LIMIT 1;
+
+  IF v_conflict_ingredient_id IS NOT NULL THEN
+    RAISE EXCEPTION
+      'Ingredient "%" has inconsistent units across the recipes in this production session (found: %). Fix the affected recipes before completing this session.',
+      v_conflict_ingredient_name,
+      v_conflict_units;
   END IF;
 
   DROP TABLE IF EXISTS tmp_production_consumption;
@@ -718,6 +754,16 @@ BEGIN
 END $$;
 
 -- Public entry point for Production Completion (authenticated clients).
+-- This function itself had no explicit REVOKE in this file (unlike
+-- decrement_ingredient_stock right below) -- the live database is
+-- protected today via sql/074's blanket REVOKE over every public-schema
+-- function, but this file was not self-sufficient on a clean re-apply
+-- without also reapplying sql/074. Revoked here explicitly, matching
+-- confirm_production_plan's pattern in sql/078. authenticated keeps
+-- EXECUTE -- unlike decrement_ingredient_stock, this is the intended
+-- direct entry point for authorized users, not an internal helper.
+REVOKE ALL ON FUNCTION complete_production_session(uuid, text, jsonb, uuid) FROM PUBLIC;
+REVOKE ALL ON FUNCTION complete_production_session(uuid, text, jsonb, uuid) FROM anon;
 GRANT EXECUTE ON FUNCTION complete_production_session(uuid, text, jsonb, uuid) TO authenticated;
 
 -- DEV-017: decrement_ingredient_stock is an internal implementation detail of

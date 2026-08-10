@@ -1,4 +1,5 @@
 export type {
+  AggregateIngredientNeedsResult,
   IngredientRequirementDraft,
   PurchaseShortageSuggestion,
 } from "./planning-mappers";

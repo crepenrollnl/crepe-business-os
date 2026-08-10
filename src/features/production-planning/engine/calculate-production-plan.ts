@@ -180,10 +180,15 @@ export function calculateProductionPlan(
   }
 
   // STEP 3 + 4 — Expand + Aggregate identical ingredients (before inventory)
-  const drafts = aggregateIngredientNeeds(lines, bomsByRecipeId, {
+  const aggregateResult = aggregateIngredientNeeds(lines, bomsByRecipeId, {
     quantityDecimalPlaces: config.quantityDecimalPlaces,
   });
 
+  if (!aggregateResult.ok) {
+    return { ok: false, issues: aggregateResult.issues };
+  }
+
+  const drafts = aggregateResult.drafts;
   const requiredIngredientIds = drafts.map((draft) => draft.ingredientId);
 
   // STEP 5 — Validate + load inventory availability

@@ -145,6 +145,7 @@ export {
 } from "./validators";
 
 export type {
+  AggregateIngredientNeedsResult,
   IngredientRequirementDraft,
   PurchaseShortageSuggestion,
 } from "./mappers";

@@ -54,6 +54,9 @@ DECLARE
   v_plan production_plans%ROWTYPE;
   v_product_count integer;
   v_sufficient boolean;
+  v_conflict_ingredient_id uuid;
+  v_conflict_ingredient_name text;
+  v_conflict_units text;
 BEGIN
   -- 1. Lock the plan.
   SELECT * INTO v_plan
@@ -89,6 +92,33 @@ BEGIN
       )
   ) THEN
     RAISE EXCEPTION 'One or more recipes on this plan have no ingredients.';
+  END IF;
+
+  -- 1a. Reject inconsistent units before aggregating. recipe_items.unit is
+  -- a free-text snapshot per recipe line (no FK/CHECK to ingredients.unit)
+  -- copied only when a recipe line is saved -- it can drift from an
+  -- ingredient's current unit, or disagree between two recipes that were
+  -- saved at different times. Summing raw quantity across recipe_items
+  -- rows that disagree on unit for the same ingredient would silently
+  -- produce a meaningless required_quantity (see AGENTS.md unit-consistency
+  -- finding). Once this passes, every ingredient on this plan has exactly
+  -- one distinct unit, so MIN(ri.unit) below is provably that single value,
+  -- not an arbitrary pick.
+  SELECT ri.ingredient_id, i.name, string_agg(DISTINCT ri.unit, ', ' ORDER BY ri.unit)
+  INTO v_conflict_ingredient_id, v_conflict_ingredient_name, v_conflict_units
+  FROM production_plan_products ppp
+  JOIN recipe_items ri ON ri.recipe_id = ppp.recipe_id
+  JOIN ingredients i ON i.id = ri.ingredient_id
+  WHERE ppp.production_plan_id = p_plan_id
+  GROUP BY ri.ingredient_id, i.name
+  HAVING COUNT(DISTINCT ri.unit) > 1
+  LIMIT 1;
+
+  IF v_conflict_ingredient_id IS NOT NULL THEN
+    RAISE EXCEPTION
+      'Ingredient "%" has inconsistent units across the recipes on this plan (found: %). Fix the affected recipes before confirming this plan.',
+      v_conflict_ingredient_name,
+      v_conflict_units;
   END IF;
 
   -- 2 + 3. Server-side requirement recompute (mirrors

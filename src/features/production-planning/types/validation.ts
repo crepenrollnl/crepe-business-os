@@ -18,6 +18,7 @@ export type PlanValidationIssueCode =
   | "invalid_inventory_quantity"
   | "invalid_planning_result"
   | "duplicate_ingredient"
+  | "inconsistent_ingredient_unit"
   | "negative_shortage"
   | "invalid_shopping_list"
   | "invalid_package_size"
