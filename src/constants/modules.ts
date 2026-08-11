@@ -87,7 +87,7 @@ export const ERP_MODULES: readonly ErpModuleDefinition[] = [
     id: "sales",
     label: "Sales",
     featurePath: "src/features/sales",
-    status: "planned",
+    status: "live",
     priority: 10,
   },
   {
@@ -108,7 +108,7 @@ export const ERP_MODULES: readonly ErpModuleDefinition[] = [
     id: "accounting",
     label: "Accounting",
     featurePath: "src/features/accounting",
-    status: "planned",
+    status: "live",
     priority: 13,
   },
   {
@@ -124,5 +124,12 @@ export const ERP_MODULES: readonly ErpModuleDefinition[] = [
     featurePath: "src/features/ai",
     status: "planned",
     priority: 15,
+  },
+  {
+    id: "users",
+    label: "Users & Roles",
+    featurePath: "src/features/users",
+    status: "planned",
+    priority: 16,
   },
 ] as const;

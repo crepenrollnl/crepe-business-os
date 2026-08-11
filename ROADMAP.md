@@ -12,6 +12,8 @@ This roadmap is sequenced for a commercial ERP build:
 
 Do not reorder phases without explicit product decision.
 
+**Actual module status is tracked in [`src/constants/modules.ts`](src/constants/modules.ts) — the machine-readable source of truth.** This roadmap describes sequencing and scope; where its phase/sprint status labels conflict with `modules.ts`, `modules.ts` wins. (Last reconciled 11.08.2026 — see `Plan_Deystviy_V1.txt` for the audit that found several phase labels stale.)
+
 **Architecture Freeze v1.0** is the official ERP Core baseline. All implementation in this roadmap must respect [`docs/ARCHITECTURE_FREEZE_V1.md`](docs/ARCHITECTURE_FREEZE_V1.md). Core architecture redesign requires an ADR — do not redefine architecture through implementation alone.
 
 ---
@@ -51,7 +53,7 @@ Accounting is the sole financial module. There is no separate Finance or Taxes m
 
 ## Phase 1 — Inventory (Reference Module)
 
-**Status:** In progress / near-complete
+**Status:** Complete. (Substantially more of the roadmap below is also live now than this phase-by-phase framing suggests — see `src/constants/modules.ts`.)
 
 ### Sprint 1 — Project setup
 Complete
@@ -63,7 +65,7 @@ Complete
 Complete
 
 ### Sprint 4 — Inventory CRUD
-Current
+Complete
 
 Delivered:
 
@@ -276,18 +278,12 @@ These run alongside feature sprints when needed:
 
 ## Near-Term Execution Plan
 
+**Stale as a literal "what's next" list — see [`src/constants/modules.ts`](src/constants/modules.ts) for current status.** Recipes, Purchases, Production Planning, Production Execution, Sales, and Reports are live and E2E-covered; Accounting's core (chart of accounts, journals, ledger, posting engine, VAT) is live and wired into those modules, alongside live `/expenses` and `/fixed-assets` routes. None of that is reflected below — retained for history until this section is rewritten.
+
 ### Now
-Sprint 4 completion: Inventory reference hardening
-
-### Next
-Sprint 5: Products
-
-### Then
-Sprint 6: Recipes
+Wire remaining UI-less modules: Products, Customers, Events, a dedicated Suppliers UI, a Finished Goods read-only screen, and connect Users/Roles (`src/features/users`) to Supabase Auth (`auth.users`).
 
 ### Do not start yet
-- Accounting engines
-- VAT filing
 - AI OCR
 - Payroll
 
