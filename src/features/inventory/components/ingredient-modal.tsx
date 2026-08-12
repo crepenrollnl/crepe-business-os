@@ -77,6 +77,13 @@ function draftToFormValues(draft: IngredientFormDraft): IngredientFormValues {
 }
 
 function validateNumericField(value: string, message: string): string | undefined {
+  // Empty is a valid input for these fields — coerceNumericField treats it
+  // as 0 at submit time. Only a non-empty, unparsable, or negative value
+  // is an actual error.
+  if (value.trim().length === 0) {
+    return undefined;
+  }
+
   const parsed = parseNumericInput(value);
 
   if (parsed === null || parsed < 0) {
@@ -392,8 +399,11 @@ function IngredientModalForm({
           </button>
           <button
             type="submit"
-            disabled={isSaving || !isFormValid}
-            className="rounded-lg bg-amber-500 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-amber-600 disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={isSaving}
+            aria-disabled={!isFormValid}
+            className={`rounded-lg bg-amber-500 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-amber-600 disabled:cursor-not-allowed disabled:opacity-60${
+              !isSaving && !isFormValid ? " cursor-not-allowed opacity-60" : ""
+            }`}
           >
             {isSaving ? "Saving..." : "Save"}
           </button>
