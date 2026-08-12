@@ -68,6 +68,7 @@ function emptyFormValues(): RecipeFormValues {
     yield_unit: DEFAULT_RECIPE_YIELD_UNIT,
     is_active: true,
     recipe_role: DEFAULT_RECIPE_ROLE,
+    selling_price: null,
     lines: [{ ingredient_id: "", quantity: null, unit: "" }],
     components: [{ component_recipe_id: "", quantity: null, unit: "" }],
   };
@@ -83,6 +84,7 @@ function recipeToFormValues(recipe: RecipeWithRelations): RecipeFormValues {
       : DEFAULT_RECIPE_YIELD_UNIT,
     is_active: recipe.is_active,
     recipe_role: recipe.recipe_role,
+    selling_price: recipe.selling_price,
     lines:
       recipe.items.length > 0
         ? recipe.items.map((item) => ({

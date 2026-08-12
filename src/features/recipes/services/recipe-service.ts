@@ -38,6 +38,7 @@ interface RecipeRow {
   yield_unit: string;
   is_active: boolean;
   recipe_role: RecipeRole;
+  selling_price: number | string | null;
   created_at: string;
   updated_at?: string;
 }
@@ -173,6 +174,7 @@ function mapRecipe(row: RecipeRow): Recipe {
     yield_unit: row.yield_unit,
     is_active: row.is_active,
     recipe_role: row.recipe_role,
+    selling_price: row.selling_price === null ? null : toNumber(row.selling_price),
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
@@ -282,6 +284,13 @@ function validateRecipeInput(input: RecipeFormValues): string | null {
     return "Yield unit is required";
   }
 
+  if (
+    input.selling_price !== null &&
+    (!Number.isFinite(input.selling_price) || input.selling_price < 0)
+  ) {
+    return "Selling price must be zero or greater";
+  }
+
   return input.recipe_role === "assembly"
     ? validateComponents(input.components)
     : validateLines(input.lines);
@@ -300,6 +309,7 @@ function toRecipePayload(input: RecipeFormValues) {
     yield_unit: input.yield_unit,
     is_active: input.is_active,
     recipe_role: input.recipe_role,
+    selling_price: input.selling_price,
     updated_at: new Date().toISOString(),
   };
 }

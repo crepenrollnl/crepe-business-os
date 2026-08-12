@@ -106,6 +106,27 @@ export interface DeleteSaleLineInput {
 }
 
 /**
+ * One line of a quick-sale cart, shaped exactly as create_and_confirm_sale's
+ * p_lines expects (sql/086_quick_sale.sql).
+ */
+export interface QuickSaleLineInput {
+  product_id: string;
+  quantity: number;
+  unit_price: number;
+}
+
+/**
+ * createAndConfirmSale input (DEV-112 / sql/086_quick_sale.sql).
+ * SQL create_and_confirm_sale owns create + line inserts + confirm in one
+ * transaction — no separate create_draft_sale / add_sale_line / confirmSale
+ * calls for this path.
+ */
+export interface CreateAndConfirmSaleInput {
+  customer_id?: string | null;
+  lines: QuickSaleLineInput[];
+}
+
+/**
  * Row from sales_list_view (DEV-029).
  * Totals come from SQL — never recomputed in TypeScript.
  */
