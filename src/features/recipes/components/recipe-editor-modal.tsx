@@ -300,6 +300,22 @@ const inputClassName =
 // isn't guaranteed by source order.
 const componentTypeSelectClassName = inputClassName.replace("w-full", "w-44");
 
+// Same fix, third and last cell in the same row: the actual Component
+// recipe / raw ingredient picker. Widest content of the three fixed
+// columns -- "Select ingredient" (18 chars) and "Select component" (17
+// chars) placeholders are already close to what w-44 covers, but real
+// option labels can run longer: recipe names in this project already
+// include "Nutella Banana Crepe" (21 chars, see PROJECT.md/ROADMAP.md
+// examples), and the ingredient <option> label is "{name} ({unit})",
+// adding several more characters on top of the ingredient name itself.
+// No local seed data to measure against (schema-only bootstrap, no rows),
+// so sized generously from the same Tailwind scale rather than the exact
+// w-44 already proven tight for 17-18 char placeholders alone.
+const componentTargetSelectClassName = inputClassName.replace(
+  "w-full",
+  "w-56",
+);
+
 // Same fix, same value, one cell to the right in the same table row —
 // "Select ingredient" (18 chars) is about the same length as "Component
 // recipe" (17 chars) the Type select next to it was just fixed for, and a
@@ -935,7 +951,7 @@ function RecipeEditorForm({
                                     )
                                   }
                                   disabled={isSaving}
-                                  className={inputClassName}
+                                  className={componentTargetSelectClassName}
                                   aria-invalid={Boolean(
                                     hasAttemptedSubmit &&
                                       componentError?.component_recipe_id,
@@ -973,7 +989,7 @@ function RecipeEditorForm({
                                     )
                                   }
                                   disabled={isSaving}
-                                  className={inputClassName}
+                                  className={componentTargetSelectClassName}
                                   aria-invalid={Boolean(
                                     hasAttemptedSubmit &&
                                       componentError?.ingredient_id,
