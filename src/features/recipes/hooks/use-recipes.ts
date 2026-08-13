@@ -70,7 +70,9 @@ function emptyFormValues(): RecipeFormValues {
     recipe_role: DEFAULT_RECIPE_ROLE,
     selling_price: null,
     lines: [{ ingredient_id: "", quantity: null, unit: "" }],
-    components: [{ component_recipe_id: "", quantity: null, unit: "" }],
+    components: [
+      { component_recipe_id: null, ingredient_id: null, quantity: null, unit: "" },
+    ],
   };
 }
 
@@ -97,10 +99,18 @@ function recipeToFormValues(recipe: RecipeWithRelations): RecipeFormValues {
       recipe.components.length > 0
         ? recipe.components.map((component) => ({
             component_recipe_id: component.component_recipe_id,
+            ingredient_id: component.ingredient_id,
             quantity: component.quantity,
             unit: component.unit,
           }))
-        : [{ component_recipe_id: "", quantity: null, unit: "" }],
+        : [
+            {
+              component_recipe_id: null,
+              ingredient_id: null,
+              quantity: null,
+              unit: "",
+            },
+          ],
   };
 }
 
@@ -120,6 +130,11 @@ export function useRecipes() {
   const [editingRecipe, setEditingRecipe] =
     useState<RecipeWithRelations | null>(null);
   const [isLoadingRecipe, setIsLoadingRecipe] = useState(false);
+  const [isViewModalOpen, setIsViewModalOpen] = useState(false);
+  const [viewingRecipe, setViewingRecipe] =
+    useState<RecipeWithRelations | null>(null);
+  const [isLoadingViewRecipe, setIsLoadingViewRecipe] = useState(false);
+  const [viewError, setViewError] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<RecipeListItem | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -194,7 +209,10 @@ export function useRecipes() {
     setIsModalOpen(true);
   }, []);
 
-  const openEditModal = useCallback(async (item: RecipeListItem) => {
+  // Only `.id` is ever read -- {id: string} rather than the full
+  // RecipeListItem so the View modal's "Edit" handoff can call this with
+  // just the id of the recipe it already has loaded, no cast needed.
+  const openEditModal = useCallback(async (item: { id: string }) => {
     setActionError(null);
     setEditingRecipe(null);
     setIsLoadingRecipe(true);
@@ -223,6 +241,45 @@ export function useRecipes() {
     setActionError(null);
     setIsLoadingRecipe(false);
   }, [isSaving]);
+
+  // Read-only quick look (recipes list "View"). Same fetch as Edit
+  // (recipeService.getRecipe -> RecipeWithRelations, already resolves
+  // ingredient/component names via enrichRecipe) -- nothing new queried.
+  const openViewModal = useCallback(async (item: RecipeListItem) => {
+    setViewError(null);
+    setViewingRecipe(null);
+    setIsLoadingViewRecipe(true);
+    setIsViewModalOpen(true);
+
+    const result = await recipeService.getRecipe(item.id);
+
+    if (result.error || !result.data) {
+      setViewError(result.error ?? "Failed to load recipe");
+      setViewingRecipe(null);
+      setIsLoadingViewRecipe(false);
+      return;
+    }
+
+    setViewingRecipe(result.data);
+    setIsLoadingViewRecipe(false);
+  }, []);
+
+  const closeViewModal = useCallback(() => {
+    setIsViewModalOpen(false);
+    setViewingRecipe(null);
+    setViewError(null);
+    setIsLoadingViewRecipe(false);
+  }, []);
+
+  const editFromView = useCallback(() => {
+    if (!viewingRecipe) {
+      return;
+    }
+
+    const id = viewingRecipe.id;
+    closeViewModal();
+    void openEditModal({ id });
+  }, [closeViewModal, openEditModal, viewingRecipe]);
 
   const openDeleteDialog = useCallback((item: RecipeListItem) => {
     setDeleteTarget(item);
@@ -298,6 +355,10 @@ export function useRecipes() {
       ? recipeToFormValues(editingRecipe)
       : emptyFormValues(),
     isLoadingRecipe,
+    isViewModalOpen,
+    viewingRecipe,
+    isLoadingViewRecipe,
+    viewError,
     deleteTarget,
     isSaving,
     isDeleting,
@@ -305,6 +366,9 @@ export function useRecipes() {
     openCreateModal,
     openEditModal,
     closeModal,
+    openViewModal,
+    closeViewModal,
+    editFromView,
     openDeleteDialog,
     closeDeleteDialog,
     saveRecipe,

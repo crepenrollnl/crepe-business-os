@@ -75,16 +75,26 @@ export interface ComponentRecipeOption {
   yield_unit: string;
 }
 
-/** recipe_components has no id column of its own — composite PK. */
+/**
+ * A row targets exactly one of component_recipe_id (a pre-produced
+ * Finished Good, FIFO-allocated at sale time) or ingredient_id (a raw,
+ * no-cook add-in decremented directly from ingredients.current_stock) —
+ * see sql/089 and ADR-0001. Has its own surrogate `id` PK since sql/089
+ * (previously a composite PK on assembly_recipe_id/component_recipe_id,
+ * which couldn't express two mutually-exclusive nullable targets).
+ */
 export interface RecipeComponent {
+  id: string;
   assembly_recipe_id: string;
-  component_recipe_id: string;
+  component_recipe_id: string | null;
+  ingredient_id: string | null;
   quantity: number;
   unit: string;
 }
 
 export interface RecipeComponentWithRelations extends RecipeComponent {
   component: ComponentRecipeOption | null;
+  ingredient: RecipeIngredientOption | null;
 }
 
 export interface RecipeWithRelations extends Recipe {
@@ -104,7 +114,9 @@ export interface RecipeLineInput {
 }
 
 export interface RecipeComponentLineInput {
-  component_recipe_id: string;
+  /** Exactly one of component_recipe_id / ingredient_id must be set. */
+  component_recipe_id: string | null;
+  ingredient_id: string | null;
   /** null means the field is empty in the form (not submitted until filled). */
   quantity: number | null;
   unit: string;

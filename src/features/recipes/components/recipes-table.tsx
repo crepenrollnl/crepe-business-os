@@ -16,6 +16,7 @@ type RecipesTableProps = {
   onSort: (field: RecipeSortField) => void;
   onRetry: () => void;
   onCreateClick: () => void;
+  onView: (item: RecipeListItem) => void;
   onEdit: (item: RecipeListItem) => void;
   onDelete: (item: RecipeListItem) => void;
 };
@@ -155,6 +156,7 @@ export function RecipesTable({
   onSort,
   onRetry,
   onCreateClick,
+  onView,
   onEdit,
   onDelete,
 }: RecipesTableProps) {
@@ -225,6 +227,7 @@ export function RecipesTable({
                 <RecipeRow
                   key={item.id}
                   item={item}
+                  onView={onView}
                   onEdit={onEdit}
                   onDelete={onDelete}
                 />

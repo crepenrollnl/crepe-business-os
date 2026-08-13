@@ -2,14 +2,18 @@
  * `recipe-service.ts` has no test file yet -- adding coverage for the whole
  * service is out of scope here (see Critical Finding #4, Step 2 in the
  * plan, which made the same call for the recipe-role UI work). This file
- * only covers `deleteRecipe`, whose error handling changed by this task
- * (Фаза 2, "Сырые технические сообщения об ошибках при удалении"): a
- * foreign-key-violation delete now maps to a friendly per-table message via
- * the shared `mapDeletionBlockedByReference` helper in `@/lib/service-errors`,
- * instead of leaking the raw Postgres error to the caller.
+ * covers `deleteRecipe` (whose error handling changed by this task, Фаза 2,
+ * "Сырые технические сообщения об ошибках при удалении": a foreign-key-
+ * violation delete now maps to a friendly per-table message via the shared
+ * `mapDeletionBlockedByReference` helper in `@/lib/service-errors`, instead
+ * of leaking the raw Postgres error to the caller), plus the client-side
+ * "exactly one of component_recipe_id / ingredient_id" validation added by
+ * the recipe_components.ingredient_id UI work (sql/089, Plan item 10 step
+ * 2) -- the one genuinely new piece of pure logic in that change.
  */
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { RecipeFormValues } from "../types/recipe";
 
 const { supabaseMock } = vi.hoisted(() => ({
   supabaseMock: { from: vi.fn() },
@@ -22,6 +26,8 @@ vi.mock("@/lib/supabase", () => ({
 import { recipeService } from "./recipe-service";
 
 const RECIPE_ID = "44444444-4444-4444-8444-444444444444";
+const COMPONENT_RECIPE_ID = "55555555-5555-4555-8555-555555555555";
+const INGREDIENT_ID = "66666666-6666-4666-8666-666666666666";
 
 type QueryResult = { data: unknown; error: unknown };
 
@@ -142,5 +148,100 @@ describe("recipeService.deleteRecipe", () => {
 
     expect(result.data).toBeNull();
     expect(result.error).toBe("connection lost");
+  });
+});
+
+describe("recipeService.createRecipe — recipe_components target validation (sql/089)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  function assemblyInput(
+    overrides?: Partial<RecipeFormValues["components"][number]>,
+  ): RecipeFormValues {
+    return {
+      name: "Chicken Crepe",
+      description: "",
+      yield_quantity: 1,
+      yield_unit: "pcs",
+      is_active: true,
+      recipe_role: "assembly",
+      selling_price: null,
+      lines: [],
+      components: [
+        {
+          component_recipe_id: COMPONENT_RECIPE_ID,
+          ingredient_id: null,
+          quantity: 1,
+          unit: "pcs",
+          ...overrides,
+        },
+      ],
+    };
+  }
+
+  it("rejects a component line with both component_recipe_id and ingredient_id set", async () => {
+    const result = await recipeService.createRecipe(
+      assemblyInput({
+        component_recipe_id: COMPONENT_RECIPE_ID,
+        ingredient_id: INGREDIENT_ID,
+      }),
+    );
+
+    expect(result.data).toBeNull();
+    expect(result.error).toMatch(/either a component recipe or a raw ingredient/i);
+    expect(supabaseMock.from).not.toHaveBeenCalled();
+  });
+
+  it("rejects a component line with neither component_recipe_id nor ingredient_id set", async () => {
+    const result = await recipeService.createRecipe(
+      assemblyInput({ component_recipe_id: null, ingredient_id: null }),
+    );
+
+    expect(result.data).toBeNull();
+    expect(result.error).toMatch(/either a component recipe or a raw ingredient/i);
+    expect(supabaseMock.from).not.toHaveBeenCalled();
+  });
+
+  it("accepts a component line with only ingredient_id set (validation passes before any DB call)", async () => {
+    // persistRecipe validates before touching supabase at all, so a passing
+    // validation reaches the (unmocked-beyond-default) insert call next —
+    // asserting on that call, not the final result, keeps this test scoped
+    // to the validation logic itself.
+    await recipeService.createRecipe(
+      assemblyInput({ component_recipe_id: null, ingredient_id: INGREDIENT_ID }),
+    );
+
+    expect(supabaseMock.from).toHaveBeenCalledWith("recipes");
+  });
+
+  it("rejects duplicate ingredient components independently from duplicate component recipes", async () => {
+    const result = await recipeService.createRecipe({
+      name: "Chicken Crepe",
+      description: "",
+      yield_quantity: 1,
+      yield_unit: "pcs",
+      is_active: true,
+      recipe_role: "assembly",
+      selling_price: null,
+      lines: [],
+      components: [
+        {
+          component_recipe_id: null,
+          ingredient_id: INGREDIENT_ID,
+          quantity: 1,
+          unit: "pcs",
+        },
+        {
+          component_recipe_id: null,
+          ingredient_id: INGREDIENT_ID,
+          quantity: 1,
+          unit: "pcs",
+        },
+      ],
+    });
+
+    expect(result.data).toBeNull();
+    expect(result.error).toMatch(/ingredient can only appear once/i);
   });
 });

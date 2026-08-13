@@ -29,6 +29,10 @@ const DUPLICATE_INGREDIENT_ERROR =
   "Each ingredient can only appear once in a recipe";
 const DUPLICATE_COMPONENT_ERROR =
   "Each component can only appear once in an assembly recipe";
+const DUPLICATE_COMPONENT_INGREDIENT_ERROR =
+  "Each ingredient can only appear once as a component in an assembly recipe";
+const COMPONENT_TARGET_ERROR =
+  "Each line must be either a component recipe or a raw ingredient, not both or neither";
 
 interface RecipeRow {
   id: string;
@@ -52,8 +56,10 @@ interface RecipeItemRow {
 }
 
 interface RecipeComponentRow {
+  id: string;
   assembly_recipe_id: string;
-  component_recipe_id: string;
+  component_recipe_id: string | null;
+  ingredient_id: string | null;
   quantity: number | string;
   unit: string;
 }
@@ -192,8 +198,10 @@ function mapRecipeItem(row: RecipeItemRow): RecipeItem {
 
 function mapRecipeComponent(row: RecipeComponentRow): RecipeComponent {
   return {
+    id: row.id,
     assembly_recipe_id: row.assembly_recipe_id,
     component_recipe_id: row.component_recipe_id,
+    ingredient_id: row.ingredient_id,
     quantity: toNumber(row.quantity),
     unit: row.unit,
   };
@@ -238,18 +246,37 @@ function validateComponents(components: RecipeComponentLineInput[]): string | nu
     return "Add at least one component";
   }
 
-  const seenComponentIds = new Set<string>();
+  // Two independent namespaces, mirroring the DB's two partial unique
+  // indexes (recipe_components_assembly_component_uidx /
+  // _assembly_ingredient_uidx, sql/089) -- a component recipe and a raw
+  // ingredient never collide with each other, only within their own kind.
+  const seenComponentRecipeIds = new Set<string>();
+  const seenIngredientIds = new Set<string>();
 
   for (const component of components) {
-    if (!component.component_recipe_id.trim()) {
-      return "Each line must have a component";
+    const componentRecipeId = component.component_recipe_id?.trim() ?? "";
+    const ingredientId = component.ingredient_id?.trim() ?? "";
+    const hasComponentRecipe = componentRecipeId.length > 0;
+    const hasIngredient = ingredientId.length > 0;
+
+    // Exactly one target is required -- checked here, before the row ever
+    // reaches the DB, not left solely to recipe_components'
+    // exactly-one-target CHECK constraint.
+    if (hasComponentRecipe === hasIngredient) {
+      return COMPONENT_TARGET_ERROR;
     }
 
-    if (seenComponentIds.has(component.component_recipe_id)) {
-      return DUPLICATE_COMPONENT_ERROR;
+    if (hasComponentRecipe) {
+      if (seenComponentRecipeIds.has(componentRecipeId)) {
+        return DUPLICATE_COMPONENT_ERROR;
+      }
+      seenComponentRecipeIds.add(componentRecipeId);
+    } else {
+      if (seenIngredientIds.has(ingredientId)) {
+        return DUPLICATE_COMPONENT_INGREDIENT_ERROR;
+      }
+      seenIngredientIds.add(ingredientId);
     }
-
-    seenComponentIds.add(component.component_recipe_id);
 
     if (component.quantity === null) {
       return "Quantity is required";
@@ -436,6 +463,7 @@ async function replaceRecipeComponents(
       components.map((component) => ({
         assembly_recipe_id: recipeId,
         component_recipe_id: component.component_recipe_id,
+        ingredient_id: component.ingredient_id,
         quantity: component.quantity,
         unit: component.unit.trim(),
       })),
@@ -494,7 +522,12 @@ async function enrichRecipe(
   const enrichedComponents: RecipeComponentWithRelations[] = components.map(
     (component) => ({
       ...component,
-      component: componentRecipeMap.get(component.component_recipe_id) ?? null,
+      component: component.component_recipe_id
+        ? (componentRecipeMap.get(component.component_recipe_id) ?? null)
+        : null,
+      ingredient: component.ingredient_id
+        ? (ingredientMap.get(component.ingredient_id) ?? null)
+        : null,
     }),
   );
 
@@ -534,6 +567,7 @@ async function persistRecipe(
     input.recipe_role === "assembly"
       ? input.components.map((component) => ({
           component_recipe_id: component.component_recipe_id,
+          ingredient_id: component.ingredient_id,
           quantity: component.quantity as number,
           unit: component.unit.trim(),
         }))

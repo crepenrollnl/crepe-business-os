@@ -40,8 +40,12 @@ type LineDraft = {
   unit: string;
 };
 
+type ComponentTargetType = "component" | "ingredient";
+
 type ComponentLineDraft = {
+  target_type: ComponentTargetType;
   component_recipe_id: string;
+  ingredient_id: string;
   quantity: string;
   unit: string;
 };
@@ -72,6 +76,7 @@ type FormErrors = {
   components?: string;
   componentErrors?: Array<{
     component_recipe_id?: string;
+    ingredient_id?: string;
     quantity?: string;
     unit?: string;
   }>;
@@ -99,7 +104,9 @@ function valuesToDraft(values: RecipeFormValues): FormDraft {
       unit: line.unit,
     })),
     components: values.components.map((component) => ({
-      component_recipe_id: component.component_recipe_id,
+      target_type: component.ingredient_id ? "ingredient" : "component",
+      component_recipe_id: component.component_recipe_id ?? "",
+      ingredient_id: component.ingredient_id ?? "",
       quantity: formatNumericInput(component.quantity),
       unit: component.unit,
     })),
@@ -121,7 +128,14 @@ function draftToValues(draft: FormDraft): RecipeFormValues {
       unit: line.unit,
     })),
     components: draft.components.map((component) => ({
-      component_recipe_id: component.component_recipe_id,
+      component_recipe_id:
+        component.target_type === "component"
+          ? component.component_recipe_id || null
+          : null,
+      ingredient_id:
+        component.target_type === "ingredient"
+          ? component.ingredient_id || null
+          : null,
       quantity: parseNumericInput(component.quantity),
       unit: component.unit,
     })),
@@ -210,7 +224,11 @@ function validateDraft(draft: FormDraft): FormErrors {
   }
 
   const componentErrors: NonNullable<FormErrors["componentErrors"]> = [];
+  // Two independent namespaces, mirroring the DB's two partial unique
+  // indexes (sql/089) — a component recipe and a raw ingredient never
+  // collide with each other, only within their own kind.
   const seenComponentIds = new Set<string>();
+  const seenComponentIngredientIds = new Set<string>();
 
   if (draft.components.length === 0) {
     errors.components = "Add at least one component";
@@ -219,16 +237,27 @@ function validateDraft(draft: FormDraft): FormErrors {
   draft.components.forEach((component) => {
     const componentError: {
       component_recipe_id?: string;
+      ingredient_id?: string;
       quantity?: string;
       unit?: string;
     } = {};
 
-    if (!component.component_recipe_id) {
-      componentError.component_recipe_id = "Component is required";
-    } else if (seenComponentIds.has(component.component_recipe_id)) {
-      componentError.component_recipe_id = "Component already added";
+    if (component.target_type === "component") {
+      if (!component.component_recipe_id) {
+        componentError.component_recipe_id = "Component is required";
+      } else if (seenComponentIds.has(component.component_recipe_id)) {
+        componentError.component_recipe_id = "Component already added";
+      } else {
+        seenComponentIds.add(component.component_recipe_id);
+      }
     } else {
-      seenComponentIds.add(component.component_recipe_id);
+      if (!component.ingredient_id) {
+        componentError.ingredient_id = "Ingredient is required";
+      } else if (seenComponentIngredientIds.has(component.ingredient_id)) {
+        componentError.ingredient_id = "Ingredient already added";
+      } else {
+        seenComponentIngredientIds.add(component.ingredient_id);
+      }
     }
 
     const quantityRaw = component.quantity.trim();
@@ -259,6 +288,29 @@ function validateDraft(draft: FormDraft): FormErrors {
 
 const inputClassName =
   "block w-full rounded-lg border border-zinc-300 bg-white px-3 py-2.5 text-sm text-zinc-900 shadow-sm outline-none transition-colors placeholder:text-zinc-400 focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20 disabled:cursor-not-allowed disabled:bg-zinc-50 disabled:text-zinc-500";
+
+// Same base styling as inputClassName, but with a fixed minimum width
+// instead of w-full — w-28 (the project's existing narrow-table-cell-input
+// convention, e.g. sale-lines-section.tsx's quantity field) is sized for
+// short numbers, not this select's prose labels ("Component recipe" /
+// "Raw ingredient"); w-44 is the smallest width on the same Tailwind scale
+// that comfortably fits the longer label without truncating. Swapping
+// w-full for w-44 in place (rather than appending both classes) avoids
+// Tailwind generating two conflicting width utilities whose cascade order
+// isn't guaranteed by source order.
+const componentTypeSelectClassName = inputClassName.replace("w-full", "w-44");
+
+// Same fix, same value, one cell to the right in the same table row —
+// "Select ingredient" (18 chars) is about the same length as "Component
+// recipe" (17 chars) the Type select next to it was just fixed for, and a
+// plain <input> has no dropdown-arrow chrome eating into that budget the
+// way a <select> does, so reusing w-44 rather than picking a fresh number
+// comfortably covers it too. Checked the Ingredients tab (recipe_role =
+// "component") for an existing fix to borrow from first — its own readOnly
+// unit input still uses bare inputClassName (w-full) and isn't reported as
+// truncated, but only because that table has no narrow "Type" column
+// competing for space; it has no explicit-width value to reuse here.
+const componentUnitInputClassName = inputClassName.replace("w-full", "w-44");
 
 type RecipeEditorFormProps = Omit<RecipeEditorModalProps, "isOpen">;
 
@@ -371,12 +423,58 @@ function RecipeEditorForm({
     }));
   };
 
+  const selectComponentIngredient = (index: number, ingredientId: string) => {
+    const ingredient = ingredients.find((item) => item.id === ingredientId);
+
+    setFormValues((current) => ({
+      ...current,
+      components: current.components.map((component, componentIndex) =>
+        componentIndex === index
+          ? {
+              ...component,
+              ingredient_id: ingredientId,
+              unit: ingredient?.unit ?? "",
+            }
+          : component,
+      ),
+    }));
+  };
+
+  // Switching type clears both ids and unit — a stale hidden selection
+  // (e.g. a component_recipe_id left over from before switching to
+  // "Raw ingredient") must never be submitted alongside the new target.
+  const selectComponentTargetType = (
+    index: number,
+    targetType: ComponentTargetType,
+  ) => {
+    setFormValues((current) => ({
+      ...current,
+      components: current.components.map((component, componentIndex) =>
+        componentIndex === index
+          ? {
+              ...component,
+              target_type: targetType,
+              component_recipe_id: "",
+              ingredient_id: "",
+              unit: "",
+            }
+          : component,
+      ),
+    }));
+  };
+
   const addComponentLine = () => {
     setFormValues((current) => ({
       ...current,
       components: [
         ...current.components,
-        { component_recipe_id: "", quantity: "", unit: "" },
+        {
+          target_type: "component",
+          component_recipe_id: "",
+          ingredient_id: "",
+          quantity: "",
+          unit: "",
+        },
       ],
     }));
   };
@@ -771,7 +869,10 @@ function RecipeEditorForm({
                   <thead className="bg-zinc-50">
                     <tr>
                       <th className="px-3 py-3 text-left text-sm font-semibold text-zinc-700">
-                        Component
+                        Type
+                      </th>
+                      <th className="px-3 py-3 text-left text-sm font-semibold text-zinc-700">
+                        Component / Ingredient
                       </th>
                       <th className="px-3 py-3 text-right text-sm font-semibold text-zinc-700">
                         Quantity
@@ -796,42 +897,111 @@ function RecipeEditorForm({
                           )
                           .filter((id): id is string => Boolean(id)),
                       );
+                      const selectedComponentIngredientIds = new Set(
+                        formValues.components
+                          .map((item, itemIndex) =>
+                            itemIndex === index ? null : item.ingredient_id,
+                          )
+                          .filter((id): id is string => Boolean(id)),
+                      );
 
                       return (
                         <tr key={index} className="border-t border-zinc-200">
                           <td className="px-3 py-3 align-top">
                             <select
-                              value={component.component_recipe_id}
+                              value={component.target_type}
                               onChange={(event) =>
-                                selectComponentRecipe(index, event.target.value)
+                                selectComponentTargetType(
+                                  index,
+                                  event.target.value as ComponentTargetType,
+                                )
                               }
                               disabled={isSaving}
-                              className={inputClassName}
-                              aria-invalid={Boolean(
-                                hasAttemptedSubmit &&
-                                  componentError?.component_recipe_id,
-                              )}
+                              className={componentTypeSelectClassName}
                             >
-                              <option value="">Select component</option>
-                              {selectableComponentRecipes.map((option) => (
-                                <option
-                                  key={option.id}
-                                  value={option.id}
-                                  disabled={
-                                    selectedComponentIds.has(option.id) &&
-                                    option.id !== component.component_recipe_id
-                                  }
-                                >
-                                  {option.name}
-                                </option>
-                              ))}
+                              <option value="component">Component recipe</option>
+                              <option value="ingredient">Raw ingredient</option>
                             </select>
-                            {hasAttemptedSubmit &&
-                              componentError?.component_recipe_id && (
-                                <p className="mt-1 text-sm text-red-600">
-                                  {componentError.component_recipe_id}
-                                </p>
-                              )}
+                          </td>
+                          <td className="px-3 py-3 align-top">
+                            {component.target_type === "component" ? (
+                              <>
+                                <select
+                                  value={component.component_recipe_id}
+                                  onChange={(event) =>
+                                    selectComponentRecipe(
+                                      index,
+                                      event.target.value,
+                                    )
+                                  }
+                                  disabled={isSaving}
+                                  className={inputClassName}
+                                  aria-invalid={Boolean(
+                                    hasAttemptedSubmit &&
+                                      componentError?.component_recipe_id,
+                                  )}
+                                >
+                                  <option value="">Select component</option>
+                                  {selectableComponentRecipes.map((option) => (
+                                    <option
+                                      key={option.id}
+                                      value={option.id}
+                                      disabled={
+                                        selectedComponentIds.has(option.id) &&
+                                        option.id !== component.component_recipe_id
+                                      }
+                                    >
+                                      {option.name}
+                                    </option>
+                                  ))}
+                                </select>
+                                {hasAttemptedSubmit &&
+                                  componentError?.component_recipe_id && (
+                                    <p className="mt-1 text-sm text-red-600">
+                                      {componentError.component_recipe_id}
+                                    </p>
+                                  )}
+                              </>
+                            ) : (
+                              <>
+                                <select
+                                  value={component.ingredient_id}
+                                  onChange={(event) =>
+                                    selectComponentIngredient(
+                                      index,
+                                      event.target.value,
+                                    )
+                                  }
+                                  disabled={isSaving}
+                                  className={inputClassName}
+                                  aria-invalid={Boolean(
+                                    hasAttemptedSubmit &&
+                                      componentError?.ingredient_id,
+                                  )}
+                                >
+                                  <option value="">Select ingredient</option>
+                                  {ingredients.map((ingredient) => (
+                                    <option
+                                      key={ingredient.id}
+                                      value={ingredient.id}
+                                      disabled={
+                                        selectedComponentIngredientIds.has(
+                                          ingredient.id,
+                                        ) && ingredient.id !== component.ingredient_id
+                                      }
+                                    >
+                                      {ingredient.name} ({ingredient.unit})
+                                    </option>
+                                  ))}
+                                </select>
+                                {hasAttemptedSubmit &&
+                                  componentError?.ingredient_id && (
+                                    <p className="mt-1 text-sm text-red-600">
+                                      {componentError.ingredient_id}
+                                    </p>
+                                  )}
+                              </>
+                            )}
                           </td>
                           <td className="px-3 py-3 align-top">
                             <NumericInput
@@ -858,8 +1028,12 @@ function RecipeEditorForm({
                               value={component.unit}
                               readOnly
                               disabled={isSaving}
-                              className={inputClassName}
-                              placeholder="Select component"
+                              className={componentUnitInputClassName}
+                              placeholder={
+                                component.target_type === "ingredient"
+                                  ? "Select ingredient"
+                                  : "Select component"
+                              }
                               aria-invalid={Boolean(
                                 hasAttemptedSubmit && componentError?.unit,
                               )}
