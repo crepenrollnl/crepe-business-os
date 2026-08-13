@@ -50,6 +50,9 @@ function cogsSummary(
         unit_cost: 2,
         total_cost: 10,
         produced_at: "2026-07-01T08:00:00.000Z",
+        source: "finished_goods",
+        ingredient_id: null,
+        ingredient_name: null,
       },
       {
         consumption_id: "c-2",
@@ -60,6 +63,9 @@ function cogsSummary(
         unit_cost: 3,
         total_cost: 12,
         produced_at: "2026-07-02T08:00:00.000Z",
+        source: "finished_goods",
+        ingredient_id: null,
+        ingredient_name: null,
       },
     ],
     ...overrides,
@@ -123,6 +129,51 @@ describe("SaleReviewSection (DEV-111)", () => {
     expect(within(batches).getByText("#2")).toBeInTheDocument();
     expect(within(batches).getByText("€2.0000")).toBeInTheDocument();
     expect(within(batches).getByText("€10.00")).toBeInTheDocument();
+  });
+
+  it("renders a direct raw-ingredient layer (sql/089) by ingredient name, not a batch number", () => {
+    render(
+      <SaleReviewSection
+        sale={sale()}
+        cogsSummary={cogsSummary({
+          total_cogs: 10.15,
+          layers: [
+            {
+              consumption_id: "c-1",
+              sale_line_id: "line-1",
+              production_batch_id: "batch-a",
+              batch_number: 1,
+              quantity: 5,
+              unit_cost: 2,
+              total_cost: 10,
+              produced_at: "2026-07-01T08:00:00.000Z",
+              source: "finished_goods",
+              ingredient_id: null,
+              ingredient_name: null,
+            },
+            {
+              consumption_id: "sm-1",
+              sale_line_id: "line-1",
+              production_batch_id: null,
+              batch_number: null,
+              quantity: 0.05,
+              unit_cost: 3,
+              total_cost: 0.15,
+              produced_at: null,
+              source: "ingredient",
+              ingredient_id: "ingredient-1",
+              ingredient_name: "Cucumber",
+            },
+          ],
+        })}
+        profitSummary={profitSummary({ cogs: 10.15, gross_profit: 89.85 })}
+        accountingPostingStatus="posted"
+      />,
+    );
+
+    const batches = screen.getByTestId("review-consumed-batches");
+    expect(within(batches).getByText("#1")).toBeInTheDocument();
+    expect(within(batches).getByText("Cucumber")).toBeInTheDocument();
   });
 
   it("renders draft sale without frozen COGS/profit/posting", () => {

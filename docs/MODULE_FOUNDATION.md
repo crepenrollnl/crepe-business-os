@@ -58,6 +58,8 @@ Inventory is the reference implementation for quality and structure.
 
 ## Planned vs live modules
 
+**[`src/constants/modules.ts`](../src/constants/modules.ts) is the canonical machine-readable source of truth for module status.** This table is a human-readable summary and must not diverge from it — if you change one, change the other. (Last reconciled 11.08.2026 — see `Plan_Deystviy_V1.txt` for the audit that found `sales` and `accounting` stale here.)
+
 | Module id | Folder | Status |
 |---|---|---|
 | `dashboard` | `src/features/dashboard` | Live |
@@ -68,17 +70,18 @@ Inventory is the reference implementation for quality and structure.
 | `production` | `src/features/production` | Live (Production Planning UI / persistence) |
 | `production-planning` | `src/features/production-planning` | Live domain package (pure pipeline; not a nav module) |
 | `products` | `src/features/products` | Planned |
-| `suppliers` | `src/features/suppliers` | Planned |
+| `suppliers` | `src/features/suppliers` | Planned (service + `create_supplier` RPC exist; no UI at all) |
 | `production-execution` | `src/features/production-execution` | Live (sessions + atomic completion) |
-| `finished-goods` | `src/features/finished-goods` | Planned (scaffold only) |
-| `sales` | `src/features/sales` | Planned |
-| `customers` | `src/features/customers` | Planned |
-| `events` | `src/features/events` | Planned |
-| `accounting` | `src/features/accounting` | Planned (architecture + contracts only — see `docs/ACCOUNTING.md`) |
+| `finished-goods` | `src/features/finished-goods` | Planned UI — backend services implemented and tested (`finished-goods-*-service.ts`), consumed by Reports and by Sales' FIFO allocation; no dedicated screen |
+| `sales` | `src/features/sales` | Live — draft → lines → confirm (FIFO finished-goods allocation, accounting posting), E2E-covered |
+| `customers` | `src/features/customers` | Planned (service layer + `create_customer` RPC exist; no UI) |
+| `events` | `src/features/events` | Planned (types only) |
+| `accounting` | `src/features/accounting` | Live core — chart of accounts, journals, ledger, posting engine, VAT, business events, wired into Purchases/Production/Sales (see `docs/ACCOUNTING.md`); `/expenses` and `/fixed-assets` are live routed UI; no unified Accounting workspace screen yet |
 | `reports` | `src/features/reporting-workspace` | Live (Reports nav host at `/reports`) |
 | `ai` | `src/features/ai` | Planned |
+| `users` | `src/features/users` | Planned — service layer exists (CRUD + role-assignment RPCs), no UI, not connected to Supabase Auth (`auth.users`) |
 
-Scaffolds for planned modules may contain types stubs and empty folders only. **No business logic** until the roadmap reaches that module.
+Scaffolds for planned modules may contain types stubs and empty folders only. **No business logic** until the roadmap reaches that module. (Exceptions already on the books above — `finished-goods`, `suppliers`, `customers`, `users` — have real, tested service/RPC layers ahead of their UI; treat "Planned" here as "no nav module / no UI screen," not "no code exists.")
 
 ### Reporting packages
 

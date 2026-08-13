@@ -16,6 +16,7 @@ import type {
 import type {
   AddSaleLineInput,
   ConfirmSaleResult,
+  CreateAndConfirmSaleInput,
   CreateDraftSaleInput,
   CreateDraftSaleResult,
   DeleteSaleLineInput,
@@ -430,19 +431,34 @@ function mapConfirmSaleRpcError(message: string): string | null {
     return "Product was not found.";
   }
 
-  // Assembly line fulfillment failure (sql/085): names the specific missing
-  // component and the dish being assembled. Must be checked before the
-  // generic "insufficient finished goods stock" case below — this message
-  // also contains that substring (it wraps the underlying allocation
-  // failure via SQLERRM), so the generic check would otherwise shadow it
-  // and discard the component name.
+  // Assembly line fulfillment failure (sql/085): confirm_sale wraps ANY
+  // error raised while allocating a component — not just a real stock
+  // shortage — in this "failed to allocate component ... while
+  // assembling ..." prefix, with the real underlying reason (SQLERRM)
+  // appended after the colon. Matching the prefix alone and unconditionally
+  // returning the "not enough stock" message discarded that real reason
+  // for every other failure this wraps (e.g. a database constraint
+  // violation) — confirmed this session when a rounding bug in
+  // finished_goods_batch_consumptions_total_cost_chk surfaced here as a
+  // misleading "not enough stock" message and cost real debugging time.
+  // Only translate to the friendly stock-shortage message when the
+  // underlying reason actually says so; otherwise surface it.
   const assemblyComponentMatch = message.match(
-    /failed to allocate component "([^"]+)" while assembling "([^"]+)"/i,
+    /failed to allocate component "([^"]+)" while assembling "([^"]+)":\s*(.*)$/i,
   );
 
   if (assemblyComponentMatch) {
-    const [, componentName, dishName] = assemblyComponentMatch;
-    return `Not enough "${componentName}" in stock to assemble "${dishName}".`;
+    const [, componentName, dishName, underlyingReason] = assemblyComponentMatch;
+    const normalizedReason = underlyingReason.toLowerCase();
+
+    if (
+      normalizedReason.includes("insufficient") &&
+      normalizedReason.includes("stock")
+    ) {
+      return `Not enough "${componentName}" in stock to assemble "${dishName}".`;
+    }
+
+    return `Failed to allocate "${componentName}" while assembling "${dishName}": ${underlyingReason.trim()}`;
   }
 
   if (normalized.includes("insufficient finished goods stock")) {
@@ -860,6 +876,108 @@ export const salesService = {
     const confirmed = await this.confirmSale(saleId);
     if (confirmed.error || !confirmed.data) {
       return fail(confirmed.error ?? "Failed to confirm sale.");
+    }
+
+    const posting = await saleAccountingService.postJournalsForSaleCompleted(
+      confirmed.data,
+      accounting,
+    );
+
+    if (posting.error || !posting.data) {
+      return ok({
+        sale: confirmed.data.sale,
+        total_cogs: confirmed.data.total_cogs,
+        posting: null,
+        postingError:
+          posting.error ?? "Sale confirmed but accounting posting failed.",
+      });
+    }
+
+    return ok({
+      sale: confirmed.data.sale,
+      total_cogs: confirmed.data.total_cogs,
+      posting: posting.data,
+      postingError: null,
+    });
+  },
+
+  /**
+   * One-tap sale (DEV-112 / sql/086_quick_sale.sql): create + add every
+   * cart line + confirm in a single RPC call, instead of separate
+   * createDraftSale / addSaleLine / confirmSale round trips. Reuses the
+   * same result mapping and sale-reload logic as confirmSale — the RPC
+   * itself calls confirm_sale internally and returns its exact
+   * {sale_id, total_cogs} shape.
+   */
+  async createAndConfirmSale(
+    input: CreateAndConfirmSaleInput,
+  ): Promise<ServiceResult<ConfirmSaleResult>> {
+    try {
+      if (input.lines.length === 0) {
+        return fail("Add at least one item before confirming this sale.");
+      }
+
+      const customerId = input.customer_id?.trim() ?? "";
+      if (customerId.length > 0 && !UUID_RE.test(customerId)) {
+        return fail("Customer id is invalid.");
+      }
+
+      const {
+        data: { user },
+        error: authError,
+      } = await supabase.auth.getUser();
+
+      if (authError || !user) {
+        return fail("You must be signed in to confirm a sale.");
+      }
+
+      const { data, error } = await supabase.rpc("create_and_confirm_sale", {
+        p_customer_id: customerId.length > 0 ? customerId : null,
+        p_lines: input.lines,
+      });
+
+      if (error) {
+        return fail(mapConfirmSaleError(error, "Failed to complete quick sale."));
+      }
+
+      const rpcResult = mapConfirmSaleRpcResult(data);
+      if (!rpcResult) {
+        return fail("Sale confirmed but the response was invalid.");
+      }
+
+      const saleResult = await reloadConfirmedSale(rpcResult.sale_id);
+      if (saleResult.error || !saleResult.data) {
+        return fail(saleResult.error ?? "Failed to reload confirmed sale");
+      }
+
+      return ok({
+        sale: saleResult.data,
+        total_cogs: rpcResult.total_cogs,
+      });
+    } catch (error) {
+      return fail(mapConfirmSaleError(error, "Failed to complete quick sale."));
+    }
+  },
+
+  /**
+   * Quick sale + Accounting journals, same posting-failure-is-non-fatal
+   * contract as confirmSaleAndPostJournals: once createAndConfirmSale
+   * succeeds the sale is durable, so this only fails before that point.
+   */
+  async createAndConfirmSaleAndPostJournals(
+    input: CreateAndConfirmSaleInput,
+    accounting: SaleAccountingContext,
+  ): Promise<
+    ServiceResult<{
+      sale: SaleWithLines;
+      total_cogs: number;
+      posting: SaleJournalPostings | null;
+      postingError: string | null;
+    }>
+  > {
+    const confirmed = await this.createAndConfirmSale(input);
+    if (confirmed.error || !confirmed.data) {
+      return fail(confirmed.error ?? "Failed to complete quick sale.");
     }
 
     const posting = await saleAccountingService.postJournalsForSaleCompleted(

@@ -53,6 +53,7 @@ type FormDraft = {
   yield_unit: RecipeYieldUnit;
   is_active: boolean;
   recipe_role: RecipeRole;
+  selling_price: string;
   lines: LineDraft[];
   components: ComponentLineDraft[];
 };
@@ -61,6 +62,7 @@ type FormErrors = {
   name?: string;
   yield_quantity?: string;
   yield_unit?: string;
+  selling_price?: string;
   lines?: string;
   lineErrors?: Array<{
     ingredient_id?: string;
@@ -90,6 +92,7 @@ function valuesToDraft(values: RecipeFormValues): FormDraft {
       : DEFAULT_RECIPE_YIELD_UNIT,
     is_active: values.is_active,
     recipe_role: values.recipe_role,
+    selling_price: formatNumericInput(values.selling_price),
     lines: values.lines.map((line) => ({
       ingredient_id: line.ingredient_id,
       quantity: formatNumericInput(line.quantity),
@@ -111,6 +114,7 @@ function draftToValues(draft: FormDraft): RecipeFormValues {
     yield_unit: draft.yield_unit,
     is_active: draft.is_active,
     recipe_role: draft.recipe_role,
+    selling_price: parseNumericInput(draft.selling_price),
     lines: draft.lines.map((line) => ({
       ingredient_id: line.ingredient_id,
       quantity: parseNumericInput(line.quantity),
@@ -147,6 +151,16 @@ function validateDraft(draft: FormDraft): FormErrors {
 
   if (!isRecipeYieldUnit(draft.yield_unit)) {
     errors.yield_unit = "Yield unit is required";
+  }
+
+  const sellingPriceRaw = draft.selling_price.trim();
+
+  if (sellingPriceRaw.length > 0) {
+    const sellingPrice = parseNumericInput(sellingPriceRaw);
+
+    if (sellingPrice === null || sellingPrice < 0) {
+      errors.selling_price = "Selling price must be zero or greater";
+    }
   }
 
   if (draft.recipe_role === "component") {
@@ -525,6 +539,29 @@ function RecipeEditorForm({
             </select>
             {hasAttemptedSubmit && fieldErrors.yield_unit && (
               <p className="text-sm text-red-600">{fieldErrors.yield_unit}</p>
+            )}
+          </div>
+
+          <div className="space-y-2">
+            <label
+              htmlFor="selling_price"
+              className="block text-sm font-medium text-zinc-700"
+            >
+              Selling price{" "}
+              <span className="font-normal text-zinc-500">(optional)</span>
+            </label>
+            <NumericInput
+              id="selling_price"
+              value={formValues.selling_price}
+              onChange={(value) => updateHeader("selling_price", value)}
+              disabled={isSaving}
+              placeholder="0.00"
+              aria-invalid={Boolean(
+                hasAttemptedSubmit && fieldErrors.selling_price,
+              )}
+            />
+            {hasAttemptedSubmit && fieldErrors.selling_price && (
+              <p className="text-sm text-red-600">{fieldErrors.selling_price}</p>
             )}
           </div>
 

@@ -8,10 +8,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { SaleDetail } from "../types/sale";
 import type { FinishedGoodsSaleConsumptionRow } from "@/features/finished-goods/types/finished-good";
 
-const { getSaleMock, listConsumptionsMock } = vi.hoisted(() => ({
-  getSaleMock: vi.fn(),
-  listConsumptionsMock: vi.fn(),
-}));
+const { getSaleMock, listConsumptionsMock, supabaseFromMock } = vi.hoisted(
+  () => ({
+    getSaleMock: vi.fn(),
+    listConsumptionsMock: vi.fn(),
+    supabaseFromMock: vi.fn(),
+  }),
+);
 
 vi.mock("./sales-read-service", () => ({
   salesReadService: {
@@ -28,7 +31,39 @@ vi.mock(
   }),
 );
 
+vi.mock("@/lib/supabase", () => ({
+  supabase: { from: supabaseFromMock },
+}));
+
 import { saleCogsService } from "./sale-cogs-service";
+
+type StockMovementRow = {
+  id: string;
+  ingredient_id: string;
+  quantity: number;
+  unit_cost: number;
+  reference_id: string;
+  ingredients: { name: string } | null;
+};
+
+/**
+ * Minimal thenable query-builder stub for supabase.from("stock_movements"),
+ * matching the pattern in inventory-service.test.ts / production-batch-
+ * service.test.ts. sale-cogs-service only ever queries stock_movements
+ * through this one mock, so a single shared builder is enough.
+ */
+function makeStockMovementsBuilder(rows: StockMovementRow[]) {
+  const builder: Record<string, unknown> = {};
+  const chain = () => builder;
+  builder.select = vi.fn(chain);
+  builder.eq = vi.fn(chain);
+  builder.in = vi.fn(chain);
+  builder.order = vi.fn(chain);
+  builder.then = (
+    resolve: (value: { data: StockMovementRow[]; error: null }) => unknown,
+  ) => Promise.resolve({ data: rows, error: null }).then(resolve);
+  return builder;
+}
 
 const SALE_ID = "11111111-1111-4111-8111-111111111111";
 const LINE_ID = "22222222-2222-4222-8222-222222222222";
@@ -80,6 +115,10 @@ function consumption(
 describe("saleCogsService (DEV-108)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Default: no direct raw-ingredient consumption for this sale. Tests
+    // that only care about the finished-goods path never need to touch
+    // this mock explicitly.
+    supabaseFromMock.mockImplementation(() => makeStockMovementsBuilder([]));
   });
 
   it("builds single-batch COGS from stored consumptions", async () => {
@@ -203,5 +242,57 @@ describe("saleCogsService (DEV-108)", () => {
 
     expect(result.data).not.toHaveProperty("gross_profit");
     expect(result.data).not.toHaveProperty("profit");
+  });
+
+  it("builds COGS purely from direct ingredient consumption (sql/089) when the assembly has no finished-goods components", async () => {
+    getSaleMock.mockResolvedValue({ data: sale(), error: null });
+    listConsumptionsMock.mockResolvedValue({ data: [], error: null });
+    supabaseFromMock.mockImplementation(() =>
+      makeStockMovementsBuilder([
+        {
+          id: "sm-1",
+          ingredient_id: "ingredient-1",
+          quantity: 0.05,
+          unit_cost: 3,
+          reference_id: LINE_ID,
+          ingredients: { name: "Cucumber" },
+        },
+      ]),
+    );
+
+    const result = await saleCogsService.getSaleCostSummary(SALE_ID);
+
+    expect(result.error).toBeNull();
+    expect(result.data?.total_cogs).toBe(0.15);
+    expect(result.data?.layers).toHaveLength(1);
+    expect(result.data?.layers[0]?.source).toBe("ingredient");
+    expect(result.data?.layers[0]?.production_batch_id).toBeNull();
+    expect(result.data?.layers[0]?.ingredient_name).toBe("Cucumber");
+  });
+
+  it("sums finished-goods and direct-ingredient layers for a mixed assembly", async () => {
+    getSaleMock.mockResolvedValue({ data: sale(), error: null });
+    listConsumptionsMock.mockResolvedValue({
+      data: [consumption({ quantity: 1, unit_cost: 2, total_cost: 2 })],
+      error: null,
+    });
+    supabaseFromMock.mockImplementation(() =>
+      makeStockMovementsBuilder([
+        {
+          id: "sm-1",
+          ingredient_id: "ingredient-1",
+          quantity: 0.05,
+          unit_cost: 3,
+          reference_id: LINE_ID,
+          ingredients: { name: "Cucumber" },
+        },
+      ]),
+    );
+
+    const result = await saleCogsService.getSaleCostSummary(SALE_ID);
+
+    expect(result.error).toBeNull();
+    expect(result.data?.total_cogs).toBe(2.15);
+    expect(result.data?.layers).toHaveLength(2);
   });
 });

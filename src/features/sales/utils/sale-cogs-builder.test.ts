@@ -23,6 +23,9 @@ function layer(
     unit_cost: 2,
     total_cost: 10,
     produced_at: "2026-07-01T08:00:00.000Z",
+    source: "finished_goods",
+    ingredient_id: null,
+    ingredient_name: null,
     ...overrides,
   };
 }
@@ -197,6 +200,78 @@ describe("sale-cogs-builder (DEV-108)", () => {
         next: first.summary,
       }),
     ).toBeNull();
+  });
+
+  it("builds COGS from an ingredient-sourced layer with no production batch (sql/089)", () => {
+    const result = buildSaleCostSummary({
+      sale_id: "sale-1",
+      sale_status: "confirmed",
+      layers: [
+        layer({
+          consumption_id: "sm-1",
+          production_batch_id: null,
+          batch_number: null,
+          produced_at: null,
+          quantity: 0.05,
+          unit_cost: 3,
+          total_cost: 0.15,
+          source: "ingredient",
+          ingredient_id: "ingredient-1",
+          ingredient_name: "Cucumber",
+        }),
+      ],
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) {
+      return;
+    }
+
+    expect(result.summary.total_cogs).toBe(0.15);
+    expect(result.summary.layers[0]?.production_batch_id).toBeNull();
+  });
+
+  it("sums a mixed assembly — one finished-goods layer plus one ingredient layer", () => {
+    const result = buildSaleCostSummary({
+      sale_id: "sale-1",
+      sale_status: "confirmed",
+      layers: [
+        layer({
+          consumption_id: "c-1",
+          quantity: 1,
+          unit_cost: 2,
+          total_cost: 2,
+        }),
+        layer({
+          consumption_id: "sm-1",
+          production_batch_id: null,
+          batch_number: null,
+          produced_at: null,
+          quantity: 0.05,
+          unit_cost: 3,
+          total_cost: 0.15,
+          source: "ingredient",
+          ingredient_id: "ingredient-1",
+          ingredient_name: "Cucumber",
+        }),
+      ],
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) {
+      return;
+    }
+
+    expect(result.summary.total_cogs).toBe(2.15);
+    expect(result.summary.layers).toHaveLength(2);
+  });
+
+  it("rejects an ingredient layer with no ingredient id", () => {
+    expect(
+      validateSaleCogsLayer(
+        layer({ source: "ingredient", ingredient_id: null }),
+      ),
+    ).toMatch(/ingredient id is required/i);
   });
 
   it("never invents unit cost — uses stored layer unit_cost as-is", () => {

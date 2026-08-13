@@ -33,6 +33,8 @@ It is a long-term operating system for food businesses, covering operations, inv
 
 ## Current Platform Status
 
+**Actual module status is tracked in [`src/constants/modules.ts`](src/constants/modules.ts) — the machine-readable source of truth.** The table below is a human-readable description for context; where it conflicts with `modules.ts`, `modules.ts` wins. (Last reconciled 11.08.2026 — see `Plan_Deystviy_V1.txt` for the audit that found this table stale.)
+
 | Area | Status |
 |---|---|
 | Authentication | Live |
@@ -40,16 +42,17 @@ It is a long-term operating system for food businesses, covering operations, inv
 | Inventory CRUD | Live (reference module) |
 | Supabase integration | Live |
 | Products | Planned |
-| Recipes | Planned |
-| Suppliers (module UI) | Planned (table exists) |
-| Purchases | Planned |
-| Production | Planned |
-| Finished Goods | Specified (`docs/FINISHED_GOODS.md`, `docs/BATCH_CONSUMPTION.md`) — not implemented |
-| Sales | Specified (`docs/SALES.md`, `docs/BATCH_CONSUMPTION.md`) — not implemented |
-| Customers | Planned |
-| Events | Planned |
-| Accounting | Planned |
-| Reports | Planned |
+| Recipes | Live |
+| Suppliers (module UI) | Planned (service + `create_supplier` RPC exist; no UI at all) |
+| Purchases | Live |
+| Production (Planning + Execution) | Live — full plan → confirm → execute cycle, E2E-covered |
+| Finished Goods | Planned UI — backend services implemented and tested (`finished-goods-*-service.ts`), used by Reports and by Sales' FIFO allocation; no dedicated screen |
+| Sales | Live — draft → lines → confirm (FIFO finished-goods allocation, accounting posting), E2E-covered |
+| Customers | Planned (service layer + `create_customer` RPC exist; no UI) |
+| Events | Planned (types only) |
+| Accounting | Live core — chart of accounts, journals, ledger, posting engine, VAT, business events, wired into Purchases/Production/Sales; `/expenses` and `/fixed-assets` are live routed UI; no unified Accounting workspace screen yet |
+| Users / Roles | Planned — service layer exists (`src/features/users`), no UI, not connected to Supabase Auth (`auth.users`) |
+| Reports | Live (`/reports`, `reporting-workspace`) |
 | AI Assistant | Planned |
 
 ### Live database tables
@@ -147,7 +150,7 @@ The platform contains only these modules (see `src/constants/modules.ts`):
 5. Suppliers
 6. Purchases
 7. Production Planning (`src/features/production`)
-8. Production Execution (`src/features/production-execution`) — planned
+8. Production Execution (`src/features/production-execution`)
 9. Finished Goods (`src/features/finished-goods`) — planned
 10. Sales
 11. Customers
@@ -155,6 +158,7 @@ The platform contains only these modules (see `src/constants/modules.ts`):
 13. Accounting
 14. Reports
 15. AI
+16. Users & Roles (`src/features/users`) — planned
 
 ---
 
@@ -385,23 +389,25 @@ Do not redesign working screens unless explicitly requested.
 
 ## Development Status Snapshot
 
+**See [`src/constants/modules.ts`](src/constants/modules.ts) for current per-module status; this snapshot is a narrative summary and can drift out of date faster than the registry.**
+
 ### Completed
 
 - Project foundation
 - Authentication
 - Dashboard layout
 - Inventory list + CRUD
-- Supabase-backed inventory services
+- Recipes, Purchases, Production Planning, Production Execution, Sales — full workflows, E2E-covered critical path
+- Reports (`/reports` workspace)
+- Accounting core (chart of accounts, journals, ledger, posting engine, VAT, business events) wired into Purchases/Production/Sales, plus live `/expenses` and `/fixed-assets`
 
 ### Current focus
 
-- Stabilize Inventory as the reference ERP module
-- Harden shared architecture contracts
-- Prepare Products next
+- Products, Customers, Events, Suppliers UI, Finished Goods UI — service layers/backends exist for some of these already; UI does not
+- Connecting Users/Roles (`src/features/users`) to Supabase Auth (`auth.users`)
 
 ### Explicitly out of scope right now
 
-- Implementing accounting posting
 - Implementing AI workflows
 - Rewriting Inventory UI
 - Destroying or replacing live inventory tables

@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
+import { SalesModeToggle } from "../components/sales-mode-toggle";
 import { SalesTable } from "../components/sales-table";
 import { SalesToolbar } from "../components/sales-toolbar";
 import { useSales } from "../hooks/use-sales";
@@ -48,13 +49,17 @@ export function SalesPage() {
   return (
     <DashboardLayout activePath="/sales">
       <div className="mx-auto max-w-7xl space-y-8">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight text-zinc-900 sm:text-4xl">
-            Sales
-          </h1>
-          <p className="mt-2 text-base text-zinc-600 sm:text-lg">
-            Review customer sales and open documents to confirm draft orders.
-          </p>
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight text-zinc-900 sm:text-4xl">
+              Sales
+            </h1>
+            <p className="mt-2 text-base text-zinc-600 sm:text-lg">
+              Review customer sales and open documents to confirm draft orders.
+            </p>
+          </div>
+
+          <SalesModeToggle active="draft" />
         </div>
 
         <SalesToolbar

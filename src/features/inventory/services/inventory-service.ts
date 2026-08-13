@@ -79,19 +79,35 @@ async function countRecipeItemsForIngredient(
   ingredientId: string,
 ): Promise<ServiceResult<number>> {
   try {
-    const { count, error } = await supabase
-      .from("recipe_items")
-      .select("id", { count: "exact", head: true })
-      .eq("ingredient_id", ingredientId);
+    const [recipeItemsResult, recipeComponentsResult] = await Promise.all([
+      supabase
+        .from("recipe_items")
+        .select("id", { count: "exact", head: true })
+        .eq("ingredient_id", ingredientId),
+      supabase
+        .from("recipe_components")
+        .select("id", { count: "exact", head: true })
+        .eq("ingredient_id", ingredientId),
+    ]);
 
-    if (error) {
+    if (recipeItemsResult.error) {
       return {
         data: null,
-        error: toUserError(error, "Failed to check recipe usage"),
+        error: toUserError(recipeItemsResult.error, "Failed to check recipe usage"),
       };
     }
 
-    return { data: count ?? 0, error: null };
+    if (recipeComponentsResult.error) {
+      return {
+        data: null,
+        error: toUserError(recipeComponentsResult.error, "Failed to check recipe usage"),
+      };
+    }
+
+    return {
+      data: (recipeItemsResult.count ?? 0) + (recipeComponentsResult.count ?? 0),
+      error: null,
+    };
   } catch (error) {
     return {
       data: null,
@@ -106,9 +122,9 @@ async function countRecipeItemsForIngredient(
  * ingredient re-selected. Changing an ingredient's unit after recipes
  * already reference it leaves those recipes silently stale, which can
  * later sum mismatched units during requirement aggregation. Block the
- * change at the source instead. recipe_components has no ingredient_id
- * column (it links recipe-to-recipe for the assembly layer), so only
- * recipe_items needs checking.
+ * change at the source instead. Since sql/089, recipe_components can also
+ * reference an ingredient directly (raw, no-cook add-ins) -- both tables
+ * are counted together, same reasoning applies to either.
  */
 async function validateUnitChange(
   id: string,
@@ -462,9 +478,9 @@ export const inventoryService = {
   },
 
   /**
-   * Number of recipe_items rows referencing this ingredient — used by the
-   * edit form to lock the Unit field before the user hits an error on save,
-   * not just as a save-time guard.
+   * Number of recipe_items + recipe_components rows referencing this
+   * ingredient — used by the edit form to lock the Unit field before the
+   * user hits an error on save, not just as a save-time guard.
    */
   async getIngredientRecipeUsageCount(
     id: string,

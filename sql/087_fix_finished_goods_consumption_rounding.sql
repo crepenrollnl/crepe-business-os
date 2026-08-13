@@ -1,0 +1,277 @@
+-- Fix: finished_goods_batch_consumptions_total_cost_chk false failures
+-- Run in Supabase SQL editor after sql/086_quick_sale.sql.
+--
+-- Bug (found this session via a real Quick Sale attempt): allocate_
+-- finished_goods_fifo computed v_line_total := v_take * v_batch.unit_cost
+-- with no explicit rounding. Postgres silently rounds that value to 4
+-- decimals when it's stored in total_cost numeric(14,4) -- but
+-- finished_goods_batch_consumptions_total_cost_chk (sql/010:81-82,
+-- CHECK (total_cost = quantity * unit_cost)) re-multiplies the ALREADY-
+-- STORED quantity numeric(12,3) and unit_cost numeric(12,4) fresh, at up
+-- to 7 decimal places, unrounded. Whenever the true product isn't exactly
+-- representable in 4 decimals, the rounded stored value no longer equals
+-- the unrounded recheck, and the INSERT fails with a 23514 check
+-- violation -- misreported to the user as "Not enough X in stock" by a
+-- separate, also-fixed bug in sales-service.ts (mapConfirmSaleRpcError),
+-- not fixed here. This is a base FIFO/inventory bug, not specific to
+-- Quick Sale -- it affects the existing manual /sales draft-confirm path
+-- identically, since both call the same allocate_finished_goods_fifo.
+--
+-- Fix: round v_line_total to the same 4 decimals as total_cost's own
+-- column precision at the point it's computed, so the stored value and
+-- the constraint's fresh recomputation are both working from numbers
+-- that agree deterministically.
+--
+-- Full function body copied verbatim from sql/085_recipe_assembly_layer.sql
+-- (the current live definition -- it already superseded sql/011's
+-- original), with exactly one line changed (marked below). Grepped the
+-- whole project for other INSERT INTO finished_goods_batch_consumptions
+-- sites and for the same unrounded v_take * v_batch.unit_cost pattern --
+-- this is the only other one (sql/011), and it's already dead: CREATE OR
+-- REPLACE FUNCTION means sql/085's copy is what's actually live today,
+-- so sql/011's file does not need a separate fix.
+--
+-- Does NOT change: function signature, validation, duplicate-source
+-- guard, FIFO batch selection, or return shape. Does NOT touch
+-- confirm_sale, sales-service.ts, or any other function.
+
+CREATE OR REPLACE FUNCTION allocate_finished_goods_fifo(
+  p_product_id uuid,
+  p_quantity numeric,
+  p_reason text,
+  p_source_type text,
+  p_source_id uuid,
+  p_notes text DEFAULT NULL,
+  p_created_by uuid DEFAULT NULL
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_created_by uuid;
+  v_remaining_to_allocate numeric;
+  v_batch record;
+  v_out_sum numeric;
+  v_in_sum numeric;
+  v_batch_remaining numeric;
+  v_take numeric;
+  v_line_total numeric;
+  v_total_cost numeric := 0;
+  v_allocated_quantity numeric := 0;
+  v_consumption_id uuid;
+  v_allocations jsonb := '[]'::jsonb;
+  v_notes text;
+BEGIN
+  IF p_product_id IS NULL THEN
+    RAISE EXCEPTION 'Product id is required.';
+  END IF;
+
+  IF p_quantity IS NULL OR p_quantity <= 0 THEN
+    RAISE EXCEPTION 'Allocation quantity must be greater than zero.';
+  END IF;
+
+  IF p_reason IS NULL OR btrim(p_reason) = '' THEN
+    RAISE EXCEPTION 'Allocation reason is required.';
+  END IF;
+
+  IF p_reason NOT IN (
+    'sale',
+    'internal_use',
+    'waste',
+    'spoilage',
+    'stock_count',
+    'manual_adjustment',
+    'recipe_consumption'
+  ) THEN
+    RAISE EXCEPTION
+      'Invalid allocation reason. return_restock is not allowed on FIFO outflow allocation.';
+  END IF;
+
+  IF p_source_type IS NULL OR btrim(p_source_type) = '' THEN
+    RAISE EXCEPTION 'Source type is required.';
+  END IF;
+
+  IF p_source_type NOT IN (
+    'sale_line',
+    'pos_line',
+    'order_line',
+    'waste_ticket',
+    'stock_count_line',
+    'adjustment',
+    'production_session_line'
+  ) THEN
+    RAISE EXCEPTION 'Invalid source type.';
+  END IF;
+
+  IF p_source_id IS NULL THEN
+    RAISE EXCEPTION 'Source id is required.';
+  END IF;
+
+  -- Until Products master exists, finished goods are represented by recipes
+  -- (production_batches.finished_good_id = recipe_id).
+  IF NOT EXISTS (
+    SELECT 1
+    FROM recipes
+    WHERE id = p_product_id
+  ) THEN
+    RAISE EXCEPTION 'Product was not found.';
+  END IF;
+
+  v_created_by := COALESCE(p_created_by, auth.uid());
+  v_notes := NULLIF(btrim(COALESCE(p_notes, '')), '');
+  v_remaining_to_allocate := p_quantity;
+
+  -- Reject duplicate posting for the same (source document line, product).
+  -- Widened from (source_type, source_id) alone -- see sql/085's
+  -- file-header comment for why. finished_goods_batch_consumptions has no
+  -- product_id column of its own -- the product is derived by joining
+  -- through production_batches.finished_good_id, the same way every other
+  -- reader of this ledger identifies which product a row belongs to.
+  IF EXISTS (
+    SELECT 1
+    FROM finished_goods_batch_consumptions c
+    JOIN production_batches pb ON pb.id = c.production_batch_id
+    WHERE c.source_type = p_source_type
+      AND c.source_id = p_source_id
+      AND pb.finished_good_id = p_product_id
+  ) THEN
+    RAISE EXCEPTION 'This source has already been allocated.';
+  END IF;
+
+  -- Lock all batches for this finished good (FIFO order) so concurrent
+  -- allocations cannot oversell. Remaining is calculated, never stored.
+  FOR v_batch IN
+    SELECT
+      pb.id,
+      pb.produced_quantity,
+      pb.unit_cost,
+      pb.produced_at
+    FROM production_batches pb
+    WHERE pb.finished_good_id = p_product_id
+    ORDER BY pb.produced_at ASC, pb.id ASC
+    FOR UPDATE
+  LOOP
+    EXIT WHEN v_remaining_to_allocate <= 0;
+
+    SELECT
+      COALESCE(SUM(c.quantity) FILTER (WHERE c.direction = 'out'), 0),
+      COALESCE(SUM(c.quantity) FILTER (WHERE c.direction = 'in'), 0)
+    INTO v_out_sum, v_in_sum
+    FROM finished_goods_batch_consumptions c
+    WHERE c.production_batch_id = v_batch.id;
+
+    v_batch_remaining := v_batch.produced_quantity - v_out_sum + v_in_sum;
+
+    -- Invariant: remaining must never be negative before allocation.
+    IF v_batch_remaining < 0 THEN
+      RAISE EXCEPTION
+        'Finished goods ledger integrity error: batch remaining is negative.';
+    END IF;
+
+    IF v_batch_remaining <= 0 THEN
+      CONTINUE;
+    END IF;
+
+    v_take := LEAST(v_batch_remaining, v_remaining_to_allocate);
+    -- FIX (this file): round to total_cost's own column precision
+    -- (numeric(14,4)) at the point of computation, instead of storing the
+    -- unrounded product and letting the column coerce it silently. Keeps
+    -- the stored value and finished_goods_batch_consumptions_total_cost_chk's
+    -- fresh recomputation (quantity * unit_cost from the stored, already-
+    -- rounded columns) in agreement -- was: v_line_total := v_take * v_batch.unit_cost;
+    v_line_total := round(v_take * v_batch.unit_cost, 4);
+
+    INSERT INTO finished_goods_batch_consumptions (
+      production_batch_id,
+      quantity,
+      unit_cost,
+      total_cost,
+      direction,
+      reason,
+      source_type,
+      source_id,
+      allocation_mode,
+      notes,
+      created_by
+    )
+    VALUES (
+      v_batch.id,
+      v_take,
+      v_batch.unit_cost,
+      v_line_total,
+      'out',
+      p_reason,
+      p_source_type,
+      p_source_id,
+      'fifo',
+      v_notes,
+      v_created_by
+    )
+    RETURNING id INTO v_consumption_id;
+
+    -- Post-insert invariant: Σ(out) − Σ(in) <= produced
+    SELECT
+      COALESCE(SUM(c.quantity) FILTER (WHERE c.direction = 'out'), 0),
+      COALESCE(SUM(c.quantity) FILTER (WHERE c.direction = 'in'), 0)
+    INTO v_out_sum, v_in_sum
+    FROM finished_goods_batch_consumptions c
+    WHERE c.production_batch_id = v_batch.id;
+
+    IF (v_out_sum - v_in_sum) > v_batch.produced_quantity THEN
+      RAISE EXCEPTION
+        'Finished goods allocation would make batch remaining negative.';
+    END IF;
+
+    v_allocations := v_allocations || jsonb_build_array(
+      jsonb_build_object(
+        'consumption_id', v_consumption_id,
+        'production_batch_id', v_batch.id,
+        'quantity', v_take,
+        'unit_cost', v_batch.unit_cost,
+        'total_cost', v_line_total,
+        'produced_at', v_batch.produced_at
+      )
+    );
+
+    v_remaining_to_allocate := v_remaining_to_allocate - v_take;
+    v_allocated_quantity := v_allocated_quantity + v_take;
+    v_total_cost := v_total_cost + v_line_total;
+  END LOOP;
+
+  IF v_remaining_to_allocate > 0 THEN
+    RAISE EXCEPTION 'Insufficient finished goods stock for this product.';
+  END IF;
+
+  RETURN jsonb_build_object(
+    'product_id', p_product_id,
+    'requested_quantity', p_quantity,
+    'allocated_quantity', v_allocated_quantity,
+    'total_cost', v_total_cost,
+    'reason', p_reason,
+    'source_type', p_source_type,
+    'source_id', p_source_id,
+    'allocations', v_allocations
+  );
+END;
+$$;
+
+COMMENT ON FUNCTION allocate_finished_goods_fifo(
+  uuid, numeric, text, text, uuid, text, uuid
+) IS
+  'FIFO allocate finished goods and append immutable batch consumption ledger rows. Remaining is calculated only. Duplicate-source guard is qualified by product_id so one source line can allocate several different products (assembly components). total_cost is rounded to 4 decimals at computation time (sql/087) to match finished_goods_batch_consumptions_total_cost_chk''s fresh recomputation.';
+
+-- Explicit REVOKE/GRANT reapplied even though CREATE OR REPLACE does not
+-- necessarily reset privileges -- same discipline as every other
+-- money-critical function touched this session, for certainty rather than
+-- reliance on that assumption.
+REVOKE ALL ON FUNCTION allocate_finished_goods_fifo(
+  uuid, numeric, text, text, uuid, text, uuid
+) FROM PUBLIC;
+REVOKE ALL ON FUNCTION allocate_finished_goods_fifo(
+  uuid, numeric, text, text, uuid, text, uuid
+) FROM anon;
+GRANT EXECUTE ON FUNCTION allocate_finished_goods_fifo(
+  uuid, numeric, text, text, uuid, text, uuid
+) TO authenticated;

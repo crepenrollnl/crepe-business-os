@@ -50,6 +50,8 @@ export interface Recipe {
   yield_unit: string;
   is_active: boolean;
   recipe_role: RecipeRole;
+  /** Optional list price. Null when not set yet — see sql/086_quick_sale.sql. */
+  selling_price: number | null;
   created_at: string;
   updated_at?: string;
 }
@@ -116,6 +118,8 @@ export interface RecipeFormValues {
   yield_unit: RecipeYieldUnit;
   is_active: boolean;
   recipe_role: RecipeRole;
+  /** Optional. null means empty/unset, not zero. */
+  selling_price: number | null;
   /** Used when recipe_role = 'component'. */
   lines: RecipeLineInput[];
   /** Used when recipe_role = 'assembly'. */

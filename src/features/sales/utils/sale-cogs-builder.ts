@@ -34,7 +34,11 @@ export function validateSaleCogsLayer(
     return "Sale line id is required for COGS.";
   }
 
-  if (!layer.production_batch_id?.trim()) {
+  if (layer.source === "ingredient") {
+    if (!layer.ingredient_id?.trim()) {
+      return "Ingredient id is required for COGS.";
+    }
+  } else if (!layer.production_batch_id?.trim()) {
     return "Production batch id is required for COGS.";
   }
 
