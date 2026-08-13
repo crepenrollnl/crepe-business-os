@@ -169,8 +169,8 @@ These rules govern future Production, Sales, and Reports. Document and design ag
 
 - **Never duplicate** finished-goods quantities at the product level as a second source of truth.
 - **Sales never modifies Production Batch rows.** Sales only inserts Sale Batch Consumption records.
-- **Sales never consume Recipes.**
-- **Sales never consume Raw Materials.**
+- **Sales consumes Recipes only through the Assembly `recipe_role` model** (`recipe_components.component_recipe_id`, FIFO-allocated from pre-produced Finished Goods) — see [ADR-0001](docs/decisions/0001-sales-consume-recipes-and-raw-materials-via-assembly-model.md). Sales never consumes a Recipe any other way.
+- **Sales consumes Raw Materials only through that same model's `recipe_components.ingredient_id`** (raw, no-cook Assembly add-ins that never go through Production) — same ADR. Outside that narrow, explicitly-declared path, Production Execution remains the exclusive module allowed to deduct Raw Materials; this exception reuses Production Execution's own internal decrement primitive and the one shared `stock_movements` ledger — it does not invent a second stock ledger.
 - **FIFO** (oldest available batch first) is the default allocation strategy.
 - Batch selection is internal. Users do not manually choose which batch to sell from.
 - Each batch stores its own immutable `unit_cost` at creation for later margin and profitability reporting.

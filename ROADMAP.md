@@ -503,13 +503,11 @@ Example:
 
 ### FIFO Sales Strategy
 
-Sales **never** consume Raw Materials.
-
-Sales **never** use Recipes.
+Sales consumes Recipes and Raw Materials only through the Assembly/Component `recipe_role` model (`recipe_components.component_recipe_id` / `.ingredient_id`) — see [ADR-0001](docs/decisions/0001-sales-consume-recipes-and-raw-materials-via-assembly-model.md). Outside that model, Sales never consumes a Recipe or Raw Material directly.
 
 Sales **never** updates Production Batch rows.
 
-Sales **only** appends Sale Batch Consumption records against Production Batches.
+Sales **only** appends Sale Batch Consumption records against Production Batches — for the `component_recipe_id` branch. For the `ingredient_id` branch, Sales decrements `ingredients.current_stock` directly (the same primitive Production Execution itself uses) and appends a `stock_movements` row instead of a Sale Batch Consumption row — see ADR-0001 for why this narrow exception exists.
 
 Default allocation strategy: **FIFO** — oldest available batch first (by calculated remaining > 0).
 
