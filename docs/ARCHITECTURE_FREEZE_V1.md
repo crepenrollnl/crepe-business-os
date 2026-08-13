@@ -100,7 +100,7 @@ Remaining =
 - Sales consume Finished Goods through **FIFO**.
 - Sales **never** edit Production Batches.
 - Sales create immutable **Sale Batch Consumption** records.
-- **COGS** comes only from Sale Batch Consumption.
+- **COGS** comes from Sale Batch Consumption for a directly-sold Component. For an Assembly's `recipe_components.ingredient_id` add-in, COGS instead comes from `ingredients.cost_per_unit` via a `stock_movements` row — a narrow, explicitly-declared exception, not a second general source. See [ADR-0001](decisions/0001-sales-consume-recipes-and-raw-materials-via-assembly-model.md).
 
 ---
 
@@ -115,7 +115,7 @@ The following rules are now frozen:
 5. FIFO is automatic.
 6. Users never choose batches manually.
 7. Users never edit calculated stock.
-8. COGS always comes from consumed batches.
+8. COGS always comes from consumed batches, except the narrow, explicitly-declared `recipe_components.ingredient_id` exception (see [ADR-0001](decisions/0001-sales-consume-recipes-and-raw-materials-via-assembly-model.md)).
 9. Remaining Quantity is calculated only.
 10. No duplicated stock values.
 

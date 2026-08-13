@@ -2,6 +2,7 @@ import type { RecipeListItem } from "../types/recipe";
 
 type RecipeRowProps = {
   item: RecipeListItem;
+  onView: (item: RecipeListItem) => void;
   onEdit: (item: RecipeListItem) => void;
   onDelete: (item: RecipeListItem) => void;
 };
@@ -18,7 +19,7 @@ function getStatusBadgeClass(isActive: boolean): string {
   return "bg-zinc-100 text-zinc-600";
 }
 
-export function RecipeRow({ item, onEdit, onDelete }: RecipeRowProps) {
+export function RecipeRow({ item, onView, onEdit, onDelete }: RecipeRowProps) {
   return (
     <tr className="border-t border-zinc-200 transition-colors hover:bg-zinc-50">
       <td className="px-4 py-4">
@@ -42,6 +43,13 @@ export function RecipeRow({ item, onEdit, onDelete }: RecipeRowProps) {
       </td>
       <td className="px-4 py-4 text-right">
         <div className="inline-flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => onView(item)}
+            className="rounded-lg px-3 py-1.5 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-900"
+          >
+            View
+          </button>
           <button
             type="button"
             onClick={() => onEdit(item)}

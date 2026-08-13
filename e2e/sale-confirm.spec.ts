@@ -150,7 +150,15 @@ test("build and execute a component, assemble it, sell it, confirm the sale", as
     .selectOption({ value: "assembly" });
 
   const componentLine = assemblyForm.locator("tbody tr").first();
-  await componentLine.locator("select").selectOption({ label: componentRecipeName });
+  // This row now has two <select>s (recipe-editor-modal.tsx's Components
+  // table gained a Type picker alongside the existing Component/Ingredient
+  // picker, sql/089 UI work) -- scope to the cell whose default option text
+  // is "Select component" so this stays unambiguous regardless of row
+  // position, rather than a positional .nth(1).
+  await componentLine
+    .getByRole("cell", { name: "Select component" })
+    .getByRole("combobox")
+    .selectOption({ label: componentRecipeName });
   // Unit auto-fills (read-only) from the selected component recipe's
   // yield_unit -- only quantity needs a value. 1 component unit per
   // assembly portion; 2 portions sold below still leaves headroom against

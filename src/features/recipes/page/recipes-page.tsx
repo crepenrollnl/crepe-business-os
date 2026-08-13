@@ -3,6 +3,7 @@
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { DeleteDialog } from "../components/delete-dialog";
 import { RecipeEditorModal } from "../components/recipe-editor-modal";
+import { RecipeViewModal } from "../components/recipe-view-modal";
 import { RecipesTable } from "../components/recipes-table";
 import { RecipesToolbar } from "../components/recipes-toolbar";
 import { useRecipes } from "../hooks/use-recipes";
@@ -25,6 +26,10 @@ export function RecipesPage() {
     editingRecipe,
     initialFormValues,
     isLoadingRecipe,
+    isViewModalOpen,
+    viewingRecipe,
+    isLoadingViewRecipe,
+    viewError,
     deleteTarget,
     isSaving,
     isDeleting,
@@ -32,6 +37,9 @@ export function RecipesPage() {
     openCreateModal,
     openEditModal,
     closeModal,
+    openViewModal,
+    closeViewModal,
+    editFromView,
     openDeleteDialog,
     closeDeleteDialog,
     saveRecipe,
@@ -69,6 +77,7 @@ export function RecipesPage() {
           onSort={toggleSort}
           onRetry={retry}
           onCreateClick={openCreateModal}
+          onView={(item) => void openViewModal(item)}
           onEdit={(item) => void openEditModal(item)}
           onDelete={openDeleteDialog}
         />
@@ -84,6 +93,15 @@ export function RecipesPage() {
           error={actionError}
           onClose={closeModal}
           onSave={saveRecipe}
+        />
+
+        <RecipeViewModal
+          isOpen={isViewModalOpen}
+          recipe={viewingRecipe}
+          isLoading={isLoadingViewRecipe}
+          error={viewError}
+          onClose={closeViewModal}
+          onEdit={editFromView}
         />
 
         <DeleteDialog
