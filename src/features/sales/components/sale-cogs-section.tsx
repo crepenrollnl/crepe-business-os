@@ -87,9 +87,11 @@ export function SaleCogsSection({
             {summary.layers.map((layer) => (
               <tr key={layer.consumption_id}>
                 <td className="px-4 py-3 font-medium text-zinc-900">
-                  {layer.batch_number !== null
-                    ? `#${layer.batch_number}`
-                    : layer.production_batch_id.slice(0, 8)}
+                  {layer.source === "ingredient"
+                    ? (layer.ingredient_name ?? "Ingredient")
+                    : layer.batch_number !== null
+                      ? `#${layer.batch_number}`
+                      : (layer.production_batch_id?.slice(0, 8) ?? "—")}
                 </td>
                 <td className="px-4 py-3 text-zinc-800">
                   {formatQuantity(layer.quantity)}

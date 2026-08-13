@@ -1,16 +1,20 @@
 /**
  * Sales COGS service (DEV-108).
  *
- * Builds frozen sale cost summaries from Finished Goods consumption ledger
- * rows (DEV-107). Never recalculates unit costs. Never posts Accounting.
- * Never calculates profit.
- *
- * Storage of COGS layers = finished_goods_batch_consumptions (append-only).
- * This service only assembles the frozen sale valuation read model.
+ * Builds frozen sale cost summaries from two append-only ledgers a
+ * completed sale can draw from (sql/089):
+ *   - finished_goods_batch_consumptions — FIFO consumption of a
+ *     component_recipe_id part of an assembly.
+ *   - stock_movements (reference_type='sale', movement_type='sale_out') —
+ *     direct decrement of an ingredient_id part of an assembly (raw,
+ *     no-cook add-ins that never go through Production).
+ * Never recalculates unit costs. Never posts Accounting. Never calculates
+ * profit. This service only assembles the frozen sale valuation read model.
  */
 
 import { finishedGoodsReadService } from "@/features/finished-goods/services/finished-goods-read-service";
 import { toUserError } from "@/lib/service-errors";
+import { supabase } from "@/lib/supabase";
 import { fail, ok, type ServiceResult } from "@/types/service";
 import type { SaleCogsBatchLayer, SaleCostSummary } from "../types/sale-cogs";
 import type { SaleStatus } from "../types/sale";
@@ -27,7 +31,7 @@ function isCompletedSaleStatus(status: SaleStatus): boolean {
   return status === "confirmed" || status === "paid";
 }
 
-function mapLayers(
+function mapFinishedGoodsLayers(
   rows: NonNullable<
     Awaited<
       ReturnType<typeof finishedGoodsReadService.listConsumptionsForSaleLines>
@@ -43,7 +47,92 @@ function mapLayers(
     unit_cost: row.unit_cost,
     total_cost: row.total_cost,
     produced_at: row.produced_at,
+    source: "finished_goods",
+    ingredient_id: null,
+    ingredient_name: null,
   }));
+}
+
+type IngredientConsumptionRow = {
+  id: string;
+  ingredient_id: string;
+  quantity: number | string;
+  unit_cost: number | string;
+  reference_id: string;
+  ingredients: { name: string } | { name: string }[] | null;
+};
+
+function ingredientNameOf(
+  ingredients: IngredientConsumptionRow["ingredients"],
+): string | null {
+  if (Array.isArray(ingredients)) {
+    return ingredients[0]?.name ?? null;
+  }
+  return ingredients?.name ?? null;
+}
+
+/**
+ * Load direct raw-ingredient sale consumption layers (sql/089) — the
+ * counterpart to finishedGoodsReadService.listConsumptionsForSaleLines for
+ * the ingredient_id branch of an assembly. Same reference_type/
+ * movement_type filter confirm_sale itself writes with, so this read can
+ * never pick up an unrelated stock_movements row.
+ */
+async function listIngredientConsumptionsForSaleLines(
+  saleLineIds: readonly string[],
+): Promise<ServiceResult<SaleCogsBatchLayer[]>> {
+  try {
+    const ids = [
+      ...new Set(saleLineIds.map((id) => id.trim()).filter(Boolean)),
+    ];
+    if (ids.length === 0) {
+      return ok([]);
+    }
+
+    const { data, error } = await supabase
+      .from("stock_movements")
+      .select(
+        "id, ingredient_id, quantity, unit_cost, reference_id, ingredients ( name )",
+      )
+      .eq("reference_type", "sale")
+      .eq("movement_type", "sale_out")
+      .in("reference_id", ids)
+      .order("created_at", { ascending: true })
+      .order("id", { ascending: true });
+
+    if (error) {
+      return fail(
+        toUserError(error, "Failed to load ingredient sale consumptions"),
+      );
+    }
+
+    const rows = (data ?? []) as IngredientConsumptionRow[];
+
+    return ok(
+      rows.map((row) => {
+        const quantity = Number(row.quantity);
+        const unitCost = Number(row.unit_cost);
+
+        return {
+          consumption_id: row.id,
+          sale_line_id: row.reference_id,
+          production_batch_id: null,
+          batch_number: null,
+          quantity,
+          unit_cost: unitCost,
+          total_cost: quantity * unitCost,
+          produced_at: null,
+          source: "ingredient",
+          ingredient_id: row.ingredient_id,
+          ingredient_name: ingredientNameOf(row.ingredients),
+        };
+      }),
+    );
+  } catch (error) {
+    return fail(
+      toUserError(error, "Failed to load ingredient sale consumptions"),
+    );
+  }
 }
 
 export const saleCogsService = {
@@ -78,20 +167,32 @@ export const saleCogsService = {
       }
 
       const lineIds = sale.lines.map((line) => line.line_id);
-      const consumptionsResult =
-        await finishedGoodsReadService.listConsumptionsForSaleLines(lineIds);
+      const [finishedGoodsResult, ingredientResult] = await Promise.all([
+        finishedGoodsReadService.listConsumptionsForSaleLines(lineIds),
+        listIngredientConsumptionsForSaleLines(lineIds),
+      ]);
 
-      if (consumptionsResult.error || !consumptionsResult.data) {
+      if (finishedGoodsResult.error || !finishedGoodsResult.data) {
         return fail(
-          consumptionsResult.error ??
+          finishedGoodsResult.error ??
             "Failed to load finished goods sale consumptions",
+        );
+      }
+
+      if (ingredientResult.error || !ingredientResult.data) {
+        return fail(
+          ingredientResult.error ??
+            "Failed to load ingredient sale consumptions",
         );
       }
 
       const built = buildSaleCostSummary({
         sale_id: sale.sale_id,
         sale_status: sale.status,
-        layers: mapLayers(consumptionsResult.data),
+        layers: [
+          ...mapFinishedGoodsLayers(finishedGoodsResult.data),
+          ...ingredientResult.data,
+        ],
       });
 
       if (!built.ok) {

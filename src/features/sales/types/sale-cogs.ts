@@ -8,11 +8,18 @@
  * Specs: docs/SALES.md, docs/BATCH_CONSUMPTION.md
  */
 
-/** One immutable COGS layer from a Finished Goods consumption row. */
+/**
+ * One immutable COGS layer, from either ledger a completed sale can draw
+ * from (sql/089): a Finished Goods FIFO consumption (component_recipe_id
+ * part of an assembly) or a direct raw-ingredient stock movement
+ * (ingredient_id part of an assembly, decremented straight from
+ * ingredients.current_stock — no production batch involved).
+ */
 export interface SaleCogsBatchLayer {
   consumption_id: string;
   sale_line_id: string;
-  production_batch_id: string;
+  /** null for an "ingredient" layer — there is no production batch. */
+  production_batch_id: string | null;
   batch_number: number | null;
   quantity: number;
   /** Frozen unit cost from the consumption ledger (batch snapshot). */
@@ -20,6 +27,12 @@ export interface SaleCogsBatchLayer {
   /** Stored layer cost from the ledger — never recomputed in Sales. */
   total_cost: number;
   produced_at: string | null;
+  /** Which ledger this layer came from. */
+  source: "finished_goods" | "ingredient";
+  /** Set only when source === "ingredient". */
+  ingredient_id: string | null;
+  /** Set only when source === "ingredient". */
+  ingredient_name: string | null;
 }
 
 /** Per sale-line COGS rollup (sum of stored layer total_cost). */
