@@ -396,7 +396,17 @@ export const finishedGoodsReadService = {
           batch_number: batchRelation?.batch_number ?? null,
           quantity: toNumber(row.quantity),
           unit_cost: roundUnitCost(toNumber(row.unit_cost)),
-          total_cost: roundMoney(toNumber(row.total_cost)),
+          // Not roundMoney()'d here (found 14.08.2026): total_cost is a
+          // per-layer figure that sale-cogs-builder.ts sums across ALL
+          // layers (this source plus stock_movements ingredient layers)
+          // before rounding once at the end. Rounding it per-layer here
+          // first silently lost sub-cent remainders before the sum ever
+          // saw them (e.g. 0.0240 -> 0.02, 1.5624 -> 1.56), producing a
+          // total_cogs that verify_sale_cost_and_profit correctly rejected
+          // as wrong. The DB column (finished_goods_batch_consumptions
+          // .total_cost) is numeric(14,4) precisely so this raw value can
+          // carry sub-cent precision through to the final sum.
+          total_cost: toNumber(row.total_cost),
           produced_at: batchRelation?.produced_at ?? null,
           created_at: row.created_at,
         } satisfies FinishedGoodsSaleConsumptionRow;
