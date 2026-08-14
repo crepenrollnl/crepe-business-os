@@ -22,7 +22,10 @@ import type {
   PostingRule,
 } from "@/types/accounting";
 import type { PostingResult } from "./posting-engine";
-import type { PostedJournalRecord } from "./posting-persistence";
+import type {
+  PostedJournalProposalStatus,
+  PostedJournalRecord,
+} from "./posting-persistence";
 
 /**
  * Opaque correlation metadata carried with every posting request/result.
@@ -91,6 +94,15 @@ export interface OperationalPostingResult {
    * Always null for propose mode (current Purchases behaviour).
    */
   posted_journal: PostedJournalRecord | null;
+  /**
+   * Per-proposal persistence outcome from post_journal_proposals (sql/091).
+   * Null for propose mode (not applicable). For mode === "post" via post(),
+   * always "posted_now" — that path fails hard on ALREADY_POSTED, same as
+   * before this field existed. For mode === "post" via postMany(), may be
+   * "already_posted" when a batch retry finds one proposal already landed
+   * from an earlier call — posted_journal stays null in that case too.
+   */
+  posting_status: PostedJournalProposalStatus | null;
 }
 
 /**

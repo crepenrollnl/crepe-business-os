@@ -22,11 +22,14 @@ import {
 import { createPurchaseReceivedPostingRule } from "../rules/purchase-received-posting-rule";
 
 const postJournalProposalMock = vi.fn();
+const postJournalProposalsMock = vi.fn();
 
 vi.mock("./posting-service", () => ({
   postingService: {
     postJournalProposal: (...args: unknown[]) =>
       postJournalProposalMock(...args),
+    postJournalProposals: (...args: unknown[]) =>
+      postJournalProposalsMock(...args),
     rejectLedgerMutation: vi.fn(),
   },
 }));
@@ -157,6 +160,7 @@ describe("operationalAccountingIntegrationService (DEV-092)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     postJournalProposalMock.mockReset();
+    postJournalProposalsMock.mockReset();
   });
 
   it("proposes a purchase_received journal through the generic framework", () => {
@@ -302,5 +306,170 @@ describe("operationalAccountingIntegrationService (DEV-092)", () => {
     expect(result.data?.mode).toBe("propose");
     expect(result.data?.posted_journal).toBeNull();
     expect(postJournalProposalMock).not.toHaveBeenCalled();
+  });
+});
+
+function buildSecondPurchaseReceivedRequest(): OperationalPostingRequest {
+  const request = buildPurchaseReceivedRequest();
+  const event = {
+    ...request.event,
+    id: "event-2",
+    source_document_id: "purchase-2",
+    idempotency_key: "purchase_received:purchase-2",
+  };
+  return {
+    ...request,
+    event,
+    metadata: {
+      ...request.metadata,
+      source_document_id: "purchase-2",
+      idempotency_key: "purchase_received:purchase-2",
+    },
+  };
+}
+
+function mockPostedRecord(overrides?: Record<string, unknown>) {
+  return {
+    journal_entry: { id: "journal-1", status: "posted" },
+    journal_lines: [],
+    ledger_entries: [],
+    posting_number: "JE-2026-000001",
+    posting_date: "2026-07-26",
+    fiscal_period_id: "period-1",
+    ...overrides,
+  };
+}
+
+describe("operationalAccountingIntegrationService.postMany (V1 plan item 8)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    postJournalProposalMock.mockReset();
+    postJournalProposalsMock.mockReset();
+  });
+
+  it("proposes every request first, then persists all of them in one Posting Service call", async () => {
+    const requestA = buildPurchaseReceivedRequest({ mode: "post" });
+    const requestB = buildSecondPurchaseReceivedRequest();
+
+    postJournalProposalsMock.mockResolvedValue({
+      data: [
+        {
+          status: "posted_now",
+          business_event_id: requestA.event.id,
+          journal_entry_id: "journal-a",
+          posting_number: "JE-2026-000001",
+          record: mockPostedRecord({ posting_number: "JE-2026-000001" }),
+        },
+        {
+          status: "posted_now",
+          business_event_id: requestB.event.id,
+          journal_entry_id: "journal-b",
+          posting_number: "JE-2026-000002",
+          record: mockPostedRecord({ posting_number: "JE-2026-000002" }),
+        },
+      ],
+      error: null,
+    });
+
+    const result = await operationalAccountingIntegrationService.postMany([
+      requestA,
+      requestB,
+    ]);
+
+    expect(result.error).toBeNull();
+    expect(result.data).toHaveLength(2);
+    expect(result.data?.[0]?.business_event_id).toBe(requestA.event.id);
+    expect(result.data?.[0]?.posting_status).toBe("posted_now");
+    expect(result.data?.[0]?.posted_journal?.posting_number).toBe(
+      "JE-2026-000001",
+    );
+    expect(result.data?.[1]?.business_event_id).toBe(requestB.event.id);
+    expect(result.data?.[1]?.posted_journal?.posting_number).toBe(
+      "JE-2026-000002",
+    );
+
+    // One persist call for the whole batch, not one per request.
+    expect(postJournalProposalsMock).toHaveBeenCalledTimes(1);
+    const [proposals] = postJournalProposalsMock.mock.calls[0] as [
+      unknown[],
+    ];
+    expect(proposals).toHaveLength(2);
+  });
+
+  it("fails before any RPC call if building ANY request's proposal fails", async () => {
+    const requestA = buildPurchaseReceivedRequest({ mode: "post" });
+    const requestB = buildSecondPurchaseReceivedRequest();
+    requestB.metadata = {
+      ...requestB.metadata,
+      source_document_id: "mismatched-document-id",
+    };
+
+    const result = await operationalAccountingIntegrationService.postMany([
+      requestA,
+      requestB,
+    ]);
+
+    expect(result.data).toBeNull();
+    expect(result.error).toMatch(/source_document_id must match/i);
+    expect(postJournalProposalsMock).not.toHaveBeenCalled();
+  });
+
+  it("surfaces already_posted per element without failing the batch", async () => {
+    const requestA = buildPurchaseReceivedRequest({ mode: "post" });
+    const requestB = buildSecondPurchaseReceivedRequest();
+
+    postJournalProposalsMock.mockResolvedValue({
+      data: [
+        {
+          status: "already_posted",
+          business_event_id: requestA.event.id,
+          journal_entry_id: "journal-a",
+          posting_number: "JE-2026-000001",
+          record: null,
+        },
+        {
+          status: "posted_now",
+          business_event_id: requestB.event.id,
+          journal_entry_id: "journal-b",
+          posting_number: "JE-2026-000002",
+          record: mockPostedRecord({ posting_number: "JE-2026-000002" }),
+        },
+      ],
+      error: null,
+    });
+
+    const result = await operationalAccountingIntegrationService.postMany([
+      requestA,
+      requestB,
+    ]);
+
+    expect(result.error).toBeNull();
+    expect(result.data?.[0]?.posting_status).toBe("already_posted");
+    expect(result.data?.[0]?.posted_journal).toBeNull();
+    expect(result.data?.[1]?.posting_status).toBe("posted_now");
+    expect(result.data?.[1]?.posted_journal).not.toBeNull();
+  });
+
+  it("propagates a Posting Service failure for the whole batch", async () => {
+    postJournalProposalsMock.mockResolvedValue({
+      data: null,
+      error: "Fiscal period is not open for posting.",
+    });
+
+    const result = await operationalAccountingIntegrationService.postMany([
+      buildPurchaseReceivedRequest({ mode: "post" }),
+      buildSecondPurchaseReceivedRequest(),
+    ]);
+
+    expect(result.data).toBeNull();
+    expect(result.error).toBe("Fiscal period is not open for posting.");
+  });
+
+  it("rejects an empty request list without calling propose or Posting Service", async () => {
+    const result = await operationalAccountingIntegrationService.postMany([]);
+
+    expect(result.data).toBeNull();
+    expect(result.error).toMatch(/at least one posting request/i);
+    expect(postJournalProposalsMock).not.toHaveBeenCalled();
   });
 });

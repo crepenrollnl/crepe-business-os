@@ -25,11 +25,15 @@ import {
   type SaleRevenueDebitRole,
 } from "@/features/accounting/rules/sale-completed-posting-rule";
 import { operationalAccountingIntegrationService } from "@/features/accounting/services/operational-accounting-integration-service";
-import type { OperationalPostingResult } from "@/features/accounting/types/operational-integration";
+import type {
+  OperationalPostingRequest,
+  OperationalPostingResult,
+} from "@/features/accounting/types/operational-integration";
 import {
   createBusinessEvent,
   createPostingMetadata,
 } from "@/features/accounting/utils/business-event-factory";
+import { roundMoney } from "@/lib/money";
 import { toUserError } from "@/lib/service-errors";
 import { supabase } from "@/lib/supabase";
 import type {
@@ -222,20 +226,18 @@ export function buildCogsRecognizedBusinessEvent(
   });
 }
 
-function submitFromEvent(input: {
+function buildPostingRequest(input: {
   event: AccountingBusinessEvent;
   accounting: SaleAccountingContext;
   postingRules: readonly PostingRule[] | undefined;
   correlationId: string | null;
   tags: Record<string, string>;
   mode: "propose" | "post";
-}):
-  | ServiceResult<OperationalPostingResult>
-  | Promise<ServiceResult<OperationalPostingResult>> {
+}): OperationalPostingRequest {
   const { event, accounting, postingRules, correlationId, tags, mode } = input;
   const requestedAt = accounting.nowIso ?? new Date().toISOString();
 
-  const request = {
+  return {
     event,
     metadata: createPostingMetadata({
       event,
@@ -252,13 +254,7 @@ function submitFromEvent(input: {
       createId: accounting.createId,
     },
     mode,
-  } as const;
-
-  if (mode === "post") {
-    return operationalAccountingIntegrationService.post(request);
-  }
-
-  return operationalAccountingIntegrationService.propose(request);
+  };
 }
 
 async function runSaleCompleted(input: {
@@ -289,14 +285,32 @@ async function runSaleCompleted(input: {
     return fail("Sale revenue and COGS must be finite non-negative amounts.");
   }
 
-  if (revenueAmount === 0 && cogsAmount === 0) {
+  // Sub-cent COGS is treated as a legitimate accounting zero (immaterial
+  // rounding), not a real cost to post — this is a deliberate threshold,
+  // not a forgotten edge case. Building a cogs_recognized event for it
+  // would still hit the Posting Pipeline's own zero-amount line drop and
+  // fail with NO_POSTING_LINES (found 12.08.2026, live on dev: sale
+  // S-000016, COGS of €0.0029 rounded to €0 and aborted the whole COGS
+  // proposal — after Revenue had already posted under the old two-call
+  // code). Checking roundMoney(cogsAmount) here means that case never
+  // reaches the pipeline at all — it settles as "Revenue only, COGS
+  // correctly skipped" instead of an error.
+  const hasCogsToPost = roundMoney(cogsAmount) > 0;
+
+  if (revenueAmount === 0 && !hasCogsToPost) {
     return fail(
       "Sale has zero revenue and zero COGS; nothing to post to Accounting.",
     );
   }
 
-  let revenue: OperationalPostingResult | null = null;
-  let cogs: OperationalPostingResult | null = null;
+  // Phase 1 — propose only (pure, no DB writes). Building both proposals
+  // before persisting either means a failure here can never leave a
+  // partial post: nothing has touched the database yet, for Revenue or
+  // COGS, so it's always safe to bail out with fail().
+  let revenueRequest: OperationalPostingRequest | null = null;
+  let cogsRequest: OperationalPostingRequest | null = null;
+  let revenueProposed: OperationalPostingResult | null = null;
+  let cogsProposed: OperationalPostingResult | null = null;
 
   if (revenueAmount > 0) {
     const dup = assertNotDuplicate(
@@ -314,7 +328,7 @@ async function runSaleCompleted(input: {
       );
     }
 
-    const submitted = await submitFromEvent({
+    revenueRequest = buildPostingRequest({
       event: eventResult.data,
       accounting,
       postingRules: resolveRevenueRules(accounting),
@@ -328,16 +342,18 @@ async function runSaleCompleted(input: {
       mode,
     });
 
-    if (submitted.error || !submitted.data) {
+    const proposed = operationalAccountingIntegrationService.propose(
+      revenueRequest,
+    );
+    if (proposed.error || !proposed.data) {
       return fail(
-        submitted.error ??
-          `Failed to ${mode} revenue journal for sale`,
+        proposed.error ?? `Failed to ${mode} revenue journal for sale`,
       );
     }
-    revenue = submitted.data;
+    revenueProposed = proposed.data;
   }
 
-  if (cogsAmount > 0) {
+  if (hasCogsToPost) {
     const dup = assertNotDuplicate(
       saleCogsIdempotencyKey(sale.id),
       accounting.alreadyPostedIdempotencyKeys,
@@ -357,7 +373,7 @@ async function runSaleCompleted(input: {
       );
     }
 
-    const submitted = await submitFromEvent({
+    cogsRequest = buildPostingRequest({
       event: eventResult.data,
       accounting,
       postingRules: resolveCogsRules(accounting),
@@ -371,13 +387,44 @@ async function runSaleCompleted(input: {
       mode,
     });
 
-    if (submitted.error || !submitted.data) {
-      return fail(
-        submitted.error ?? `Failed to ${mode} COGS journal for sale`,
-      );
+    const proposed = operationalAccountingIntegrationService.propose(
+      cogsRequest,
+    );
+    if (proposed.error || !proposed.data) {
+      return fail(proposed.error ?? `Failed to ${mode} COGS journal for sale`);
     }
-    cogs = submitted.data;
+    cogsProposed = proposed.data;
   }
+
+  if (mode === "propose") {
+    return ok({
+      sale,
+      total_cogs: totalCogs,
+      revenue: revenueProposed,
+      cogs: cogsProposed,
+    });
+  }
+
+  // Phase 2 — persist everything proposed above in a single atomic call.
+  // Whatever was built in phase 1 lands together, or none of it does.
+  const requestsToPersist: OperationalPostingRequest[] = [];
+  if (revenueRequest) {
+    requestsToPersist.push(revenueRequest);
+  }
+  if (cogsRequest) {
+    requestsToPersist.push(cogsRequest);
+  }
+
+  const persisted = await operationalAccountingIntegrationService.postMany(
+    requestsToPersist,
+  );
+  if (persisted.error || !persisted.data) {
+    return fail(persisted.error ?? "Failed to post journals for sale");
+  }
+
+  let resultIndex = 0;
+  const revenue = revenueRequest ? persisted.data[resultIndex++] : null;
+  const cogs = cogsRequest ? persisted.data[resultIndex++] : null;
 
   return ok({
     sale,
@@ -498,7 +545,7 @@ export const saleAccountingService = {
         );
       }
 
-      const proposed = submitFromEvent({
+      const revenueRequest = buildPostingRequest({
         event: eventResult.data,
         accounting,
         postingRules: resolveRevenueRules(accounting),
@@ -511,10 +558,9 @@ export const saleAccountingService = {
         },
         mode: "propose",
       });
-
-      if (proposed instanceof Promise) {
-        return fail("Failed to propose revenue journal for sale");
-      }
+      const proposed = operationalAccountingIntegrationService.propose(
+        revenueRequest,
+      );
 
       if (proposed.error || !proposed.data) {
         return fail(
@@ -545,7 +591,7 @@ export const saleAccountingService = {
         );
       }
 
-      const proposed = submitFromEvent({
+      const cogsRequest = buildPostingRequest({
         event: eventResult.data,
         accounting,
         postingRules: resolveCogsRules(accounting),
@@ -558,10 +604,9 @@ export const saleAccountingService = {
         },
         mode: "propose",
       });
-
-      if (proposed instanceof Promise) {
-        return fail("Failed to propose COGS journal for sale");
-      }
+      const proposed = operationalAccountingIntegrationService.propose(
+        cogsRequest,
+      );
 
       if (proposed.error || !proposed.data) {
         return fail(

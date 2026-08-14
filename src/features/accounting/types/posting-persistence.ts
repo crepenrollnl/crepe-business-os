@@ -47,3 +47,21 @@ export interface PostedJournalRecord {
 }
 
 export type JournalProposal = PostingResult;
+
+export type PostedJournalProposalStatus = "posted_now" | "already_posted";
+
+/**
+ * Per-proposal outcome from post_journal_proposals (sql/091). Batches persist
+ * atomically — all proposals land or none do — but ALREADY_POSTED on one
+ * element is reported per element rather than failing the whole batch, so a
+ * retry that finds one proposal already posted (e.g. a legacy partial post
+ * from before this RPC existed) can still land the rest.
+ */
+export interface PostedJournalProposalOutcome {
+  status: PostedJournalProposalStatus;
+  business_event_id: string | null;
+  journal_entry_id: string;
+  posting_number: string | null;
+  /** Populated only when status === "posted_now". */
+  record: PostedJournalRecord | null;
+}

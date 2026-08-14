@@ -99,6 +99,7 @@ function toResult(input: {
   mode: OperationalPostingMode;
   journalProposal: OperationalPostingResult["journal_proposal"];
   postedJournal: OperationalPostingResult["posted_journal"];
+  postingStatus: OperationalPostingResult["posting_status"];
 }): OperationalPostingResult {
   return {
     business_event_id: input.request.event.id,
@@ -107,6 +108,7 @@ function toResult(input: {
     metadata: input.request.metadata,
     journal_proposal: input.journalProposal,
     posted_journal: input.postedJournal,
+    posting_status: input.postingStatus,
   };
 }
 
@@ -138,12 +140,17 @@ export const operationalAccountingIntegrationService = {
         mode: "propose",
         journalProposal: pipeline.data,
         postedJournal: null,
+        postingStatus: null,
       }),
     );
   },
 
   /**
    * Propose then persist journal + ledger through Posting Service only.
+   * Single-request path — ALREADY_POSTED fails hard here (unchanged
+   * contract). Callers posting more than one related proposal for the same
+   * business operation (e.g. Sales' revenue + COGS) should use postMany
+   * instead, so persistence happens in one atomic call.
    */
   async post(
     request: OperationalPostingRequest,
@@ -171,6 +178,69 @@ export const operationalAccountingIntegrationService = {
         mode: "post",
         journalProposal: proposed.data.journal_proposal,
         postedJournal: persisted.data,
+        postingStatus: "posted_now",
+      }),
+    );
+  },
+
+  /**
+   * Propose every request (pure, no DB writes), then persist all of them
+   * in a single atomic call to Posting Service — every proposal lands, or
+   * none do (V1 plan item 8). If building ANY request's proposal fails,
+   * returns fail immediately and no RPC call happens at all — nothing from
+   * an earlier request in this batch can end up persisted alone.
+   *
+   * A proposal already posted from a prior call (e.g. a retry after a
+   * legacy partial post) is reported per-element as posting_status:
+   * "already_posted" rather than failing the whole batch — see sql/091.
+   */
+  async postMany(
+    requests: readonly OperationalPostingRequest[],
+  ): Promise<ServiceResult<OperationalPostingResult[]>> {
+    if (requests.length === 0) {
+      return fail("At least one posting request is required.");
+    }
+
+    const proposedResults: OperationalPostingResult[] = [];
+    for (const request of requests) {
+      const proposed = this.propose(request);
+      if (proposed.error || !proposed.data) {
+        return fail(
+          proposed.error ?? "Failed to propose journal for posting",
+        );
+      }
+      proposedResults.push(proposed.data);
+    }
+
+    const first = requests[0];
+    const persisted = await postingService.postJournalProposals(
+      proposedResults.map((result) => result.journal_proposal),
+      {
+        postingDate: first.event.occurred_at.slice(0, 10),
+        nowIso: first.context.nowIso,
+      },
+    );
+
+    if (persisted.error || !persisted.data) {
+      return fail(persisted.error ?? "Failed to persist journal postings");
+    }
+
+    if (persisted.data.length !== requests.length) {
+      return fail(
+        "Posting service returned an unexpected number of results.",
+      );
+    }
+
+    return ok(
+      proposedResults.map((proposedResult, index) => {
+        const outcome = persisted.data[index];
+        return toResult({
+          request: requests[index],
+          mode: "post",
+          journalProposal: proposedResult.journal_proposal,
+          postedJournal: outcome.record,
+          postingStatus: outcome.status,
+        });
       }),
     );
   },

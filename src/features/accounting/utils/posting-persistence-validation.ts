@@ -1,12 +1,15 @@
 /**
  * Pre-persist validation for Journal Proposals (DEV-091).
+ *
+ * Only the pure, no-DB checks live here — shape and balance can be verified
+ * from the proposal alone, so they run as a fast client-side pre-check
+ * before post_journal_proposals (sql/091) is even called. Everything that
+ * needs to read the database (fiscal period, accounts, currencies,
+ * exchange rate, ALREADY_POSTED) moved into that RPC so it runs inside the
+ * same transaction as the inserts — see V1 plan item 8.
  */
 
 import { roundMoney } from "@/lib/money";
-import type {
-  Account,
-  FiscalPeriod,
-} from "@/types/accounting";
 import type {
   JournalProposal,
   PostingPersistenceError,
@@ -19,10 +22,6 @@ function persistenceError(
   details?: PostingPersistenceError["details"],
 ): PostingPersistenceError {
   return details === undefined ? { code, message } : { code, message, details };
-}
-
-function toDateOnly(isoOrDate: string): string {
-  return isoOrDate.slice(0, 10);
 }
 
 export function validateJournalProposalShape(
@@ -110,93 +109,6 @@ export function validateProposalBalanced(
         },
       ),
     };
-  }
-
-  return { ok: true };
-}
-
-export function validateFiscalPeriodForPosting(
-  period: FiscalPeriod | null,
-  entryDate: string,
-): PostingPersistenceValidationResult {
-  if (!period) {
-    return {
-      ok: false,
-      error: persistenceError(
-        "PERIOD_NOT_OPEN",
-        "Fiscal period was not found for posting.",
-      ),
-    };
-  }
-
-  if (period.status !== "open") {
-    return {
-      ok: false,
-      error: persistenceError(
-        "PERIOD_NOT_OPEN",
-        "Fiscal period is not open for posting.",
-        { fiscal_period_id: period.id, status: period.status },
-      ),
-    };
-  }
-
-  const dateOnly = toDateOnly(entryDate);
-  if (dateOnly < period.start_date || dateOnly > period.end_date) {
-    return {
-      ok: false,
-      error: persistenceError(
-        "EVENT_DATE_OUTSIDE_PERIOD",
-        "Posting date is outside the fiscal period range.",
-        {
-          posting_date: dateOnly,
-          period_start: period.start_date,
-          period_end: period.end_date,
-        },
-      ),
-    };
-  }
-
-  return { ok: true };
-}
-
-export function validateAccountsForPosting(
-  accountIds: readonly string[],
-  accountsById: Readonly<Record<string, Pick<Account, "id" | "is_active" | "is_postable">>>,
-): PostingPersistenceValidationResult {
-  for (const accountId of accountIds) {
-    const account = accountsById[accountId];
-    if (!account) {
-      return {
-        ok: false,
-        error: persistenceError(
-          "INACTIVE_ACCOUNT",
-          "Journal line references an unknown account.",
-          { account_id: accountId },
-        ),
-      };
-    }
-
-    if (!account.is_active) {
-      return {
-        ok: false,
-        error: persistenceError(
-          "INACTIVE_ACCOUNT",
-          "Journal line references an inactive account.",
-          { account_id: accountId },
-        ),
-      };
-    }
-
-    if (!account.is_postable) {
-      return {
-        ok: false,
-        error: persistenceError(
-          "ACCOUNT_NOT_POSTABLE",
-          "Journal line references a non-postable account.",
-          { account_id: accountId },
-        ),
-      };
-    }
   }
 
   return { ok: true };
