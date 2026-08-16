@@ -357,6 +357,22 @@ describe("finishedGoodsReadService (DEV-024 / DEV-104)", () => {
       expect(builder.in).toHaveBeenCalledWith("source_id", [LINE_A]);
     });
 
+    it("does not round total_cost per layer — passes it through at full stored precision (found 14.08.2026: sale-cogs-builder.ts sums layers across this source plus stock_movements ingredient layers and rounds once at the end; rounding here first silently lost sub-cent remainders, e.g. 0.0240 -> 0.02, before the sum ever saw them)", async () => {
+      const builder = makeBuilder({
+        data: [consumptionRow({ total_cost: 0.024 })],
+        error: null,
+      });
+      supabaseMock.from.mockReturnValue(builder);
+
+      const result =
+        await finishedGoodsReadService.listConsumptionsForSaleLines([
+          LINE_A,
+        ]);
+
+      expect(result.error).toBeNull();
+      expect(result.data?.[0]?.total_cost).toBe(0.024);
+    });
+
     it("maps a joined production_batches array (one-to-many join shape)", async () => {
       supabaseMock.from.mockReturnValue(
         makeBuilder({

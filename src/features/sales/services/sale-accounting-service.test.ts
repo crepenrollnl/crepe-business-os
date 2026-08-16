@@ -20,9 +20,10 @@ import {
   createSaleCompletedRevenuePostingRule,
 } from "./sale-completed-posting-rule";
 
-const { proposeSpy, postSpy, supabaseMock } = vi.hoisted(() => ({
+const { proposeSpy, postSpy, postManySpy, supabaseMock } = vi.hoisted(() => ({
   proposeSpy: vi.fn(),
   postSpy: vi.fn(),
+  postManySpy: vi.fn(),
   supabaseMock: {
     from: vi.fn(),
     rpc: vi.fn(),
@@ -63,6 +64,16 @@ vi.mock(
           postSpy(...args);
           return actual.operationalAccountingIntegrationService.post(...args);
         },
+        postMany: async (
+          ...args: Parameters<
+            typeof actual.operationalAccountingIntegrationService.postMany
+          >
+        ) => {
+          postManySpy(...args);
+          return actual.operationalAccountingIntegrationService.postMany(
+            ...args,
+          );
+        },
       },
     };
   },
@@ -76,6 +87,7 @@ vi.mock("@/features/accounting/services/posting-service", async () => {
     postingService: {
       ...actual.postingService,
       postJournalProposal: vi.fn(),
+      postJournalProposals: vi.fn(),
       rejectLedgerMutation: actual.postingService.rejectLedgerMutation,
     },
   };
@@ -231,32 +243,51 @@ function source(
   };
 }
 
-function mockPostedJournal(businessEventId: string) {
+function mockPostedRecord(businessEventId: string, postingNumber: string) {
   return {
-    data: {
-      journal_entry: {
-        id: "journal-1",
-        business_event_id: businessEventId,
-        transaction_id: null,
-        fiscal_period_id: "period-1",
-        entry_date: "2026-07-26",
-        memo: null,
-        status: "posted" as const,
-        posting_number: "JE-2026-000100",
-        transaction_currency: "EUR",
-        base_currency: "EUR",
-        exchange_rate: 1,
-        reversal_of_journal_entry_id: null,
-        posted_at: "2026-07-26T12:00:00.000Z",
-        created_at: "2026-07-26T12:00:00.000Z",
-      },
-      journal_lines: [],
-      ledger_entries: [],
-      posting_number: "JE-2026-000100",
-      posting_date: "2026-07-26",
+    journal_entry: {
+      id: "journal-1",
+      business_event_id: businessEventId,
+      transaction_id: null,
       fiscal_period_id: "period-1",
+      entry_date: "2026-07-26",
+      memo: null,
+      status: "posted" as const,
+      posting_number: postingNumber,
+      transaction_currency: "EUR",
+      base_currency: "EUR",
+      exchange_rate: 1,
+      reversal_of_journal_entry_id: null,
+      posted_at: "2026-07-26T12:00:00.000Z",
+      created_at: "2026-07-26T12:00:00.000Z",
     },
-    error: null,
+    journal_lines: [],
+    ledger_entries: [],
+    posting_number: postingNumber,
+    posting_date: "2026-07-26",
+    fiscal_period_id: "period-1",
+  };
+}
+
+/** posted_now outcome shape returned by postJournalProposals (sql/091). */
+function postedNowOutcome(businessEventId: string, postingNumber: string) {
+  return {
+    status: "posted_now" as const,
+    business_event_id: businessEventId,
+    journal_entry_id: "journal-1",
+    posting_number: postingNumber,
+    record: mockPostedRecord(businessEventId, postingNumber),
+  };
+}
+
+/** already_posted outcome shape — a proposal that landed in an earlier call. */
+function alreadyPostedOutcome(businessEventId: string, postingNumber: string) {
+  return {
+    status: "already_posted" as const,
+    business_event_id: businessEventId,
+    journal_entry_id: "journal-1",
+    posting_number: postingNumber,
+    record: null,
   };
 }
 
@@ -264,7 +295,9 @@ describe("saleAccountingService (DEV-093 / DEV-109)", () => {
   beforeEach(() => {
     proposeSpy.mockClear();
     postSpy.mockClear();
+    postManySpy.mockClear();
     vi.mocked(postingService.postJournalProposal).mockReset();
+    vi.mocked(postingService.postJournalProposals).mockReset();
   });
 
   it("posts revenue: Dr AR (gross) / Cr Revenue (net) / Cr VAT Output (tax)", () => {
@@ -305,14 +338,20 @@ describe("saleAccountingService (DEV-093 / DEV-109)", () => {
     expect(credit?.credit_base).toBe(40);
   });
 
-  it("successfully posts sale journals through Posting Service", async () => {
-    vi.mocked(postingService.postJournalProposal)
-      .mockResolvedValueOnce(
-        mockPostedJournal(stableBusinessEventId("sale_completed:sale-1")),
-      )
-      .mockResolvedValueOnce(
-        mockPostedJournal(stableBusinessEventId("cogs_recognized:sale-1")),
-      );
+  it("proposes revenue + COGS first, then persists both in one Posting Service call (V1 plan item 8)", async () => {
+    vi.mocked(postingService.postJournalProposals).mockResolvedValue({
+      data: [
+        postedNowOutcome(
+          stableBusinessEventId("sale_completed:sale-1"),
+          "JE-2026-000100",
+        ),
+        postedNowOutcome(
+          stableBusinessEventId("cogs_recognized:sale-1"),
+          "JE-2026-000101",
+        ),
+      ],
+      error: null,
+    });
 
     const result = await saleAccountingService.postJournalsForSaleCompleted(
       source(),
@@ -320,37 +359,45 @@ describe("saleAccountingService (DEV-093 / DEV-109)", () => {
     );
 
     expect(result.error).toBeNull();
-    expect(postSpy).toHaveBeenCalledTimes(2);
-    expect(postSpy.mock.calls[0]?.[0]).toMatchObject({
-      mode: "post",
+
+    // Phase 1: both proposed via propose(), never via post() — post() is
+    // no longer used by the Sales post-mode path at all.
+    expect(proposeSpy).toHaveBeenCalledTimes(2);
+    expect(postSpy).not.toHaveBeenCalled();
+    expect(proposeSpy.mock.calls[0]?.[0]).toMatchObject({
       event: {
         event_type: "sale_completed",
         id: stableBusinessEventId("sale_completed:sale-1"),
         source_document_id: "sale-1",
-        amounts: {
-          gross_amount: 121,
-          net_amount: 100,
-          tax_amount: 21,
-        },
+        amounts: { gross_amount: 121, net_amount: 100, tax_amount: 21 },
       },
-      metadata: {
-        tags: { sale_id: "sale-1", journal: "revenue" },
-      },
+      metadata: { tags: { sale_id: "sale-1", journal: "revenue" } },
     });
-    expect(postSpy.mock.calls[1]?.[0]).toMatchObject({
-      mode: "post",
+    expect(proposeSpy.mock.calls[1]?.[0]).toMatchObject({
       event: {
         event_type: "cogs_recognized",
         id: stableBusinessEventId("cogs_recognized:sale-1"),
         amounts: { cogs_amount: 40 },
       },
     });
-    expect(result.data?.revenue?.mode).toBe("post");
-    expect(result.data?.cogs?.mode).toBe("post");
+
+    // Phase 2: exactly one persist call for both proposals together.
+    expect(postManySpy).toHaveBeenCalledTimes(1);
+    const [requests] = postManySpy.mock.calls[0] as [unknown[]];
+    expect(requests).toHaveLength(2);
+    expect(postingService.postJournalProposals).toHaveBeenCalledTimes(1);
+    const [proposals] = vi.mocked(postingService.postJournalProposals).mock
+      .calls[0];
+    expect(proposals).toHaveLength(2);
+
+    expect(result.data?.revenue?.posting_status).toBe("posted_now");
+    expect(result.data?.cogs?.posting_status).toBe("posted_now");
     expect(result.data?.revenue?.posted_journal?.posting_number).toBe(
       "JE-2026-000100",
     );
-    expect(postingService.postJournalProposal).toHaveBeenCalledTimes(2);
+    expect(result.data?.cogs?.posted_journal?.posting_number).toBe(
+      "JE-2026-000101",
+    );
   });
 
   it("protects against duplicate posting (in-memory idempotency keys)", async () => {
@@ -363,13 +410,45 @@ describe("saleAccountingService (DEV-093 / DEV-109)", () => {
 
     expect(result.data).toBeNull();
     expect(result.error).toMatch(/already been posted/i);
-    expect(postSpy).not.toHaveBeenCalled();
+    expect(proposeSpy).not.toHaveBeenCalled();
+    expect(postManySpy).not.toHaveBeenCalled();
   });
 
-  it("protects against duplicate posting (Posting Service ALREADY_POSTED)", async () => {
-    vi.mocked(postingService.postJournalProposal).mockResolvedValue({
+  it("does not fail the whole sale when one of the two proposals is already posted — the other still lands (fixes the S-000016 partial-post bug)", async () => {
+    vi.mocked(postingService.postJournalProposals).mockResolvedValue({
+      data: [
+        alreadyPostedOutcome(
+          stableBusinessEventId("sale_completed:sale-1"),
+          "JE-2026-000100",
+        ),
+        postedNowOutcome(
+          stableBusinessEventId("cogs_recognized:sale-1"),
+          "JE-2026-000101",
+        ),
+      ],
+      error: null,
+    });
+
+    const result = await saleAccountingService.postJournalsForSaleCompleted(
+      source(),
+      accounting(),
+    );
+
+    expect(result.error).toBeNull();
+    expect(result.data?.revenue?.posting_status).toBe("already_posted");
+    expect(result.data?.revenue?.posted_journal).toBeNull();
+    expect(result.data?.cogs?.posting_status).toBe("posted_now");
+    expect(result.data?.cogs?.posted_journal?.posting_number).toBe(
+      "JE-2026-000101",
+    );
+    // Still one atomic persist call for the batch, not a retry per element.
+    expect(postManySpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails the whole sale posting on a genuine Posting Service error (e.g. closed fiscal period)", async () => {
+    vi.mocked(postingService.postJournalProposals).mockResolvedValue({
       data: null,
-      error: "Journal proposal has already been posted.",
+      error: "Fiscal period is not open for posting.",
     });
 
     const result = await saleAccountingService.postJournalsForSaleCompleted(
@@ -378,8 +457,28 @@ describe("saleAccountingService (DEV-093 / DEV-109)", () => {
     );
 
     expect(result.data).toBeNull();
-    expect(result.error).toMatch(/already been posted/i);
-    expect(postSpy).toHaveBeenCalledTimes(1);
+    expect(result.error).toBe("Fiscal period is not open for posting.");
+  });
+
+  it("posts nothing when revenue proposes fine but COGS fails to propose (no partial post — the S-000016 shape, prevented at the source)", async () => {
+    const result = await saleAccountingService.postJournalsForSaleCompleted(
+      source(),
+      accounting({
+        // Removing the cogs binding makes the COGS proposal fail inside
+        // propose() — pure, no DB — which must happen BEFORE Revenue is
+        // ever persisted.
+        accountRoleBindings: bindings().filter((row) => row.role !== "cogs"),
+      }),
+    );
+
+    expect(result.data).toBeNull();
+    expect(result.error).toMatch(/no active account binding/i);
+
+    // Revenue proposed successfully (it's built first), COGS failed to
+    // propose — but crucially, persistence was never attempted for either.
+    expect(proposeSpy).toHaveBeenCalledTimes(2);
+    expect(postManySpy).not.toHaveBeenCalled();
+    expect(postingService.postJournalProposals).not.toHaveBeenCalled();
   });
 
   it("fails when a required account role binding is missing", async () => {
@@ -394,13 +493,19 @@ describe("saleAccountingService (DEV-093 / DEV-109)", () => {
 
     expect(result.data).toBeNull();
     expect(result.error).toMatch(/no active account binding/i);
-    expect(postingService.postJournalProposal).not.toHaveBeenCalled();
+    expect(postingService.postJournalProposals).not.toHaveBeenCalled();
   });
 
   it("skips revenue posting when revenue is zero and posts COGS only", async () => {
-    vi.mocked(postingService.postJournalProposal).mockResolvedValue(
-      mockPostedJournal(stableBusinessEventId("cogs_recognized:sale-1")),
-    );
+    vi.mocked(postingService.postJournalProposals).mockResolvedValue({
+      data: [
+        postedNowOutcome(
+          stableBusinessEventId("cogs_recognized:sale-1"),
+          "JE-2026-000101",
+        ),
+      ],
+      error: null,
+    });
 
     const result = await saleAccountingService.postJournalsForSaleCompleted(
       source({ subtotal: 0, tax_total: 0, total: 0 }, 25),
@@ -410,16 +515,24 @@ describe("saleAccountingService (DEV-093 / DEV-109)", () => {
     expect(result.error).toBeNull();
     expect(result.data?.revenue).toBeNull();
     expect(result.data?.cogs).not.toBeNull();
-    expect(postSpy).toHaveBeenCalledTimes(1);
-    expect(postSpy.mock.calls[0]?.[0].event.event_type).toBe(
+    expect(proposeSpy).toHaveBeenCalledTimes(1);
+    expect(proposeSpy.mock.calls[0]?.[0].event.event_type).toBe(
       "cogs_recognized",
     );
+    const [requests] = postManySpy.mock.calls[0] as [unknown[]];
+    expect(requests).toHaveLength(1);
   });
 
   it("skips COGS posting when cost is zero and posts revenue only", async () => {
-    vi.mocked(postingService.postJournalProposal).mockResolvedValue(
-      mockPostedJournal(stableBusinessEventId("sale_completed:sale-1")),
-    );
+    vi.mocked(postingService.postJournalProposals).mockResolvedValue({
+      data: [
+        postedNowOutcome(
+          stableBusinessEventId("sale_completed:sale-1"),
+          "JE-2026-000100",
+        ),
+      ],
+      error: null,
+    });
 
     const result = await saleAccountingService.postJournalsForSaleCompleted(
       source(undefined, 0),
@@ -429,8 +542,40 @@ describe("saleAccountingService (DEV-093 / DEV-109)", () => {
     expect(result.error).toBeNull();
     expect(result.data?.revenue).not.toBeNull();
     expect(result.data?.cogs).toBeNull();
-    expect(postSpy).toHaveBeenCalledTimes(1);
-    expect(postSpy.mock.calls[0]?.[0].event.event_type).toBe("sale_completed");
+    expect(proposeSpy).toHaveBeenCalledTimes(1);
+    expect(proposeSpy.mock.calls[0]?.[0].event.event_type).toBe(
+      "sale_completed",
+    );
+  });
+
+  it("skips COGS posting when COGS rounds to a sub-cent zero, and posts revenue only (roundMoney gate, not a forgotten edge case)", async () => {
+    vi.mocked(postingService.postJournalProposals).mockResolvedValue({
+      data: [
+        postedNowOutcome(
+          stableBusinessEventId("sale_completed:sale-1"),
+          "JE-2026-000100",
+        ),
+      ],
+      error: null,
+    });
+
+    const result = await saleAccountingService.postJournalsForSaleCompleted(
+      source(undefined, 0.0029),
+      accounting(),
+    );
+
+    expect(result.error).toBeNull();
+    expect(result.data?.revenue).not.toBeNull();
+    expect(result.data?.cogs).toBeNull();
+    // Only the revenue event is ever built — cogs_recognized is never
+    // proposed, so it can never hit NO_POSTING_LINES from the Posting
+    // Pipeline's own zero-amount line drop (the S-000016 root cause).
+    expect(proposeSpy).toHaveBeenCalledTimes(1);
+    expect(proposeSpy.mock.calls[0]?.[0].event.event_type).toBe(
+      "sale_completed",
+    );
+    const [requests] = postManySpy.mock.calls[0] as [unknown[]];
+    expect(requests).toHaveLength(1);
   });
 
   it("rejects when both revenue and COGS are zero", async () => {
@@ -441,7 +586,19 @@ describe("saleAccountingService (DEV-093 / DEV-109)", () => {
 
     expect(result.data).toBeNull();
     expect(result.error).toMatch(/zero revenue and zero COGS/i);
-    expect(postSpy).not.toHaveBeenCalled();
+    expect(proposeSpy).not.toHaveBeenCalled();
+    expect(postManySpy).not.toHaveBeenCalled();
+  });
+
+  it("rejects when revenue is zero and COGS is a sub-cent zero (both settle as nothing to post)", async () => {
+    const result = await saleAccountingService.postJournalsForSaleCompleted(
+      source({ subtotal: 0, tax_total: 0, total: 0 }, 0.0029),
+      accounting(),
+    );
+
+    expect(result.data).toBeNull();
+    expect(result.error).toMatch(/zero revenue and zero COGS/i);
+    expect(proposeSpy).not.toHaveBeenCalled();
   });
 
   it("rejects draft sales", async () => {
