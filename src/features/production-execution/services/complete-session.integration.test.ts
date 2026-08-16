@@ -59,6 +59,7 @@ function lineRow() {
     product_name: "Chicken Crepe",
     planned_quantity: 10,
     actual_produced_quantity: null,
+    raw_material_scale: null,
     yield_unit: "pcs",
     sort_order: 0,
   };
@@ -196,14 +197,14 @@ describe("productionSessionService.completeSession", () => {
 
     const result = await productionSessionService.completeSession("session-1", {
       notes: "Done",
-      lines: [{ line_id: "line-1", actual_produced_quantity: 5 }],
+      lines: [{ line_id: "line-1", actual_produced_quantity: 5, raw_material_scale: null }],
     });
 
     expect(result.error).toBeNull();
     expect(supabaseMock.rpc).toHaveBeenCalledWith("complete_production_session", {
       p_session_id: "session-1",
       p_notes: "Done",
-      p_lines: [{ line_id: "line-1", actual_produced_quantity: 5 }],
+      p_lines: [{ line_id: "line-1", actual_produced_quantity: 5, raw_material_scale: null }],
       p_completed_by: "user-1",
     });
     // DEV-017: client must not call the internal stock decrement RPC.
@@ -230,7 +231,7 @@ describe("productionSessionService.completeSession", () => {
 
     const result = await productionSessionService.completeSession("session-1", {
       notes: null,
-      lines: [{ line_id: "line-1", actual_produced_quantity: 5 }],
+      lines: [{ line_id: "line-1", actual_produced_quantity: 5, raw_material_scale: null }],
     });
 
     expect(result.data).toBeNull();
@@ -243,7 +244,7 @@ describe("productionSessionService.completeSession", () => {
 
     const result = await productionSessionService.completeSession("session-1", {
       notes: null,
-      lines: [{ line_id: "line-1", actual_produced_quantity: 5 }],
+      lines: [{ line_id: "line-1", actual_produced_quantity: 5, raw_material_scale: null }],
     });
 
     expect(result.data).toBeNull();
@@ -262,7 +263,7 @@ describe("productionSessionService.completeSession", () => {
 
     const result = await productionSessionService.completeSession("session-1", {
       notes: null,
-      lines: [{ line_id: "line-1", actual_produced_quantity: 5 }],
+      lines: [{ line_id: "line-1", actual_produced_quantity: 5, raw_material_scale: null }],
     });
 
     expect(result.data).toBeNull();

@@ -124,6 +124,42 @@ describe("buildCompleteProductionPlan", () => {
     expect(result.plan.batches[0]?.unit_cost).toBe(0.5);
   });
 
+  it("uses raw_material_scale for consumption when set, not produced/yield", () => {
+    const result = buildCompleteProductionPlan(
+      [
+        {
+          line_id: "line-1",
+          recipe_id: "recipe-1",
+          product_name: "Chicken Crepe",
+          actual_produced_quantity: 5,
+          raw_material_scale: 1,
+        },
+      ],
+      new Map([["recipe-1", bom()]]),
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) {
+      return;
+    }
+
+    // yield 10, produced 5, but scale override 1 → full BOM (flour 2, milk 1)
+    expect(
+      result.plan.consumptions.find((line) => line.ingredient_id === "flour")
+        ?.quantity,
+    ).toBe(2);
+    expect(
+      result.plan.consumptions.find((line) => line.ingredient_id === "milk")
+        ?.quantity,
+    ).toBe(1);
+    expect(result.plan.batches[0]).toMatchObject({
+      produced_quantity: 5,
+      // (2 * 1.5) + (1 * 2) = 5 → unit cost 1
+      unit_cost: 1,
+      total_cost: 5,
+    });
+  });
+
   it("skips zero actual lines and aggregates shared ingredients", () => {
     const result = buildCompleteProductionPlan(
       [

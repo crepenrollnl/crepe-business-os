@@ -17,6 +17,7 @@ export function ProductionSessionPage({ sessionId }: ProductionSessionPageProps)
     error,
     notes,
     drafts,
+    rawMaterialScaleDrafts,
     canEdit,
     canFinish,
     saving,
@@ -24,6 +25,7 @@ export function ProductionSessionPage({ sessionId }: ProductionSessionPageProps)
     actionError,
     onNotesChange,
     onProducedChange,
+    onRawMaterialScaleChange,
     saveProgress,
     finishProduction,
     retry,
@@ -75,8 +77,10 @@ export function ProductionSessionPage({ sessionId }: ProductionSessionPageProps)
             <ProductionSessionLinesSection
               lines={session.lines}
               drafts={drafts}
+              rawMaterialScaleDrafts={rawMaterialScaleDrafts}
               canEdit={canEdit}
               onProducedChange={onProducedChange}
+              onRawMaterialScaleChange={onRawMaterialScaleChange}
             />
             {session.status === "completed" ? (
               <>

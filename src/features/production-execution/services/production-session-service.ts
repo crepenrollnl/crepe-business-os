@@ -38,6 +38,7 @@ import {
   toSessionLineView,
   validateSessionLinesForComplete,
   validateProducedQuantity,
+  validateRawMaterialScale,
 } from "../utils/production-session";
 
 const SESSION_SELECT =
@@ -65,6 +66,7 @@ interface ProductionSessionLineRow {
   product_name: string;
   planned_quantity: number | string;
   actual_produced_quantity: number | string | null;
+  raw_material_scale: number | string | null;
   yield_unit: string;
   sort_order: number;
 }
@@ -136,6 +138,7 @@ function mapSessionLine(row: ProductionSessionLineRow): ProductionSessionLine {
     product_name: row.product_name,
     planned_quantity: toNumber(row.planned_quantity),
     actual_produced_quantity: toNullableNumber(row.actual_produced_quantity),
+    raw_material_scale: toNullableNumber(row.raw_material_scale),
     yield_unit: row.yield_unit,
     sort_order: row.sort_order,
   };
@@ -147,7 +150,7 @@ async function fetchSessionLines(
   const { data, error } = await supabase
     .from("production_session_lines")
     .select(
-      "id, production_session_id, production_plan_product_id, recipe_id, product_name, planned_quantity, actual_produced_quantity, yield_unit, sort_order",
+      "id, production_session_id, production_plan_product_id, recipe_id, product_name, planned_quantity, actual_produced_quantity, raw_material_scale, yield_unit, sort_order",
     )
     .eq("production_session_id", sessionId)
     .order("sort_order", { ascending: true });
@@ -246,6 +249,11 @@ function validateSaveInput(input: SaveProductionSessionInput): string | null {
     const error = validateProducedQuantity(line.actual_produced_quantity);
     if (error) {
       return error;
+    }
+
+    const scaleError = validateRawMaterialScale(line.raw_material_scale);
+    if (scaleError) {
+      return scaleError;
     }
   }
 
@@ -680,6 +688,7 @@ export const productionSessionService = {
         p_lines: input.lines.map((line) => ({
           line_id: line.line_id,
           actual_produced_quantity: line.actual_produced_quantity,
+          raw_material_scale: line.raw_material_scale,
         })),
       });
 
@@ -770,6 +779,7 @@ export const productionSessionService = {
           recipe_id: sessionLine.recipe_id,
           product_name: sessionLine.product_name,
           actual_produced_quantity: line.actual_produced_quantity as number,
+          raw_material_scale: line.raw_material_scale,
         };
       });
 
@@ -801,6 +811,7 @@ export const productionSessionService = {
         p_lines: input.lines.map((line) => ({
           line_id: line.line_id,
           actual_produced_quantity: line.actual_produced_quantity,
+          raw_material_scale: line.raw_material_scale,
         })),
         p_completed_by: user.id,
       });

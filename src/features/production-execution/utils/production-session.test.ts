@@ -4,7 +4,9 @@ import {
   computeLineDifference,
   hasAllProducedQuantities,
   parseProducedQuantityInput,
+  parseRawMaterialScaleInput,
   validateProducedQuantity,
+  validateRawMaterialScale,
   validateSessionLinesForComplete,
 } from "./production-session";
 
@@ -59,6 +61,59 @@ describe("validateProducedQuantity", () => {
   });
 });
 
+describe("parseRawMaterialScaleInput", () => {
+  it("treats empty as not entered", () => {
+    expect(parseRawMaterialScaleInput("")).toEqual({ ok: true, value: null });
+    expect(parseRawMaterialScaleInput("   ")).toEqual({
+      ok: true,
+      value: null,
+    });
+  });
+
+  it("accepts a positive number of recipe batches", () => {
+    expect(parseRawMaterialScaleInput("1")).toEqual({ ok: true, value: 1 });
+    expect(parseRawMaterialScaleInput("1.5")).toEqual({
+      ok: true,
+      value: 1.5,
+    });
+  });
+
+  it("rejects zero, negative, and non-numeric values", () => {
+    expect(parseRawMaterialScaleInput("0")).toEqual({
+      ok: false,
+      error: "Recipe batches used must be greater than zero.",
+    });
+    expect(parseRawMaterialScaleInput("-1")).toEqual({
+      ok: false,
+      error: "Recipe batches used must be greater than zero.",
+    });
+    expect(parseRawMaterialScaleInput("abc")).toEqual({
+      ok: false,
+      error: "Enter a valid number of recipe batches.",
+    });
+  });
+});
+
+describe("validateRawMaterialScale", () => {
+  it("allows null", () => {
+    expect(validateRawMaterialScale(null)).toBeNull();
+  });
+
+  it("accepts a positive number", () => {
+    expect(validateRawMaterialScale(1)).toBeNull();
+    expect(validateRawMaterialScale(0.5)).toBeNull();
+  });
+
+  it("rejects zero and negatives", () => {
+    expect(validateRawMaterialScale(0)).toBe(
+      "Recipe batches used must be greater than zero.",
+    );
+    expect(validateRawMaterialScale(-0.1)).toBe(
+      "Recipe batches used must be greater than zero.",
+    );
+  });
+});
+
 describe("canFinishProductionSession", () => {
   it("requires every line to have an actual quantity", () => {
     expect(
@@ -86,7 +141,11 @@ describe("validateSessionLinesForComplete", () => {
   it("requires all produced quantities", () => {
     expect(
       validateSessionLinesForComplete([
-        { line_id: "a", actual_produced_quantity: null },
+        {
+          line_id: "a",
+          actual_produced_quantity: null,
+          raw_material_scale: null,
+        },
       ]),
     ).toBe(
       "Enter an actual produced quantity for every product before finishing.",
@@ -96,8 +155,16 @@ describe("validateSessionLinesForComplete", () => {
   it("accepts zero and over-plan quantities", () => {
     expect(
       validateSessionLinesForComplete([
-        { line_id: "a", actual_produced_quantity: 0 },
-        { line_id: "b", actual_produced_quantity: 200 },
+        {
+          line_id: "a",
+          actual_produced_quantity: 0,
+          raw_material_scale: null,
+        },
+        {
+          line_id: "b",
+          actual_produced_quantity: 200,
+          raw_material_scale: null,
+        },
       ]),
     ).toBeNull();
   });

@@ -46,6 +46,11 @@ export interface CompleteProductionLineInput {
   recipe_id: string;
   product_name: string;
   actual_produced_quantity: number;
+  /**
+   * Optional recipe-batch scale override. When set, raw-ingredient
+   * consumption uses this number instead of produced / yield.
+   */
+  raw_material_scale?: number | null;
 }
 
 export interface IngredientConsumptionLine {
@@ -199,7 +204,9 @@ export function buildCompleteProductionPlan(
           quantityPerYield: ingredient.quantity_per_yield,
           unit: ingredient.unit,
         },
-        line.actual_produced_quantity,
+        line.raw_material_scale != null
+          ? line.raw_material_scale * bom.yield_quantity
+          : line.actual_produced_quantity,
         bom.yield_quantity,
       );
 

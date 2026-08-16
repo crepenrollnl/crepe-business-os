@@ -82,6 +82,7 @@ function sessionFixture(
         product_name: "Chicken Crepe",
         planned_quantity: 10,
         actual_produced_quantity: 10,
+        raw_material_scale: null,
         yield_unit: "pcs",
         sort_order: 1,
         difference: 0,
