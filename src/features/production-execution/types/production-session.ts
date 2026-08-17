@@ -50,6 +50,13 @@ export interface ProductionSessionLine {
    * May exceed planned quantity.
    */
   actual_produced_quantity: number | null;
+  /**
+   * Optional override for raw-material consumption scale (cooking
+   * loss/shrinkage). When set, this number (not the produced/yield ratio)
+   * scales the recipe's raw ingredient consumption. null = auto-calculate
+   * from actual_produced_quantity / recipe.yield_quantity as before.
+   */
+  raw_material_scale: number | null;
   yield_unit: string;
   sort_order: number;
 }
@@ -84,6 +91,8 @@ export interface ProductionSessionLineInput {
   line_id: string;
   /** null means empty / not entered. */
   actual_produced_quantity: number | null;
+  /** null means not entered — falls back to automatic scale. */
+  raw_material_scale: number | null;
 }
 
 export interface SaveProductionSessionInput {

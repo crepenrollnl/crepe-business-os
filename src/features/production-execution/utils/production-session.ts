@@ -74,6 +74,38 @@ export function validateProducedQuantity(
   return null;
 }
 
+export function parseRawMaterialScaleInput(
+  raw: string,
+): { ok: true; value: number | null } | { ok: false; error: string } {
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) {
+    return { ok: true, value: null };
+  }
+  const value = Number(trimmed);
+  if (!Number.isFinite(value)) {
+    return { ok: false, error: "Enter a valid number of recipe batches." };
+  }
+  if (value <= 0) {
+    return { ok: false, error: "Recipe batches used must be greater than zero." };
+  }
+  return { ok: true, value };
+}
+
+export function validateRawMaterialScale(
+  value: number | null,
+): string | null {
+  if (value === null) {
+    return null;
+  }
+  if (!Number.isFinite(value)) {
+    return "Enter a valid number of recipe batches.";
+  }
+  if (value <= 0) {
+    return "Recipe batches used must be greater than zero.";
+  }
+  return null;
+}
+
 export function hasAllProducedQuantities(
   lines: ReadonlyArray<Pick<ProductionSessionLineInput, "actual_produced_quantity">>,
 ): boolean {
@@ -111,6 +143,11 @@ export function validateSessionLinesForComplete(
     const error = validateProducedQuantity(line.actual_produced_quantity);
     if (error) {
       return error;
+    }
+
+    const scaleError = validateRawMaterialScale(line.raw_material_scale);
+    if (scaleError) {
+      return scaleError;
     }
   }
 

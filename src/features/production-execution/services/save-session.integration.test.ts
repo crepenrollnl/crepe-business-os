@@ -57,6 +57,7 @@ function lineRow(overrides?: Record<string, unknown>) {
     product_name: "Chicken Crepe",
     planned_quantity: 10,
     actual_produced_quantity: 8,
+    raw_material_scale: null,
     yield_unit: "pcs",
     sort_order: 0,
     ...overrides,
@@ -145,7 +146,7 @@ describe("productionSessionService.saveSessionProgress (DEV-019)", () => {
       "session-1",
       {
         notes: "Saved notes",
-        lines: [{ line_id: "line-1", actual_produced_quantity: 9 }],
+        lines: [{ line_id: "line-1", actual_produced_quantity: 9, raw_material_scale: null }],
       },
     );
 
@@ -158,7 +159,7 @@ describe("productionSessionService.saveSessionProgress (DEV-019)", () => {
     expect(supabaseMock.rpc).toHaveBeenCalledWith("save_production_session", {
       p_session_id: "session-1",
       p_notes: "Saved notes",
-      p_lines: [{ line_id: "line-1", actual_produced_quantity: 9 }],
+      p_lines: [{ line_id: "line-1", actual_produced_quantity: 9, raw_material_scale: null }],
     });
     expect(supabaseMock.rpc.mock.calls.map((call) => call[0])).toEqual([
       "save_production_session",
@@ -176,7 +177,7 @@ describe("productionSessionService.saveSessionProgress (DEV-019)", () => {
 
     await productionSessionService.saveSessionProgress("session-1", {
       notes: null,
-      lines: [{ line_id: "line-1", actual_produced_quantity: 0 }],
+      lines: [{ line_id: "line-1", actual_produced_quantity: 0, raw_material_scale: null }],
     });
 
     expect(updateMock).not.toHaveBeenCalled();
@@ -196,7 +197,7 @@ describe("productionSessionService.saveSessionProgress (DEV-019)", () => {
       "session-1",
       {
         notes: "Nope",
-        lines: [{ line_id: "line-1", actual_produced_quantity: 5 }],
+        lines: [{ line_id: "line-1", actual_produced_quantity: 5, raw_material_scale: null }],
       },
     );
 
@@ -220,7 +221,7 @@ describe("productionSessionService.saveSessionProgress (DEV-019)", () => {
       "session-1",
       {
         notes: null,
-        lines: [{ line_id: "missing-line", actual_produced_quantity: 1 }],
+        lines: [{ line_id: "missing-line", actual_produced_quantity: 1, raw_material_scale: null }],
       },
     );
 
@@ -236,7 +237,7 @@ describe("productionSessionService.saveSessionProgress (DEV-019)", () => {
       "session-1",
       {
         notes: null,
-        lines: [{ line_id: "line-1", actual_produced_quantity: -1 }],
+        lines: [{ line_id: "line-1", actual_produced_quantity: -1, raw_material_scale: null }],
       },
     );
 

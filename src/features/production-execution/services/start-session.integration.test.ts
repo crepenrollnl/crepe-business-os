@@ -56,6 +56,7 @@ function lineRow() {
     product_name: "Chicken Crepe",
     planned_quantity: 10,
     actual_produced_quantity: null,
+    raw_material_scale: null,
     yield_unit: "pcs",
     sort_order: 0,
   };

@@ -6,7 +6,8 @@
  *
  * Cost breakdown is reconstructed from:
  *   - frozen production_out stock_movements unit costs (actual inventory values)
- *   - BOM scaled by batch produced quantity (actual consumption quantities)
+ *   - BOM scaled by COALESCE(raw_material_scale, produced / yield)
+ *     (same consumption scale as complete_production_session)
  */
 
 import { finishedGoodsReadService } from "@/features/finished-goods/services/finished-goods-read-service";
@@ -61,8 +62,24 @@ interface IngredientNameRow {
   unit: string;
 }
 
+interface SessionLineScaleRow {
+  id: string;
+  raw_material_scale: number | string | null;
+}
+
 function toNumber(value: number | string): number {
   return typeof value === "number" ? value : Number(value);
+}
+
+function toNullableNumber(
+  value: number | string | null | undefined,
+): number | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  const parsed = toNumber(value);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function mapBatch(row: ProductionBatchRow): ProductionBatch {
@@ -129,13 +146,20 @@ async function buildCostBreakdownsForBatches(
   }
 
   const recipeIds = [...new Set(batches.map((batch) => batch.recipe_id))];
+  const lineIds = [
+    ...new Set(batches.map((batch) => batch.production_session_line_id)),
+  ];
 
-  const [recipesResult, itemsResult] = await Promise.all([
+  const [recipesResult, itemsResult, scaleResult] = await Promise.all([
     supabase.from("recipes").select("id, yield_quantity").in("id", recipeIds),
     supabase
       .from("recipe_items")
       .select("recipe_id, ingredient_id, quantity, unit")
       .in("recipe_id", recipeIds),
+    supabase
+      .from("production_session_lines")
+      .select("id, raw_material_scale")
+      .in("id", lineIds),
   ]);
 
   if (recipesResult.error || itemsResult.error) {
@@ -151,6 +175,13 @@ async function buildCostBreakdownsForBatches(
 
   const items = (itemsResult.data as RecipeItemRow[] | null) ?? [];
   const ingredientIds = [...new Set(items.map((item) => item.ingredient_id))];
+
+  const scaleByLineId = new Map<string, number | null>();
+  if (!scaleResult.error) {
+    for (const row of (scaleResult.data as SessionLineScaleRow[] | null) ?? []) {
+      scaleByLineId.set(row.id, toNullableNumber(row.raw_material_scale));
+    }
+  }
 
   let ingredientNames = new Map<string, { name: string; unit: string }>();
   if (ingredientIds.length > 0) {
@@ -187,6 +218,13 @@ async function buildCostBreakdownsForBatches(
       continue;
     }
 
+    const rawMaterialScale = scaleByLineId.get(
+      batch.production_session_line_id,
+    );
+    const effectiveScale =
+      rawMaterialScale ?? batch.produced_quantity / yieldQuantity;
+    const scalingQuantity = effectiveScale * yieldQuantity;
+
     const costInputs = recipeItems.map((item) => {
       const meta = ingredientNames.get(item.ingredient_id);
       const consumed = scaleRecipeIngredientNeed(
@@ -195,7 +233,7 @@ async function buildCostBreakdownsForBatches(
           quantityPerYield: toNumber(item.quantity),
           unit: meta?.unit ?? item.unit,
         },
-        batch.produced_quantity,
+        scalingQuantity,
         yieldQuantity,
       );
 

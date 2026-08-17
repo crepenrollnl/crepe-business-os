@@ -314,6 +314,54 @@ describe("productionBatchService.listBySessionId (DEV-015 / DEV-103)", () => {
     ]);
   });
 
+  it("uses raw_material_scale for consumed quantity when the session line has an override", async () => {
+    mockTables({
+      production_batches: {
+        data: [batchRow({ produced_quantity: 5 })],
+        error: null,
+      },
+      production_session_lines: {
+        data: [sessionLineRow({ raw_material_scale: 1 })],
+        error: null,
+      },
+      stock_movements: {
+        data: [{ ingredient_id: INGREDIENT_ID, unit_cost: 0.5 }],
+        error: null,
+      },
+      recipes: { data: [{ id: RECIPE_ID, yield_quantity: 10 }], error: null },
+      recipe_items: {
+        data: [
+          {
+            recipe_id: RECIPE_ID,
+            ingredient_id: INGREDIENT_ID,
+            quantity: 2,
+            unit: "kg",
+          },
+        ],
+        error: null,
+      },
+      ingredients: {
+        data: [{ id: INGREDIENT_ID, name: "Flour", unit: "kg" }],
+        error: null,
+      },
+    });
+
+    const result = await productionBatchService.listBySessionId(SESSION_ID);
+
+    // BOM 2kg per yield of 10; produced 5 but cooked 1 full recipe batch.
+    // Consumed = 2 x 1 = 2kg, not 2 x (5 / 10) = 1kg.
+    expect(result.data?.[0]?.cost_breakdown).toEqual([
+      expect.objectContaining({
+        ingredient_id: INGREDIENT_ID,
+        ingredient_name: "Flour",
+        consumed_quantity: 2,
+        unit: "kg",
+        inventory_unit_cost: 0.5,
+        line_cost: 1,
+      }),
+    ]);
+  });
+
   it("degrades the cost breakdown to an empty array (without failing the call) when no frozen ingredient costs were recorded", async () => {
     mockTables({
       production_batches: { data: [batchRow()], error: null },

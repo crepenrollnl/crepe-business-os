@@ -7,6 +7,7 @@ import type { ProductionSessionWithRelations } from "../types/production-session
 import {
   canFinishProductionSession,
   parseProducedQuantityInput,
+  parseRawMaterialScaleInput,
 } from "../utils/production-session";
 import { isOpenProductionSessionStatus } from "../utils/format-production-session";
 
@@ -35,6 +36,25 @@ function buildDrafts(
   return drafts;
 }
 
+function buildRawMaterialScaleDrafts(
+  session: ProductionSessionWithRelations,
+): Record<string, LineDraft> {
+  const drafts: Record<string, LineDraft> = {};
+
+  for (const line of session.lines) {
+    drafts[line.id] = {
+      raw:
+        line.raw_material_scale === null
+          ? ""
+          : String(line.raw_material_scale),
+      value: line.raw_material_scale,
+      error: null,
+    };
+  }
+
+  return drafts;
+}
+
 export function useProductionSession(sessionId: string) {
   const [session, setSession] = useState<ProductionSessionWithRelations | null>(
     null,
@@ -43,6 +63,9 @@ export function useProductionSession(sessionId: string) {
   const [error, setError] = useState<string | null>(null);
   const [notes, setNotes] = useState("");
   const [drafts, setDrafts] = useState<Record<string, LineDraft>>({});
+  const [rawMaterialScaleDrafts, setRawMaterialScaleDrafts] = useState<
+    Record<string, LineDraft>
+  >({});
   const [saving, setSaving] = useState(false);
   const [finishing, setFinishing] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -52,6 +75,7 @@ export function useProductionSession(sessionId: string) {
     setSession(next);
     setNotes(next.notes ?? "");
     setDrafts(buildDrafts(next));
+    setRawMaterialScaleDrafts(buildRawMaterialScaleDrafts(next));
   }, []);
 
   const loadSession = useCallback(async () => {
@@ -109,15 +133,20 @@ export function useProductionSession(sessionId: string) {
     return session.lines.map((line) => ({
       line_id: line.id,
       actual_produced_quantity: drafts[line.id]?.value ?? null,
+      raw_material_scale: rawMaterialScaleDrafts[line.id]?.value ?? null,
     }));
-  }, [drafts, session]);
+  }, [drafts, rawMaterialScaleDrafts, session]);
 
   const hasFieldErrors = useMemo(
     () =>
       session
-        ? session.lines.some((line) => drafts[line.id]?.error != null)
+        ? session.lines.some(
+            (line) =>
+              drafts[line.id]?.error != null ||
+              rawMaterialScaleDrafts[line.id]?.error != null,
+          )
         : false,
-    [drafts, session],
+    [drafts, rawMaterialScaleDrafts, session],
   );
 
   const canFinish =
@@ -129,6 +158,20 @@ export function useProductionSession(sessionId: string) {
     const parsed = parseProducedQuantityInput(raw);
 
     setDrafts((current) => ({
+      ...current,
+      [lineId]: {
+        raw,
+        value: parsed.ok ? parsed.value : null,
+        error: parsed.ok ? null : parsed.error,
+      },
+    }));
+    setActionError(null);
+  }, []);
+
+  const onRawMaterialScaleChange = useCallback((lineId: string, raw: string) => {
+    const parsed = parseRawMaterialScaleInput(raw);
+
+    setRawMaterialScaleDrafts((current) => ({
       ...current,
       [lineId]: {
         raw,
@@ -265,6 +308,7 @@ export function useProductionSession(sessionId: string) {
     error,
     notes,
     drafts,
+    rawMaterialScaleDrafts,
     canEdit,
     canFinish,
     saving,
@@ -273,6 +317,7 @@ export function useProductionSession(sessionId: string) {
     postingError,
     onNotesChange,
     onProducedChange,
+    onRawMaterialScaleChange,
     saveProgress,
     finishProduction,
     retry,
