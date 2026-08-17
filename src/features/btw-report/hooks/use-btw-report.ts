@@ -40,7 +40,7 @@ export function useBtwReport() {
   const onPeriodChange = useCallback((nextYear: number, nextQuarter: number) => {
     setYear(nextYear);
     setQuarter(nextQuarter);
-  }, []);
+  }, [setYear, setQuarter]);
 
   return {
     year,
