@@ -294,6 +294,51 @@ function validateComponents(components: RecipeComponentLineInput[]): string | nu
   return null;
 }
 
+/**
+ * Sub-components of a Component-role recipe (e.g. "Chicken marinade" used
+ * inside "Roasted chicken") — component-recipe targets only. Optional: most
+ * Component recipes have none, so an empty list is valid. Raw ingredients
+ * for a Component recipe go through `lines`/`recipe_items` instead, so a
+ * row with `ingredient_id` set here is rejected rather than silently
+ * accepted as a second path to the same thing.
+ */
+function validateSubComponents(
+  components: RecipeComponentLineInput[],
+): string | null {
+  const seenComponentRecipeIds = new Set<string>();
+
+  for (const component of components) {
+    const componentRecipeId = component.component_recipe_id?.trim() ?? "";
+
+    if (component.ingredient_id) {
+      return "Sub-components must reference another Component recipe. Use the Ingredients section above for raw ingredients.";
+    }
+
+    if (!componentRecipeId) {
+      return "Each sub-component line must reference a component recipe";
+    }
+
+    if (seenComponentRecipeIds.has(componentRecipeId)) {
+      return DUPLICATE_COMPONENT_ERROR;
+    }
+    seenComponentRecipeIds.add(componentRecipeId);
+
+    if (component.quantity === null) {
+      return "Quantity is required";
+    }
+
+    if (!Number.isFinite(component.quantity) || component.quantity <= 0) {
+      return "Quantity must be greater than zero";
+    }
+
+    if (!component.unit.trim()) {
+      return "Each line must have a unit";
+    }
+  }
+
+  return null;
+}
+
 function validateRecipeInput(input: RecipeFormValues): string | null {
   if (!input.name.trim()) {
     return "Recipe name is required";
@@ -318,9 +363,17 @@ function validateRecipeInput(input: RecipeFormValues): string | null {
     return "Selling price must be zero or greater";
   }
 
-  return input.recipe_role === "assembly"
-    ? validateComponents(input.components)
-    : validateLines(input.lines);
+  if (input.recipe_role === "assembly") {
+    return validateComponents(input.components);
+  }
+
+  const linesError = validateLines(input.lines);
+
+  if (linesError) {
+    return linesError;
+  }
+
+  return validateSubComponents(input.components);
 }
 
 function toRecipePayload(input: RecipeFormValues) {
@@ -552,9 +605,13 @@ async function persistRecipe(
 
   const payload = toRecipePayload(input);
 
-  // Only the section matching recipe_role is persisted; the other side is
-  // cleared (empty array passed to its own replace* call) so a role switch
-  // never leaves orphaned recipe_items/recipe_components behind.
+  // recipe_items (`lines`) only ever applies to recipe_role = 'component'
+  // (its raw ingredients), so it's cleared for 'assembly' to avoid orphaned
+  // rows on a role switch. recipe_components (`components`) applies to
+  // BOTH roles now: an assembly's full bill of components, or a
+  // component's optional sub-components (other Component recipes it's
+  // built from, e.g. Component-in-Component) — validated above to be
+  // component-recipe-only targets in the 'component' case.
   const lines: RecipeLineInput[] =
     input.recipe_role === "component"
       ? input.lines.map((line) => ({
@@ -563,15 +620,14 @@ async function persistRecipe(
           unit: line.unit.trim(),
         }))
       : [];
-  const components: RecipeComponentLineInput[] =
-    input.recipe_role === "assembly"
-      ? input.components.map((component) => ({
-          component_recipe_id: component.component_recipe_id,
-          ingredient_id: component.ingredient_id,
-          quantity: component.quantity as number,
-          unit: component.unit.trim(),
-        }))
-      : [];
+  const components: RecipeComponentLineInput[] = input.components.map(
+    (component) => ({
+      component_recipe_id: component.component_recipe_id,
+      ingredient_id: component.ingredient_id,
+      quantity: component.quantity as number,
+      unit: component.unit.trim(),
+    }),
+  );
 
   if (input.id) {
     const { data, error } = await supabase

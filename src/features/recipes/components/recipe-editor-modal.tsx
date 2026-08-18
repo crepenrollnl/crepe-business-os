@@ -219,10 +219,15 @@ function validateDraft(draft: FormDraft): FormErrors {
     if (lineErrors.some((line) => Object.keys(line).length > 0)) {
       errors.lineErrors = lineErrors;
     }
-
-    return errors;
   }
 
+  // The components table applies to both roles: an assembly's full bill of
+  // components (required, both target types allowed) and a component's
+  // optional sub-components (other Component recipes it's built from —
+  // Component-in-Component; the UI never offers the "Raw ingredient" type
+  // for this role, so component.target_type is always "component" here,
+  // but validation still checks it rather than assuming the UI enforced
+  // it).
   const componentErrors: NonNullable<FormErrors["componentErrors"]> = [];
   // Two independent namespaces, mirroring the DB's two partial unique
   // indexes (sql/089) — a component recipe and a raw ingredient never
@@ -230,7 +235,7 @@ function validateDraft(draft: FormDraft): FormErrors {
   const seenComponentIds = new Set<string>();
   const seenComponentIngredientIds = new Set<string>();
 
-  if (draft.components.length === 0) {
+  if (draft.recipe_role === "assembly" && draft.components.length === 0) {
     errors.components = "Add at least one component";
   }
 
@@ -353,7 +358,10 @@ function RecipeEditorForm({
   // component, and a recipe may never be its own component (also enforced
   // by recipe_components' CHECK constraint and enforce_recipe_component_roles
   // trigger — filtered here too so the picker never offers an option that
-  // would just fail on save).
+  // would just fail on save). This is direct self-reference only; it does
+  // not detect longer cycles (A includes B, B includes A) — sql/100's own
+  // comments flag that as a known limitation, not yet enforced by the DB
+  // or here.
   const selectableComponentRecipes = componentRecipes.filter(
     (option) => option.id !== recipe?.id,
   );
@@ -363,6 +371,20 @@ function RecipeEditorForm({
     value: FormDraft[K],
   ) => {
     setFormValues((current) => ({ ...current, [field]: value }));
+  };
+
+  // A role change resets the components list (never lines — 'component'
+  // keeps its own ingredient lines when switching into that role). This
+  // guarantees no invalid carryover: an assembly's raw-ingredient-target
+  // rows can never leak into a component's sub-components table (which
+  // only accepts component-recipe targets), and it mirrors persistRecipe's
+  // existing "the other side is cleared" behavior in recipe-service.ts.
+  const selectRecipeRole = (role: RecipeRole) => {
+    setFormValues((current) => ({
+      ...current,
+      recipe_role: role,
+      components: [],
+    }));
   };
 
   const updateLine = <K extends keyof LineDraft>(
@@ -690,7 +712,7 @@ function RecipeEditorForm({
               id="recipe_role"
               value={formValues.recipe_role}
               onChange={(event) =>
-                updateHeader("recipe_role", event.target.value as RecipeRole)
+                selectRecipeRole(event.target.value as RecipeRole)
               }
               disabled={isSaving}
               className={inputClassName}
@@ -720,6 +742,7 @@ function RecipeEditorForm({
         </div>
 
         {formValues.recipe_role === "component" ? (
+          <div className="space-y-6">
           <div className="space-y-3">
             <div className="flex items-center justify-between gap-3">
               <h3 className="text-sm font-semibold text-zinc-900">Ingredients</h3>
@@ -855,6 +878,163 @@ function RecipeEditorForm({
                 </table>
               </div>
             </div>
+          </div>
+
+          <div className="space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <h3 className="text-sm font-semibold text-zinc-900">
+                Sub-components{" "}
+                <span className="font-normal text-zinc-500">(optional)</span>
+              </h3>
+              <button
+                type="button"
+                onClick={addComponentLine}
+                disabled={isSaving}
+                className="rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                + Add line
+              </button>
+            </div>
+            <p className="text-sm text-zinc-500">
+              Other pre-produced Component recipes this one is built from
+              (e.g. a marinade used inside a roasted dish). Allocated from
+              stock when this recipe is produced. Leave empty if this
+              recipe uses only the raw ingredients above.
+            </p>
+
+            {hasAttemptedSubmit && fieldErrors.components && (
+              <p className="text-sm text-red-600">{fieldErrors.components}</p>
+            )}
+
+            {formValues.components.length > 0 && (
+              <div className="overflow-hidden rounded-xl border border-zinc-200">
+                <div className="overflow-x-auto">
+                  <table className="min-w-full">
+                    <thead className="bg-zinc-50">
+                      <tr>
+                        <th className="px-3 py-3 text-left text-sm font-semibold text-zinc-700">
+                          Component
+                        </th>
+                        <th className="px-3 py-3 text-right text-sm font-semibold text-zinc-700">
+                          Quantity
+                        </th>
+                        <th className="px-3 py-3 text-left text-sm font-semibold text-zinc-700">
+                          Unit
+                        </th>
+                        <th className="px-3 py-3 text-right text-sm font-semibold text-zinc-700">
+                          Actions
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {formValues.components.map((component, index) => {
+                        const componentError =
+                          fieldErrors.componentErrors?.[index];
+                        const selectedComponentIds = new Set(
+                          formValues.components
+                            .map((item, itemIndex) =>
+                              itemIndex === index
+                                ? null
+                                : item.component_recipe_id,
+                            )
+                            .filter((id): id is string => Boolean(id)),
+                        );
+
+                        return (
+                          <tr key={index} className="border-t border-zinc-200">
+                            <td className="px-3 py-3 align-top">
+                              <select
+                                value={component.component_recipe_id}
+                                onChange={(event) =>
+                                  selectComponentRecipe(
+                                    index,
+                                    event.target.value,
+                                  )
+                                }
+                                disabled={isSaving}
+                                className={inputClassName}
+                                aria-invalid={Boolean(
+                                  hasAttemptedSubmit &&
+                                    componentError?.component_recipe_id,
+                                )}
+                              >
+                                <option value="">Select component</option>
+                                {selectableComponentRecipes.map((option) => (
+                                  <option
+                                    key={option.id}
+                                    value={option.id}
+                                    disabled={
+                                      selectedComponentIds.has(option.id) &&
+                                      option.id !== component.component_recipe_id
+                                    }
+                                  >
+                                    {option.name}
+                                  </option>
+                                ))}
+                              </select>
+                              {hasAttemptedSubmit &&
+                                componentError?.component_recipe_id && (
+                                  <p className="mt-1 text-sm text-red-600">
+                                    {componentError.component_recipe_id}
+                                  </p>
+                                )}
+                            </td>
+                            <td className="px-3 py-3 align-top">
+                              <NumericInput
+                                value={component.quantity}
+                                onChange={(value) =>
+                                  updateComponentLine(index, "quantity", value)
+                                }
+                                disabled={isSaving}
+                                className="text-right"
+                                placeholder="0.00"
+                                aria-invalid={Boolean(
+                                  hasAttemptedSubmit && componentError?.quantity,
+                                )}
+                              />
+                              {hasAttemptedSubmit && componentError?.quantity && (
+                                <p className="mt-1 text-sm text-red-600">
+                                  {componentError.quantity}
+                                </p>
+                              )}
+                            </td>
+                            <td className="px-3 py-3 align-top">
+                              <input
+                                type="text"
+                                value={component.unit}
+                                readOnly
+                                disabled={isSaving}
+                                className={inputClassName}
+                                placeholder="Select component"
+                                aria-invalid={Boolean(
+                                  hasAttemptedSubmit && componentError?.unit,
+                                )}
+                              />
+                              {hasAttemptedSubmit && componentError?.unit && (
+                                <p className="mt-1 text-sm text-red-600">
+                                  {componentError.unit}
+                                </p>
+                              )}
+                            </td>
+                            <td className="px-3 py-3 text-right align-top">
+                              <button
+                                type="button"
+                                onClick={() => removeComponentLine(index)}
+                                disabled={isSaving}
+                                className="rounded-lg px-3 py-1.5 text-sm font-medium text-red-600 transition-colors hover:bg-red-50 hover:text-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                Remove
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
           </div>
         ) : (
           <div className="space-y-3">

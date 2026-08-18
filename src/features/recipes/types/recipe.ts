@@ -132,9 +132,16 @@ export interface RecipeFormValues {
   recipe_role: RecipeRole;
   /** Optional. null means empty/unset, not zero. */
   selling_price: number | null;
-  /** Used when recipe_role = 'component'. */
+  /** Raw ingredients. Used when recipe_role = 'component'. */
   lines: RecipeLineInput[];
-  /** Used when recipe_role = 'assembly'. */
+  /**
+   * Used when recipe_role = 'assembly' (its full bill of components, both
+   * component-recipe and raw-ingredient targets, required) OR when
+   * recipe_role = 'component' (optional sub-components — other Component
+   * recipes this one is built from, e.g. a marinade used inside a roasted
+   * dish; component-recipe targets only, no raw-ingredient target — those
+   * go through `lines` instead).
+   */
   components: RecipeComponentLineInput[];
 }
 
