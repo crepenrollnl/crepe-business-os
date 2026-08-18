@@ -120,7 +120,9 @@ function mockFromForComplete(options: {
                 id: "recipe-1",
                 name: "Chicken Crepe",
                 yield_quantity: 10,
+                yield_unit: "pcs",
                 is_active: true,
+                recipe_role: "component",
               },
             ],
             error: null,
@@ -141,6 +143,17 @@ function mockFromForComplete(options: {
                 unit: "kg",
               },
             ],
+            error: null,
+          }),
+        }),
+      };
+    }
+
+    if (table === "recipe_components") {
+      return {
+        select: vi.fn().mockReturnValue({
+          in: vi.fn().mockResolvedValue({
+            data: [],
             error: null,
           }),
         }),

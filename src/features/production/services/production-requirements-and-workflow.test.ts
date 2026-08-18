@@ -59,6 +59,7 @@ function makeBuilder(result: QueryResult) {
   builder.delete = vi.fn(chain);
   builder.eq = vi.fn(chain);
   builder.in = vi.fn(chain);
+  builder.not = vi.fn(chain);
   builder.order = vi.fn(chain);
   builder.then = (
     resolve: (value: QueryResult) => unknown,
@@ -121,26 +122,67 @@ describe("productionService (requirements calculation + workflow)", () => {
 
   describe("getRecipeOptions", () => {
     it("only offers active component recipes (Critical Finding #4)", async () => {
-      const builder = makeBuilder({
-        data: [
-          {
-            id: RECIPE_ID,
-            name: "Dough",
-            yield_quantity: 10,
-            yield_unit: "pcs",
-            is_active: true,
-          },
-        ],
-        error: null,
+      mockTables({
+        recipes: {
+          data: [
+            {
+              id: RECIPE_ID,
+              name: "Dough",
+              yield_quantity: 10,
+              yield_unit: "pcs",
+              is_active: true,
+            },
+          ],
+          error: null,
+        },
+        recipe_components: { data: [], error: null },
       });
-      supabaseMock.from.mockReturnValue(builder);
 
       const result = await productionService.getRecipeOptions();
 
       expect(result.error).toBeNull();
       expect(result.data).toHaveLength(1);
-      expect(builder.eq).toHaveBeenCalledWith("is_active", true);
-      expect(builder.eq).toHaveBeenCalledWith("recipe_role", "component");
+      expect(result.data?.[0]?.name).toBe("Dough");
+    });
+
+    it("hides recipes that are currently used as a Component sub-component", async () => {
+      mockTables({
+        recipes: {
+          data: [
+            {
+              id: RECIPE_ID,
+              name: "Dough",
+              yield_quantity: 10,
+              yield_unit: "kg",
+              is_active: true,
+              recipe_role: "component",
+            },
+            {
+              id: RECIPE_ID_2,
+              name: "Marinade",
+              yield_quantity: 1,
+              yield_unit: "kg",
+              is_active: true,
+              recipe_role: "component",
+            },
+          ],
+          error: null,
+        },
+        recipe_components: {
+          data: [
+            {
+              assembly_recipe_id: RECIPE_ID,
+              component_recipe_id: RECIPE_ID_2,
+            },
+          ],
+          error: null,
+        },
+      });
+
+      const result = await productionService.getRecipeOptions();
+
+      expect(result.error).toBeNull();
+      expect(result.data?.map((row) => row.id)).toEqual([RECIPE_ID]);
     });
 
     it("propagates a query error", async () => {

@@ -4,6 +4,8 @@
  * Purchases requests tax calculation only — no rates/rules knowledge.
  */
 
+import type { TaxPriceMode } from "@/types/tax-engine";
+
 /**
  * Opaque tax category codes used on purchase lines.
  * Country Packs interpret these; Purchases does not resolve rates.
@@ -62,6 +64,11 @@ export interface PurchaseTaxLineInput {
   quantity: number;
   unit_price: number;
   discount?: number;
+  /**
+   * Whether `unit_price` already includes tax.
+   * Omitted / exclusive = current Purchases default.
+   */
+  price_mode?: TaxPriceMode;
   tax_category: string;
   tax_regime?: string | null;
   /** Optional explicit tax code override for Tax Integration. */

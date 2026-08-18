@@ -131,6 +131,33 @@ describe("purchaseTaxService (DEV-099, RPC-based)", () => {
       });
     });
 
+    it("forwards inclusive price_mode instead of hardcoding exclusive", async () => {
+      supabaseMock.rpc.mockResolvedValue(rpcResult());
+
+      await purchaseTaxService.calculatePurchaseTaxes(
+        document({
+          lines: [
+            {
+              line_id: "line-1",
+              quantity: 1,
+              unit_price: 121,
+              tax_category: "goods",
+              tax_regime: "standard_vat",
+              price_mode: "inclusive",
+            },
+          ],
+        }),
+      );
+
+      const [, params] = supabaseMock.rpc.mock.calls[0] as [
+        string,
+        Record<string, unknown>,
+      ];
+      const lines = params.p_lines as Array<Record<string, unknown>>;
+      expect(lines[0]?.price_mode).toBe("inclusive");
+      expect(lines[0]?.unit_price).toBe(121);
+    });
+
     it("defaults discount to 0 and tax_regime to null when omitted", async () => {
       supabaseMock.rpc.mockResolvedValue(rpcResult());
 

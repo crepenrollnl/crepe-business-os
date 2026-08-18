@@ -17,10 +17,12 @@ import type { PurchaseAccountingPreviewData } from "../types/purchase-accounting
 import type { PurchaseTaxResult } from "../types/purchase-tax";
 import { buildPurchaseTaxDocument } from "../utils/build-purchase-tax-document";
 import { createPurchaseAccountingPreviewContext } from "../utils/create-purchase-accounting-preview-context";
+import { purchaseToFormValues } from "../utils/map-purchase-form-values";
 import {
   mapPurchaseJournalProposalToPreview,
   mapPurchaseTotalsToAccountingPreview,
 } from "../utils/map-purchase-accounting-preview";
+import { toNetPurchaseLines } from "../utils/to-net-purchase-lines";
 
 function comparePurchases(
   a: PurchaseListItem,
@@ -87,39 +89,9 @@ function emptyFormValues(): PurchaseFormValues {
         discount: 0,
         tax_category: "goods",
         tax_regime: "standard_vat",
+        price_mode: "exclusive",
       },
     ],
-  };
-}
-
-function purchaseToFormValues(purchase: PurchaseWithRelations): PurchaseFormValues {
-  return {
-    supplier_id: purchase.supplier_id ?? "",
-    invoice_number: purchase.invoice_number ?? "",
-    purchased_at: purchase.purchased_at.slice(0, 10),
-    notes: purchase.notes ?? "",
-    supplier_country: "NL",
-    tax_country: "NL",
-    lines:
-      purchase.items.length > 0
-        ? purchase.items.map((item) => ({
-            ingredient_id: item.ingredient_id,
-            quantity: item.quantity,
-            unit_cost: item.unit_cost,
-            discount: 0,
-            tax_category: "goods",
-            tax_regime: "standard_vat",
-          }))
-        : [
-            {
-              ingredient_id: "",
-              quantity: 1,
-              unit_cost: 0,
-              discount: 0,
-              tax_category: "goods",
-              tax_regime: "standard_vat",
-            },
-          ],
   };
 }
 
@@ -337,10 +309,21 @@ export function usePurchases() {
         return false;
       }
 
+      const tax = resolved.tax;
+      const netLines = toNetPurchaseLines(values.lines, tax);
+      if (netLines.error || !netLines.data) {
+        setActionError(
+          netLines.error ?? "Failed to convert inclusive prices to net unit cost.",
+        );
+        setIsSaving(false);
+        return false;
+      }
+
       const result = await purchaseService.saveDraft({
         ...values,
         id: editingPurchase?.id,
-        tax_total: resolved.tax.tax_total,
+        lines: netLines.data,
+        tax_total: tax.tax_total,
       });
 
       if (result.error) {
@@ -370,6 +353,15 @@ export function usePurchases() {
       }
 
       const tax = resolved.tax;
+      const netLines = toNetPurchaseLines(values.lines, tax);
+      if (netLines.error || !netLines.data) {
+        setActionError(
+          netLines.error ?? "Failed to convert inclusive prices to net unit cost.",
+        );
+        setIsSaving(false);
+        return false;
+      }
+
       const accountingContext = createPurchaseAccountingPreviewContext({
         currency: tax.tax_result.currency || "EUR",
         purchasedAt: values.purchased_at,
@@ -381,6 +373,7 @@ export function usePurchases() {
         {
           ...values,
           id: editingPurchase?.id,
+          lines: netLines.data,
           tax_total: tax.tax_total,
         },
         accountingContext,

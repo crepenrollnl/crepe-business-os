@@ -1,5 +1,10 @@
 /**
  * Build a PurchaseTaxDocument from purchase form values (DEV-099).
+ *
+ * `unit_price` is the amount currently in the form (typed). `price_mode`
+ * tells calculate_purchase_taxes whether that amount is exclusive or
+ * inclusive. Does not substitute goods / standard_vat for blank lines —
+ * missing category is rejected by purchase-tax-service.
  */
 
 import type { PurchaseFormValues, PurchaseSupplier } from "../types/purchase";
@@ -43,8 +48,9 @@ export function buildPurchaseTaxDocument(input: {
       quantity: line.quantity,
       unit_price: line.unit_cost,
       discount: line.discount ?? 0,
-      tax_category: line.tax_category?.trim() || "goods",
-      tax_regime: line.tax_regime?.trim() || "standard_vat",
+      price_mode: line.price_mode === "inclusive" ? "inclusive" : "exclusive",
+      tax_category: line.tax_category?.trim() ?? "",
+      tax_regime: line.tax_regime?.trim() || null,
     })),
   };
 }

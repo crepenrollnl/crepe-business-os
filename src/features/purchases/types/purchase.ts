@@ -4,6 +4,8 @@
  * transaction_id is reserved for future Transaction posting.
  */
 
+import type { TaxPriceMode } from "@/types/tax-engine";
+
 export type PurchaseStatus = "draft" | "received" | "cancelled";
 
 export interface PurchaseSupplier {
@@ -49,8 +51,23 @@ export interface PurchaseItem {
   purchase_id: string;
   ingredient_id: string;
   quantity: number;
+  /** Exclusive net unit price — source of truth for sql/069 and cost history. */
   unit_cost: number;
   line_total: number;
+  /** Opaque tax category used at calculation time. Null on pre-sql/102 rows. */
+  tax_category: string | null;
+  /** Opaque tax regime hint used at calculation time. Null on pre-sql/102 rows. */
+  tax_regime: string | null;
+  /**
+   * Whether `entered_unit_price` was typed inclusive of tax.
+   * Null on pre-sql/102 rows. `unit_cost` is always exclusive net.
+   */
+  price_mode: TaxPriceMode | null;
+  /**
+   * Unit amount as typed on the form (may be gross). Display-only memory.
+   * Null on pre-sql/102 rows.
+   */
+  entered_unit_price: number | null;
 }
 
 export interface PurchaseItemWithRelations extends PurchaseItem {
@@ -70,13 +87,24 @@ export interface PurchaseListItem extends Purchase {
 export interface PurchaseLineInput {
   ingredient_id: string;
   quantity: number;
+  /**
+   * On the form: the unit amount the user typed (may be gross).
+   * On persist: exclusive net unit price for sql/069 (`toNetPurchaseLines`).
+   */
   unit_cost: number;
   /** Absolute discount in document currency (tax preview / calculation). */
   discount?: number;
   /** Opaque tax category for Tax Integration (e.g. goods, food). */
-  tax_category?: string;
+  tax_category?: string | null;
   /** Optional regime override hint for Country Pack matching. */
   tax_regime?: string | null;
+  /** How the typed unit amount should be sent to calculate_purchase_taxes. */
+  price_mode?: TaxPriceMode | null;
+  /**
+   * Typed unit amount remembered for reopen (may be gross).
+   * Set by `toNetPurchaseLines` before persist.
+   */
+  entered_unit_price?: number | null;
 }
 
 export interface PurchaseFormValues {

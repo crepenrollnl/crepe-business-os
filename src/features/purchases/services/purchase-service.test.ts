@@ -92,10 +92,14 @@ const purchaseItemRows = [
 
 function installMock(stockRpcErrors: Record<string, { message: string } | null>) {
   const updateCalls: Array<{ table: string; payload: unknown }> = [];
+  const itemInserts: unknown[] = [];
+  const totalsCalls: unknown[] = [];
+  const purchaseInserts: unknown[] = [];
 
   supabaseMock.rpc.mockImplementation(
     async (fn: string, args: Record<string, unknown>) => {
       if (fn === "calculate_purchase_totals") {
+        totalsCalls.push(args);
         const lines = args.p_lines as Array<{
           ingredient_id: string;
           quantity: number;
@@ -140,7 +144,10 @@ function installMock(stockRpcErrors: Record<string, { message: string } | null>)
   supabaseMock.from.mockImplementation((table: string) => {
     if (table === "purchases") {
       return {
-        insert: vi.fn(() => chainable({ data: purchaseRow, error: null })),
+        insert: vi.fn((payload: unknown) => {
+          purchaseInserts.push(payload);
+          return chainable({ data: purchaseRow, error: null });
+        }),
         update: vi.fn((payload: unknown) => {
           updateCalls.push({ table, payload });
           return chainable({ data: null, error: null });
@@ -152,7 +159,10 @@ function installMock(stockRpcErrors: Record<string, { message: string } | null>)
     if (table === "purchase_items") {
       return {
         delete: vi.fn(() => chainable({ data: null, error: null })),
-        insert: vi.fn(() => chainable({ data: purchaseItemRows, error: null })),
+        insert: vi.fn((payload: unknown) => {
+          itemInserts.push(payload);
+          return chainable({ data: purchaseItemRows, error: null });
+        }),
       };
     }
 
@@ -167,7 +177,7 @@ function installMock(stockRpcErrors: Record<string, { message: string } | null>)
     throw new Error(`Unexpected table: ${table}`);
   });
 
-  return { updateCalls };
+  return { updateCalls, itemInserts, totalsCalls, purchaseInserts };
 }
 
 function buildInput(): SavePurchaseInput {
@@ -246,6 +256,67 @@ describe("purchaseService.receivePurchase — partial stock increment failure", 
     expect(stockCalls).toEqual([
       ["increment_ingredient_stock", { p_ingredient_id: INGREDIENT_A, p_quantity: 10 }],
       ["increment_ingredient_stock", { p_ingredient_id: INGREDIENT_B, p_quantity: 10 }],
+    ]);
+  });
+});
+
+describe("purchaseService.receivePurchase — variant C tax memory", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("persists net unit_cost/line totals and remembers the typed inclusive price", async () => {
+    const { itemInserts, totalsCalls, purchaseInserts } = installMock({});
+
+    const result = await purchaseService.receivePurchase({
+      supplier_id: "supplier-1",
+      invoice_number: "INV-1",
+      purchased_at: "2026-07-30",
+      notes: "",
+      tax_total: 21,
+      lines: [
+        {
+          ingredient_id: INGREDIENT_A,
+          quantity: 1,
+          unit_cost: 100,
+          entered_unit_price: 121,
+          price_mode: "inclusive",
+          tax_category: "goods",
+          tax_regime: "standard_vat",
+        },
+      ],
+    });
+
+    expect(result.error).toBeNull();
+
+    expect(totalsCalls[0]).toMatchObject({
+      p_tax_total: 21,
+      p_lines: [
+        expect.objectContaining({
+          ingredient_id: INGREDIENT_A,
+          quantity: 1,
+          unit_cost: 100,
+        }),
+      ],
+    });
+
+    expect(purchaseInserts[0]).toMatchObject({
+      subtotal: 100,
+      tax_total: 21,
+      total: 121,
+    });
+
+    expect(itemInserts[0]).toEqual([
+      expect.objectContaining({
+        ingredient_id: INGREDIENT_A,
+        quantity: 1,
+        unit_cost: 100,
+        line_total: 100,
+        entered_unit_price: 121,
+        price_mode: "inclusive",
+        tax_category: "goods",
+        tax_regime: "standard_vat",
+      }),
     ]);
   });
 });

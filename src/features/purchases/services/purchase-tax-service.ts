@@ -145,7 +145,7 @@ async function run(
         quantity: line.quantity,
         unit_price: line.unit_price,
         discount: line.discount ?? 0,
-        price_mode: "exclusive",
+        price_mode: line.price_mode === "inclusive" ? "inclusive" : "exclusive",
         tax_category: line.tax_category.trim(),
         tax_regime: line.tax_regime?.trim() || null,
         tax_codes: line.tax_code?.trim() ? [line.tax_code.trim()] : undefined,
