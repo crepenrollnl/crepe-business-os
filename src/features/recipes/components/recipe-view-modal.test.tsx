@@ -142,6 +142,52 @@ describe("RecipeViewModal", () => {
     expect(screen.getByText("Dough")).toBeInTheDocument();
     expect(screen.getByText("Flour")).toBeInTheDocument();
     expect(screen.queryByText("Components")).not.toBeInTheDocument();
+    expect(screen.queryByText("Sub-components")).not.toBeInTheDocument();
+  });
+
+  it("renders the sub-components table for a component recipe that uses other components", () => {
+    render(
+      <RecipeViewModal
+        isOpen={true}
+        recipe={componentRecipe({
+          name: "Chicken filling",
+          components: [
+            {
+              id: "sub-1",
+              assembly_recipe_id: "recipe-1",
+              component_recipe_id: "recipe-marinade",
+              ingredient_id: null,
+              quantity: 0.2,
+              unit: "kg",
+              component: {
+                id: "recipe-marinade",
+                name: "Chicken marinade",
+                yield_unit: "kg",
+              },
+              ingredient: null,
+            },
+          ],
+        })}
+        isLoading={false}
+        error={null}
+        onClose={() => {}}
+        onEdit={() => {}}
+      />,
+    );
+
+    expect(screen.getByText("Chicken filling")).toBeInTheDocument();
+    expect(screen.getByText("Flour")).toBeInTheDocument();
+
+    const heading = screen.getByRole("heading", { name: "Sub-components" });
+    expect(heading).toBeInTheDocument();
+
+    const tables = screen.getAllByRole("table");
+    expect(tables).toHaveLength(2);
+    const subTable = tables[1];
+    expect(within(subTable).getByText("Chicken marinade")).toBeInTheDocument();
+    expect(within(subTable).getByText("0.200")).toBeInTheDocument();
+    expect(within(subTable).getByText("kg")).toBeInTheDocument();
+    expect(within(subTable).queryByText("Raw")).not.toBeInTheDocument();
   });
 
   it("renders the components table for an assembly recipe, badging only the ingredient row as Raw", () => {

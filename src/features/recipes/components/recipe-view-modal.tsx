@@ -165,6 +165,52 @@ export function RecipeViewModal({
                       </table>
                     </div>
                   </div>
+
+                  {recipe.components.length > 0 && (
+                    <>
+                      <h3 className="mt-6 text-sm font-semibold text-zinc-900">
+                        Sub-components
+                      </h3>
+                      <div className="mt-2 overflow-hidden rounded-xl border border-zinc-200">
+                        <div className="overflow-x-auto">
+                          <table className="min-w-full">
+                            <thead className="bg-zinc-50">
+                              <tr>
+                                <th className="px-3 py-2 text-left text-sm font-semibold text-zinc-700">
+                                  Component
+                                </th>
+                                <th className="px-3 py-2 text-right text-sm font-semibold text-zinc-700">
+                                  Quantity
+                                </th>
+                                <th className="px-3 py-2 text-left text-sm font-semibold text-zinc-700">
+                                  Unit
+                                </th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {recipe.components.map((component) => (
+                                <tr
+                                  key={component.id}
+                                  className="border-t border-zinc-200"
+                                >
+                                  <td className="px-3 py-2 text-zinc-900">
+                                    {component.component?.name ??
+                                      "Unknown component"}
+                                  </td>
+                                  <td className="px-3 py-2 text-right text-zinc-800">
+                                    {formatQuantity(component.quantity)}
+                                  </td>
+                                  <td className="px-3 py-2 text-zinc-800">
+                                    {component.unit}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    </>
+                  )}
                 </>
               ) : (
                 <>
