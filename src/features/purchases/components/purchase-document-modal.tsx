@@ -6,7 +6,7 @@ import {
   formatNumericInput,
   parseNumericInput,
 } from "@/components/ui/numeric-input";
-import { formatMoney } from "@/lib/money";
+import { formatMoney, formatUnitCost } from "@/lib/money";
 import { PurchaseAccountingPreview } from "./purchase-accounting-preview";
 import { purchaseTaxService } from "../services/purchase-tax-service";
 import type {
@@ -50,13 +50,19 @@ type NumericLineField = "quantity" | "unit_cost";
 
 type LineDraft = Omit<
   PurchaseLineInput,
-  NumericLineField | "discount" | "tax_category" | "tax_regime"
+  | NumericLineField
+  | "discount"
+  | "tax_category"
+  | "tax_regime"
+  | "price_mode"
+  | "entered_unit_price"
 > & {
   quantity: string;
   unit_cost: string;
   discount: string;
   tax_category: string;
   tax_regime: string;
+  price_mode: "" | "exclusive" | "inclusive";
 };
 
 type FormDraft = Omit<PurchaseFormValues, "lines"> & {
@@ -73,6 +79,7 @@ type FormErrors = {
     ingredient_id?: string;
     quantity?: string;
     unit_cost?: string;
+    tax_category?: string;
   }>;
 };
 
@@ -103,8 +110,12 @@ function valuesToDraft(
       discount: options?.emptyNumericDefaults
         ? ""
         : formatNumericInput(line.discount ?? 0),
-      tax_category: line.tax_category ?? "goods",
-      tax_regime: line.tax_regime ?? "standard_vat",
+      tax_category: line.tax_category ?? "",
+      tax_regime: line.tax_regime ?? "",
+      price_mode:
+        line.price_mode === "inclusive" || line.price_mode === "exclusive"
+          ? line.price_mode
+          : "",
     })),
   };
 }
@@ -124,6 +135,8 @@ function draftToValues(draft: FormDraft): PurchaseFormValues {
       discount: coerceNumericField(line.discount),
       tax_category: line.tax_category,
       tax_regime: line.tax_regime,
+      price_mode:
+        line.price_mode === "inclusive" ? "inclusive" : "exclusive",
     })),
   };
 }
@@ -153,10 +166,15 @@ function validateDraft(
       ingredient_id?: string;
       quantity?: string;
       unit_cost?: string;
+      tax_category?: string;
     } = {};
 
     if (!line.ingredient_id) {
       lineError.ingredient_id = "Ingredient is required";
+    }
+
+    if (!line.tax_category) {
+      lineError.tax_category = "Tax category is required";
     }
 
     const quantity = parseNumericInput(line.quantity);
@@ -239,7 +257,15 @@ function PurchaseDocumentForm({
   // effect. The effect below owns only the genuine external subscription:
   // debouncing edits and awaiting the tax preview RPC.
   const hasTaxPreviewInputs =
-    formValues.lines.length > 0 && Boolean(formValues.purchased_at);
+    formValues.lines.length > 0 &&
+    Boolean(formValues.purchased_at) &&
+    formValues.lines.every((line) => line.tax_category.trim().length > 0) &&
+    !(
+      isReadOnly &&
+      formValues.lines.some(
+        (line) => !line.tax_category.trim() || !line.price_mode,
+      )
+    );
 
   // Debounced: re-requests the tax preview RPC after edits settle, instead
   // of calculating in-browser synchronously on every keystroke.
@@ -300,9 +326,14 @@ function PurchaseDocumentForm({
 
   const taxTotal =
     accountingPreview?.tax_total ?? taxPreview?.data?.tax_total ?? 0;
-  const netAmount = accountingPreview?.net_amount ?? subtotal;
+  const netAmount =
+    accountingPreview?.net_amount ??
+    taxPreview?.data?.subtotal ??
+    subtotal;
   const grandTotal =
-    accountingPreview?.grand_total ?? roundMoney(subtotal + taxTotal);
+    accountingPreview?.grand_total ??
+    taxPreview?.data?.grand_total ??
+    roundMoney(subtotal + taxTotal);
   const previewCurrency = accountingPreview?.currency ?? "EUR";
 
   const previewForDisplay: PurchaseAccountingPreviewData = accountingPreview ?? {
@@ -346,7 +377,7 @@ function PurchaseDocumentForm({
               tax_regime:
                 DEFAULT_TAX_REGIME_BY_CATEGORY[
                   category as PurchaseTaxCategoryCode
-                ] ?? line.tax_regime,
+                ] ?? (category ? line.tax_regime : ""),
             }
           : line,
       ),
@@ -365,6 +396,7 @@ function PurchaseDocumentForm({
           discount: "",
           tax_category: "goods",
           tax_regime: "standard_vat",
+          price_mode: "exclusive",
         },
       ],
     }));
@@ -640,6 +672,9 @@ function PurchaseDocumentForm({
                       Unit price
                     </th>
                     <th className="px-3 py-3 text-left text-sm font-semibold text-zinc-700">
+                      Price includes tax
+                    </th>
+                    <th className="px-3 py-3 text-left text-sm font-semibold text-zinc-700">
                       Tax category
                     </th>
                     <th className="px-3 py-3 text-left text-sm font-semibold text-zinc-700">
@@ -666,20 +701,36 @@ function PurchaseDocumentForm({
                 </thead>
                 <tbody>
                   {formValues.lines.map((line, index) => {
-                    const lineTotal = roundMoney(
-                      coerceNumericField(line.quantity) *
-                        coerceNumericField(line.unit_cost) -
-                        coerceNumericField(line.discount),
-                    );
+                    const quantity = coerceNumericField(line.quantity);
                     const lineError = fieldErrors.lineErrors?.[index];
                     const taxLine = taxPreview?.data?.lines.find(
                       (row) => row.line_id === `line-${index + 1}`,
                     );
+                    const storedItem = purchase?.items[index];
+                    const netLineTotal = taxLine
+                      ? taxLine.net_amount
+                      : line.price_mode === "inclusive"
+                        ? null
+                        : roundMoney(
+                            quantity * coerceNumericField(line.unit_cost) -
+                              coerceNumericField(line.discount),
+                          );
+                    const netUnitCost =
+                      taxLine && quantity > 0
+                        ? taxLine.net_amount / quantity
+                        : storedItem?.unit_cost;
+                    const showNetUnitCost =
+                      line.price_mode === "inclusive" &&
+                      netUnitCost !== undefined &&
+                      netUnitCost !== null;
                     const lineTaxWarning = taxPreview?.data?.warnings.find(
                       (message) =>
+                        Boolean(line.tax_category) &&
+                        Boolean(line.tax_regime) &&
                         message.includes(`category '${line.tax_category}'`) &&
                         message.includes(`regime '${line.tax_regime}'`),
                     );
+                    const taxUnrecorded = isReadOnly && !line.price_mode;
 
                     return (
                       <tr key={index} className="border-t border-zinc-200">
@@ -745,38 +796,85 @@ function PurchaseDocumentForm({
                               {lineError.unit_cost}
                             </p>
                           )}
+                          {showNetUnitCost && (
+                            <p className="mt-1 text-xs text-zinc-500">
+                              Net {formatUnitCost(netUnitCost)}
+                            </p>
+                          )}
                         </td>
                         <td className="px-3 py-3 align-top">
-                          <select
-                            value={line.tax_category}
-                            onChange={(event) =>
-                              updateLineTaxCategory(index, event.target.value)
-                            }
-                            disabled={isReadOnly || isSaving}
-                            className={inputClassName}
-                          >
-                            {PURCHASE_TAX_CATEGORY_OPTIONS.map((category) => (
-                              <option key={category} value={category}>
-                                {category}
-                              </option>
-                            ))}
-                          </select>
+                          {taxUnrecorded ? (
+                            <p className="text-sm text-zinc-500">Not recorded</p>
+                          ) : (
+                            <label className="flex items-center gap-2 text-sm text-zinc-700">
+                              <input
+                                type="checkbox"
+                                checked={line.price_mode === "inclusive"}
+                                onChange={(event) =>
+                                  updateLine(
+                                    index,
+                                    "price_mode",
+                                    event.target.checked
+                                      ? "inclusive"
+                                      : "exclusive",
+                                  )
+                                }
+                                disabled={isReadOnly || isSaving}
+                                className="h-4 w-4 rounded border-zinc-300 text-amber-600 focus:ring-amber-500"
+                              />
+                              Includes tax
+                            </label>
+                          )}
                         </td>
                         <td className="px-3 py-3 align-top">
-                          <select
-                            value={line.tax_regime}
-                            onChange={(event) =>
-                              updateLine(index, "tax_regime", event.target.value)
-                            }
-                            disabled={isReadOnly || isSaving}
-                            className={inputClassName}
-                          >
-                            {PURCHASE_TAX_REGIME_OPTIONS.map((regime) => (
-                              <option key={regime} value={regime}>
-                                {regime}
-                              </option>
-                            ))}
-                          </select>
+                          {isReadOnly && !line.tax_category ? (
+                            <p className="text-sm text-zinc-500">Not recorded</p>
+                          ) : (
+                            <select
+                              value={line.tax_category}
+                              onChange={(event) =>
+                                updateLineTaxCategory(index, event.target.value)
+                              }
+                              disabled={isReadOnly || isSaving}
+                              className={inputClassName}
+                              aria-invalid={Boolean(
+                                hasAttemptedSubmit && lineError?.tax_category,
+                              )}
+                            >
+                              <option value="">Select category</option>
+                              {PURCHASE_TAX_CATEGORY_OPTIONS.map((category) => (
+                                <option key={category} value={category}>
+                                  {category}
+                                </option>
+                              ))}
+                            </select>
+                          )}
+                          {hasAttemptedSubmit && lineError?.tax_category && (
+                            <p className="mt-1 text-sm text-red-600">
+                              {lineError.tax_category}
+                            </p>
+                          )}
+                        </td>
+                        <td className="px-3 py-3 align-top">
+                          {isReadOnly && !line.tax_regime ? (
+                            <p className="text-sm text-zinc-500">Not recorded</p>
+                          ) : (
+                            <select
+                              value={line.tax_regime}
+                              onChange={(event) =>
+                                updateLine(index, "tax_regime", event.target.value)
+                              }
+                              disabled={isReadOnly || isSaving}
+                              className={inputClassName}
+                            >
+                              <option value="">Select regime</option>
+                              {PURCHASE_TAX_REGIME_OPTIONS.map((regime) => (
+                                <option key={regime} value={regime}>
+                                  {regime}
+                                </option>
+                              ))}
+                            </select>
+                          )}
                           {lineTaxWarning && (
                             <p
                               className="mt-1 text-xs text-amber-700"
@@ -796,10 +894,12 @@ function PurchaseDocumentForm({
                             : "—"}
                         </td>
                         <td className="px-3 py-3 text-right align-top text-sm text-zinc-700">
-                          {formatMoney(taxLine?.tax_amount ?? 0)}
+                          {taxLine ? formatMoney(taxLine.tax_amount) : "—"}
                         </td>
                         <td className="px-3 py-3 text-right align-top text-sm font-medium text-zinc-900">
-                          {formatMoney(lineTotal)}
+                          {netLineTotal === null
+                            ? "—"
+                            : formatMoney(netLineTotal)}
                         </td>
                         {!isReadOnly && (
                           <td className="px-3 py-3 text-right align-top">

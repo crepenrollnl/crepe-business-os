@@ -47,10 +47,36 @@ interface PurchaseItemRow {
   quantity: number | string;
   unit_cost: number | string;
   line_total: number | string;
+  tax_category?: string | null;
+  tax_regime?: string | null;
+  price_mode?: string | null;
+  entered_unit_price?: number | string | null;
 }
 
 function toNumber(value: number | string): number {
   return typeof value === "number" ? value : Number(value);
+}
+
+function toNullableNumber(
+  value: number | string | null | undefined,
+): number | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  const parsed = toNumber(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function toNullableTrimmedString(
+  value: string | null | undefined,
+): string | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
 }
 
 function mapPurchase(row: PurchaseRow): Purchase {
@@ -73,6 +99,8 @@ function mapPurchase(row: PurchaseRow): Purchase {
 }
 
 function mapPurchaseItem(row: PurchaseItemRow): PurchaseItem {
+  const priceMode = row.price_mode?.trim() ?? "";
+
   return {
     id: row.id,
     purchase_id: row.purchase_id,
@@ -80,6 +108,13 @@ function mapPurchaseItem(row: PurchaseItemRow): PurchaseItem {
     quantity: toNumber(row.quantity),
     unit_cost: toNumber(row.unit_cost),
     line_total: toNumber(row.line_total),
+    tax_category: toNullableTrimmedString(row.tax_category),
+    tax_regime: toNullableTrimmedString(row.tax_regime),
+    price_mode:
+      priceMode === "inclusive" || priceMode === "exclusive"
+        ? priceMode
+        : null,
+    entered_unit_price: toNullableNumber(row.entered_unit_price),
   };
 }
 
@@ -148,6 +183,10 @@ interface PurchaseTotals {
     quantity: number;
     unit_cost: number;
     line_total: number;
+    tax_category: string | null;
+    tax_regime: string | null;
+    price_mode: "exclusive" | "inclusive" | null;
+    entered_unit_price: number | null;
   }>;
   subtotal: number;
   tax_total: number;
@@ -184,12 +223,24 @@ async function buildTotals(
 
   return {
     data: {
-      preparedLines: rows.map((line) => ({
-        ingredient_id: line.ingredient_id as string,
-        quantity: toNumber(line.quantity),
-        unit_cost: toNumber(line.unit_cost),
-        line_total: toNumber(line.line_total),
-      })),
+      preparedLines: rows.map((line, index) => {
+        const source = lines[index];
+        const priceMode = source?.price_mode;
+
+        return {
+          ingredient_id: line.ingredient_id as string,
+          quantity: toNumber(line.quantity),
+          unit_cost: toNumber(line.unit_cost),
+          line_total: toNumber(line.line_total),
+          tax_category: toNullableTrimmedString(source?.tax_category),
+          tax_regime: toNullableTrimmedString(source?.tax_regime),
+          price_mode:
+            priceMode === "inclusive" || priceMode === "exclusive"
+              ? priceMode
+              : null,
+          entered_unit_price: toNullableNumber(source?.entered_unit_price),
+        };
+      }),
       subtotal: toNumber(data.subtotal as number | string),
       tax_total: toNumber(data.tax_total as number | string),
       total: toNumber(data.total as number | string),
@@ -291,6 +342,10 @@ async function replacePurchaseItems(
         quantity: line.quantity,
         unit_cost: line.unit_cost,
         line_total: line.line_total,
+        tax_category: line.tax_category,
+        tax_regime: line.tax_regime,
+        price_mode: line.price_mode,
+        entered_unit_price: line.entered_unit_price,
       })),
     )
     .select("*");
@@ -395,7 +450,7 @@ async function reverseIngredientStockDelta(
 }
 
 async function increaseIngredientStock(
-  lines: PurchaseTotals["preparedLines"],
+  lines: Array<{ ingredient_id: string; quantity: number }>,
 ): Promise<ServiceResult<null>> {
   const applied: Array<{ ingredient_id: string; quantity: number }> = [];
 
@@ -891,8 +946,6 @@ export const purchaseService = {
         result.data.items.map((item) => ({
           ingredient_id: item.ingredient_id,
           quantity: item.quantity,
-          unit_cost: item.unit_cost,
-          line_total: item.line_total,
         })),
       );
 
