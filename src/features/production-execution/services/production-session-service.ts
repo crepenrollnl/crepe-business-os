@@ -27,6 +27,10 @@ import type {
 import { productionAccountingService } from "./production-accounting-service";
 import { productionBatchService } from "./production-batch-service";
 import {
+  explodeComponentRecipeBom,
+} from "@/features/production-planning";
+import { loadRecipeBomGraph } from "@/features/production/services/load-recipe-bom-graph";
+import {
   assertCanCompleteProductionSession,
   buildCompleteProductionPlan,
   logProductionCompleted,
@@ -75,20 +79,6 @@ interface PlanHeaderRow {
   id: string;
   plan_number: number;
   name: string;
-}
-
-interface RecipeRow {
-  id: string;
-  name: string;
-  yield_quantity: number | string;
-  is_active: boolean;
-}
-
-interface RecipeItemRow {
-  recipe_id: string;
-  ingredient_id: string;
-  quantity: number | string;
-  unit: string;
 }
 
 interface IngredientCostRow {
@@ -269,40 +259,40 @@ async function loadRecipeBomsForCompletion(
     return ok(new Map());
   }
 
-  const [recipesResult, itemsResult] = await Promise.all([
-    supabase
-      .from("recipes")
-      .select("id, name, yield_quantity, is_active")
-      .in("id", uniqueIds),
-    supabase
-      .from("recipe_items")
-      .select("recipe_id, ingredient_id, quantity, unit")
-      .in("recipe_id", uniqueIds),
-  ]);
-
-  if (recipesResult.error) {
-    return fail(toUserError(recipesResult.error, "Failed to load recipes"));
+  const graphResult = await loadRecipeBomGraph(uniqueIds);
+  if (graphResult.error || !graphResult.data) {
+    return fail(graphResult.error ?? "Failed to load recipes");
   }
 
-  if (itemsResult.error) {
-    return fail(
-      toUserError(itemsResult.error, "Failed to load recipe ingredients"),
+  const graph = graphResult.data;
+  const explodedByRecipe = new Map<
+    string,
+    ReturnType<typeof explodeComponentRecipeBom>
+  >();
+  const ingredientIds = new Set<string>();
+
+  for (const recipeId of uniqueIds) {
+    const exploded = explodeComponentRecipeBom(
+      recipeId,
+      graph.recipes,
+      graph.recipeIngredients,
+      graph.recipeComponents,
     );
+    explodedByRecipe.set(recipeId, exploded);
+    if (exploded.ok) {
+      for (const item of exploded.ingredients) {
+        ingredientIds.add(item.ingredientId);
+      }
+    }
   }
-
-  const recipeRows = (recipesResult.data ?? []) as RecipeRow[];
-  const itemRows = (itemsResult.data ?? []) as RecipeItemRow[];
-  const ingredientIds = [
-    ...new Set(itemRows.map((item) => item.ingredient_id)),
-  ];
 
   let ingredientRows: IngredientCostRow[] = [];
 
-  if (ingredientIds.length > 0) {
+  if (ingredientIds.size > 0) {
     const ingredientsResult = await supabase
       .from("ingredients")
       .select("id, name, unit, current_stock, cost_per_unit")
-      .in("id", ingredientIds);
+      .in("id", [...ingredientIds]);
 
     if (ingredientsResult.error) {
       return fail(
@@ -326,28 +316,34 @@ async function loadRecipeBomsForCompletion(
     ]),
   );
 
-  const itemsByRecipe = new Map<string, RecipeItemRow[]>();
-  for (const item of itemRows) {
-    const existing = itemsByRecipe.get(item.recipe_id) ?? [];
-    existing.push(item);
-    itemsByRecipe.set(item.recipe_id, existing);
-  }
-
   const boms = new Map<string, CompleteProductionRecipeBom>();
 
-  for (const recipe of recipeRows) {
-    const items = itemsByRecipe.get(recipe.id) ?? [];
-    boms.set(recipe.id, {
-      recipe_id: recipe.id,
-      recipe_name: recipe.name,
-      yield_quantity: toNumber(recipe.yield_quantity),
-      is_active: recipe.is_active,
-      ingredients: items.map((item) => {
-        const ingredient = ingredientMap.get(item.ingredient_id);
+  for (const recipeId of uniqueIds) {
+    const recipeRow = graph.recipeRowsById.get(recipeId);
+    if (!recipeRow) {
+      continue;
+    }
+
+    const exploded = explodedByRecipe.get(recipeId);
+    if (!exploded || !exploded.ok) {
+      return fail(
+        exploded && !exploded.ok
+          ? exploded.issues[0]?.message ?? "Failed to resolve recipe ingredients"
+          : "Failed to resolve recipe ingredients",
+      );
+    }
+
+    boms.set(recipeId, {
+      recipe_id: recipeRow.id,
+      recipe_name: recipeRow.name,
+      yield_quantity: toNumber(recipeRow.yield_quantity),
+      is_active: recipeRow.is_active,
+      ingredients: exploded.ingredients.map((item) => {
+        const ingredient = ingredientMap.get(item.ingredientId);
         if (!ingredient) {
           return {
-            ingredient_id: item.ingredient_id,
-            quantity_per_yield: toNumber(item.quantity),
+            ingredient_id: item.ingredientId,
+            quantity_per_yield: item.quantityPerYield,
             unit: item.unit,
             cost_per_unit: null,
             name: "Missing ingredient",
@@ -357,8 +353,8 @@ async function loadRecipeBomsForCompletion(
         }
 
         return {
-          ingredient_id: item.ingredient_id,
-          quantity_per_yield: toNumber(item.quantity),
+          ingredient_id: item.ingredientId,
+          quantity_per_yield: item.quantityPerYield,
           unit: ingredient.unit || item.unit,
           cost_per_unit: ingredient.cost_per_unit,
           name: ingredient.name,

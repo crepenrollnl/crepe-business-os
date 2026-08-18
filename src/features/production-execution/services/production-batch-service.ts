@@ -14,7 +14,11 @@ import { finishedGoodsReadService } from "@/features/finished-goods/services/fin
 import { assignFinishedGoodsInventoryValuation } from "@/features/finished-goods/utils/finished-goods-valuation";
 import { toUserError } from "@/lib/service-errors";
 import { supabase } from "@/lib/supabase";
-import { scaleRecipeIngredientNeed } from "@/features/production-planning";
+import {
+  explodeComponentRecipeBom,
+  scaleRecipeIngredientNeed,
+} from "@/features/production-planning";
+import { loadRecipeBomGraph } from "@/features/production/services/load-recipe-bom-graph";
 import { fail, ok, type ServiceResult } from "@/types/service";
 import type {
   ProductionBatch,
@@ -42,18 +46,6 @@ interface ProductionBatchRow {
 interface StockMovementCostRow {
   ingredient_id: string;
   unit_cost: number | string | null;
-}
-
-interface RecipeYieldRow {
-  id: string;
-  yield_quantity: number | string;
-}
-
-interface RecipeItemRow {
-  recipe_id: string;
-  ingredient_id: string;
-  quantity: number | string;
-  unit: string;
 }
 
 interface IngredientNameRow {
@@ -150,31 +142,43 @@ async function buildCostBreakdownsForBatches(
     ...new Set(batches.map((batch) => batch.production_session_line_id)),
   ];
 
-  const [recipesResult, itemsResult, scaleResult] = await Promise.all([
-    supabase.from("recipes").select("id, yield_quantity").in("id", recipeIds),
-    supabase
-      .from("recipe_items")
-      .select("recipe_id, ingredient_id, quantity, unit")
-      .in("recipe_id", recipeIds),
+  const [graphResult, scaleResult] = await Promise.all([
+    loadRecipeBomGraph(recipeIds),
     supabase
       .from("production_session_lines")
       .select("id, raw_material_scale")
       .in("id", lineIds),
   ]);
 
-  if (recipesResult.error || itemsResult.error) {
+  if (graphResult.error || !graphResult.data) {
     return ok(empty);
   }
 
-  const recipeYields = new Map(
-    ((recipesResult.data as RecipeYieldRow[] | null) ?? []).map((row) => [
-      row.id,
-      toNumber(row.yield_quantity),
-    ]),
-  );
+  const graph = graphResult.data;
+  const explodedByRecipe = new Map<
+    string,
+    ReturnType<typeof explodeComponentRecipeBom>
+  >();
 
-  const items = (itemsResult.data as RecipeItemRow[] | null) ?? [];
-  const ingredientIds = [...new Set(items.map((item) => item.ingredient_id))];
+  for (const recipeId of recipeIds) {
+    explodedByRecipe.set(
+      recipeId,
+      explodeComponentRecipeBom(
+        recipeId,
+        graph.recipes,
+        graph.recipeIngredients,
+        graph.recipeComponents,
+      ),
+    );
+  }
+
+  const ingredientIds = [
+    ...new Set(
+      [...explodedByRecipe.values()].flatMap((exploded) =>
+        exploded.ok ? exploded.ingredients.map((item) => item.ingredientId) : [],
+      ),
+    ),
+  ];
 
   const scaleByLineId = new Map<string, number | null>();
   if (!scaleResult.error) {
@@ -200,20 +204,15 @@ async function buildCostBreakdownsForBatches(
     }
   }
 
-  const itemsByRecipe = new Map<string, RecipeItemRow[]>();
-  for (const item of items) {
-    const existing = itemsByRecipe.get(item.recipe_id) ?? [];
-    existing.push(item);
-    itemsByRecipe.set(item.recipe_id, existing);
-  }
-
   const breakdowns = new Map<string, readonly ProductionCostLine[]>();
 
   for (const batch of batches) {
-    const yieldQuantity = recipeYields.get(batch.recipe_id);
-    const recipeItems = itemsByRecipe.get(batch.recipe_id) ?? [];
+    const recipeRow = graph.recipeRowsById.get(batch.recipe_id);
+    const yieldQuantity = recipeRow ? toNumber(recipeRow.yield_quantity) : 0;
+    const exploded = explodedByRecipe.get(batch.recipe_id);
+    const leaves = exploded && exploded.ok ? exploded.ingredients : [];
 
-    if (!yieldQuantity || yieldQuantity <= 0 || recipeItems.length === 0) {
+    if (!yieldQuantity || yieldQuantity <= 0 || leaves.length === 0) {
       breakdowns.set(batch.id, []);
       continue;
     }
@@ -225,12 +224,12 @@ async function buildCostBreakdownsForBatches(
       rawMaterialScale ?? batch.produced_quantity / yieldQuantity;
     const scalingQuantity = effectiveScale * yieldQuantity;
 
-    const costInputs = recipeItems.map((item) => {
-      const meta = ingredientNames.get(item.ingredient_id);
+    const costInputs = leaves.map((item) => {
+      const meta = ingredientNames.get(item.ingredientId);
       const consumed = scaleRecipeIngredientNeed(
         {
-          ingredientId: item.ingredient_id,
-          quantityPerYield: toNumber(item.quantity),
+          ingredientId: item.ingredientId,
+          quantityPerYield: item.quantityPerYield,
           unit: meta?.unit ?? item.unit,
         },
         scalingQuantity,
@@ -238,11 +237,11 @@ async function buildCostBreakdownsForBatches(
       );
 
       return {
-        ingredient_id: item.ingredient_id,
+        ingredient_id: item.ingredientId,
         ingredient_name: meta?.name ?? "Ingredient",
         consumed_quantity: consumed,
         unit: meta?.unit ?? item.unit,
-        inventory_unit_cost: frozenCosts.get(item.ingredient_id) ?? Number.NaN,
+        inventory_unit_cost: frozenCosts.get(item.ingredientId) ?? Number.NaN,
       };
     });
 

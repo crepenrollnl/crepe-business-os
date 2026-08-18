@@ -77,6 +77,7 @@ function makeBuilder(result: QueryResult) {
   builder.delete = vi.fn(chain);
   builder.eq = vi.fn(chain);
   builder.in = vi.fn(chain);
+  builder.not = vi.fn(chain);
   builder.order = vi.fn(chain);
   builder.single = vi.fn(chain);
   builder.maybeSingle = vi.fn(chain);
@@ -614,6 +615,51 @@ describe("productionService (plan + product CRUD)", () => {
       expect(result.data).toBeNull();
       expect(result.error).toBe(
         "Archived products cannot be added to a production plan.",
+      );
+    });
+
+    it("rejects a recipe that is currently used as a Component sub-component", async () => {
+      vi.spyOn(productionService, "getProductionPlanById").mockResolvedValue({
+        data: planWithRelations(),
+        error: null,
+      });
+      mockTables({
+        recipes: [
+          {
+            data: {
+              id: RECIPE_ID,
+              name: "Marinade",
+              yield_quantity: 1,
+              yield_unit: "kg",
+              is_active: true,
+              recipe_role: "component",
+            },
+            error: null,
+          },
+          {
+            data: [{ id: "parent-recipe", recipe_role: "component" }],
+            error: null,
+          },
+        ],
+        recipe_components: {
+          data: [
+            {
+              assembly_recipe_id: "parent-recipe",
+              component_recipe_id: RECIPE_ID,
+            },
+          ],
+          error: null,
+        },
+      });
+
+      const result = await productionService.addProductToPlan(PLAN_ID, {
+        recipe_id: RECIPE_ID,
+        planned_quantity: 5,
+      });
+
+      expect(result.data).toBeNull();
+      expect(result.error).toBe(
+        "This recipe is used as a sub-component of another Component recipe and cannot be planned or produced on its own.",
       );
     });
 

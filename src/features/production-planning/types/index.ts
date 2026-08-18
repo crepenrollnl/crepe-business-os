@@ -21,6 +21,7 @@ export type {
   PlanningRecipe,
   PlanningRecipeIngredient,
   PlanningRecipeIngredientLine,
+  PlanningRecipeComponentLine,
   ResolvedRecipeBom,
 } from "./recipe";
 

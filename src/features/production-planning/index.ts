@@ -116,6 +116,7 @@ export type {
   PlanningRecipe,
   PlanningRecipeIngredient,
   PlanningRecipeIngredientLine,
+  PlanningRecipeComponentLine,
   PlanValidationIssue,
   PlanValidationIssueCode,
   ProductionPlanStatus,
@@ -155,6 +156,9 @@ export {
   mapShortageSuggestions,
   scaleRecipeIngredientNeed,
 } from "./mappers";
+
+export { explodeComponentRecipeBom } from "./engine/explode-component-bom";
+export type { ExplodeComponentRecipeBomResult } from "./engine/explode-component-bom";
 
 export type {
   CalculateProductionPlanInput,

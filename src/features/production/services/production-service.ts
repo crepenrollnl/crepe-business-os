@@ -1,5 +1,6 @@
 import {
   calculateProductionPlan,
+  explodeComponentRecipeBom,
   generateProcurementRecommendation,
   generateShoppingList,
   type PlanValidationIssue,
@@ -42,6 +43,11 @@ import {
   getAddPlanProductValidationMessage,
   getUpdatePlanProductQuantityValidationMessage,
 } from "../utils/validate-plan-product";
+import {
+  fetchNestedComponentRecipeIds,
+  loadRecipeBomGraph,
+  NESTED_COMPONENT_RECIPE_ERROR,
+} from "./load-recipe-bom-graph";
 
 const DUPLICATE_PURCHASE_DRAFT_ERROR = "Already transferred.";
 const EMPTY_PURCHASE_DRAFT_ERROR =
@@ -105,13 +111,7 @@ interface RecipeRow {
   yield_quantity: number | string;
   yield_unit: string;
   is_active: boolean;
-}
-
-interface RecipeItemRow {
-  recipe_id: string;
-  ingredient_id: string;
-  quantity: number | string;
-  unit: string;
+  recipe_role?: string | null;
 }
 
 interface IngredientStockRow {
@@ -336,95 +336,98 @@ async function buildLiveRequirements(
   }
 
   const recipeIds = prepared.map((product) => product.recipe_id);
+  const graphResult = await loadRecipeBomGraph(recipeIds);
 
-  const [recipesResult, itemsResult] = await Promise.all([
-    supabase
-      .from("recipes")
-      .select("id, name, yield_quantity, yield_unit, is_active")
-      .in("id", recipeIds),
-    supabase
-      .from("recipe_items")
-      .select("recipe_id, ingredient_id, quantity, unit")
-      .in("recipe_id", recipeIds),
-  ]);
-
-  if (recipesResult.error) {
+  if (graphResult.error || !graphResult.data) {
     return {
       data: null,
-      error: toUserError(recipesResult.error, "Failed to load recipes"),
+      error: graphResult.error ?? "Failed to load recipes",
     };
   }
 
-  if (itemsResult.error) {
-    return {
-      data: null,
-      error: toUserError(itemsResult.error, "Failed to load recipe ingredients"),
-    };
-  }
-
-  const recipeMap = new Map(
-    ((recipesResult.data ?? []) as RecipeRow[]).map((row) => [
-      row.id,
-      mapRecipeOption(row),
-    ]),
-  );
-
-  const requiredByIngredient = new Map<
-    string,
-    { quantity: number; unit: string }
-  >();
+  const graph = graphResult.data;
 
   for (const product of prepared) {
-    const recipe = recipeMap.get(product.recipe_id);
+    const recipeRow = graph.recipeRowsById.get(product.recipe_id);
 
-    if (!recipe) {
+    if (!recipeRow) {
       return { data: null, error: "One or more selected recipes were not found" };
     }
 
-    if (!recipe.is_active) {
+    if (!recipeRow.is_active) {
       return {
         data: null,
-        error: `Recipe "${recipe.name}" is inactive`,
+        error: `Recipe "${recipeRow.name}" is inactive`,
       };
     }
 
-    if (recipe.yield_quantity <= 0) {
+    if (toNumber(recipeRow.yield_quantity) <= 0) {
       return {
         data: null,
-        error: `Recipe "${recipe.name}" has an invalid yield`,
+        error: `Recipe "${recipeRow.name}" has an invalid yield`,
       };
     }
 
-    const plannedQuantity = product.planned_quantity as number;
-    const scale = plannedQuantity / recipe.yield_quantity;
-    const recipeItems = ((itemsResult.data ?? []) as RecipeItemRow[]).filter(
-      (item) => item.recipe_id === product.recipe_id,
+    const exploded = explodeComponentRecipeBom(
+      product.recipe_id,
+      graph.recipes,
+      graph.recipeIngredients,
+      graph.recipeComponents,
     );
 
-    if (recipeItems.length === 0) {
-      return {
-        data: null,
-        error: `Recipe "${recipe.name}" has no ingredients`,
-      };
+    if (!exploded.ok) {
+      return { data: null, error: formatPlanValidationIssues(exploded.issues) };
     }
 
-    for (const item of recipeItems) {
-      const required = roundQuantity(toNumber(item.quantity) * scale);
-      const existing = requiredByIngredient.get(item.ingredient_id);
-
-      if (existing) {
-        existing.quantity = roundQuantity(existing.quantity + required);
-      } else {
-        requiredByIngredient.set(item.ingredient_id, {
-          quantity: required,
-          unit: item.unit,
-        });
-      }
+    if (exploded.ingredients.length === 0) {
+      return {
+        data: null,
+        error: `Recipe "${recipeRow.name}" has no ingredients`,
+      };
     }
   }
 
-  const ingredientIds = [...requiredByIngredient.keys()];
-  const stockResult = await fetchIngredientStock(ingredientIds);
+  const recipes: PlanningRecipe[] = graph.recipes;
+  const recipeIngredients: PlanningRecipeIngredientLine[] =
+    graph.recipeIngredients;
+
+  const dummyPlan: DomainProductionPlan = {
+    id: "preview",
+    name: "preview",
+    status: "draft",
+    plannedDate: "1970-01-01",
+    notes: null,
+    createdAt: "1970-01-01T00:00:00.000Z",
+    updatedAt: "1970-01-01T00:00:00.000Z",
+  };
+
+  const lines: ProductionPlanLine[] = prepared.map((product) => {
+    const recipeRow = graph.recipeRowsById.get(product.recipe_id)!;
+    return {
+      finishedGoodId: product.recipe_id,
+      recipeId: product.recipe_id,
+      plannedQuantity: product.planned_quantity as number,
+      unit: recipeRow.yield_unit,
+    };
+  });
+
+  const leafIngredientIds = [
+    ...new Set(
+      prepared.flatMap((product) => {
+        const exploded = explodeComponentRecipeBom(
+          product.recipe_id,
+          graph.recipes,
+          graph.recipeIngredients,
+          graph.recipeComponents,
+        );
+        return exploded.ok
+          ? exploded.ingredients.map((item) => item.ingredientId)
+          : [];
+      }),
+    ),
+  ];
+
+  const stockResult = await fetchIngredientStock(leafIngredientIds);
 
   if (stockResult.error || !stockResult.data) {
     return {
@@ -437,36 +440,57 @@ async function buildLiveRequirements(
     stockResult.data.map((ingredient) => [ingredient.id, ingredient]),
   );
 
-  const lines: ProductionIngredientRequirement[] = ingredientIds.map(
+  const inventory: PlanningInventoryItem[] = leafIngredientIds.map(
     (ingredientId) => {
-      const required = requiredByIngredient.get(ingredientId)!;
-      const ingredient = stockMap.get(ingredientId);
-      const currentStock = ingredient
-        ? roundQuantity(toNumber(ingredient.current_stock))
-        : 0;
-      const missingQuantity = roundQuantity(
-        Math.max(0, required.quantity - currentStock),
-      );
-
+      const stock = stockMap.get(ingredientId);
       return {
-        ingredient_id: ingredientId,
-        ingredient_name: ingredient?.name ?? "Unknown ingredient",
-        unit: ingredient?.unit ?? required.unit,
-        required_quantity: required.quantity,
-        current_stock: currentStock,
-        missing_quantity: missingQuantity,
-        is_sufficient: missingQuantity <= 0,
+        ingredientId,
+        availableQuantity: stock
+          ? roundQuantity(toNumber(stock.current_stock))
+          : 0,
+        ingredientName: stock?.name ?? "Unknown ingredient",
       };
     },
   );
 
-  lines.sort((a, b) => a.ingredient_name.localeCompare(b.ingredient_name));
+  const calculation = calculateProductionPlan({
+    plan: dummyPlan,
+    lines,
+    recipes,
+    recipeIngredients,
+    recipeComponents: graph.recipeComponents,
+    inventory,
+  });
 
-  const missingLineCount = lines.filter((line) => !line.is_sufficient).length;
+  if (!calculation.ok) {
+    return {
+      data: null,
+      error: formatPlanValidationIssues(calculation.issues),
+    };
+  }
+
+  const previewLines: ProductionIngredientRequirement[] =
+    calculation.result.ingredientRequirements.map((requirement) => ({
+      ingredient_id: requirement.ingredientId,
+      ingredient_name: requirement.ingredientName,
+      unit: requirement.unit,
+      required_quantity: requirement.requiredQuantity,
+      current_stock: requirement.availableQuantity,
+      missing_quantity: requirement.shortageQuantity,
+      is_sufficient: requirement.shortageQuantity <= 0,
+    }));
+
+  previewLines.sort((a, b) =>
+    a.ingredient_name.localeCompare(b.ingredient_name),
+  );
+
+  const missingLineCount = previewLines.filter(
+    (line) => !line.is_sufficient,
+  ).length;
 
   return {
     data: {
-      lines,
+      lines: previewLines,
       is_inventory_sufficient: missingLineCount === 0,
       missing_line_count: missingLineCount,
     },
@@ -530,65 +554,35 @@ async function runDomainPlanCalculation(
   }
 
   const recipeIds = products.map((product) => product.recipe_id);
+  const graphResult = await loadRecipeBomGraph(recipeIds);
 
-  const [recipesResult, itemsResult] = await Promise.all([
-    supabase
-      .from("recipes")
-      .select("id, name, yield_quantity, yield_unit, is_active")
-      .in("id", recipeIds),
-    supabase
-      .from("recipe_items")
-      .select("recipe_id, ingredient_id, quantity, unit")
-      .in("recipe_id", recipeIds),
-  ]);
-
-  if (recipesResult.error) {
+  if (graphResult.error || !graphResult.data) {
     return {
       data: null,
-      error: toUserError(recipesResult.error, "Failed to load recipes"),
+      error: graphResult.error ?? "Failed to load recipes",
     };
   }
 
-  if (itemsResult.error) {
-    return {
-      data: null,
-      error: toUserError(itemsResult.error, "Failed to load recipe ingredients"),
-    };
-  }
-
-  const recipeRows = (recipesResult.data ?? []) as RecipeRow[];
-  const itemRows = (itemsResult.data ?? []) as RecipeItemRow[];
-
-  const recipes: PlanningRecipe[] = recipeRows.map((row) => ({
-    id: row.id,
-    finishedGoodId: row.id,
-    status: row.is_active ? "active" : "inactive",
-    yieldQuantity: toNumber(row.yield_quantity),
-    yieldUnit: row.yield_unit,
-  }));
-
-  const recipeIngredients: PlanningRecipeIngredientLine[] = itemRows.map(
-    (row) => ({
-      recipeId: row.recipe_id,
-      ingredientId: row.ingredient_id,
-      quantityPerYield: toNumber(row.quantity),
-      unit: row.unit,
-    }),
-  );
-
-  const recipeNameById = new Map(recipeRows.map((row) => [row.id, row.name]));
-  const ingredientsByRecipeId = new Map<string, number>();
-  for (const item of recipeIngredients) {
-    ingredientsByRecipeId.set(
-      item.recipeId,
-      (ingredientsByRecipeId.get(item.recipeId) ?? 0) + 1,
-    );
-  }
+  const graph = graphResult.data;
+  const recipes: PlanningRecipe[] = graph.recipes;
+  const recipeIngredients: PlanningRecipeIngredientLine[] =
+    graph.recipeIngredients;
 
   for (const product of products) {
-    if ((ingredientsByRecipeId.get(product.recipe_id) ?? 0) === 0) {
-      const recipeName =
-        recipeNameById.get(product.recipe_id) ?? product.recipe_name;
+    const recipeName =
+      graph.recipeNameById.get(product.recipe_id) ?? product.recipe_name;
+    const exploded = explodeComponentRecipeBom(
+      product.recipe_id,
+      graph.recipes,
+      graph.recipeIngredients,
+      graph.recipeComponents,
+    );
+
+    if (!exploded.ok) {
+      return { data: null, error: formatPlanValidationIssues(exploded.issues) };
+    }
+
+    if (exploded.ingredients.length === 0) {
       return {
         data: null,
         error: `Recipe "${recipeName}" has no ingredients`,
@@ -597,7 +591,19 @@ async function runDomainPlanCalculation(
   }
 
   const ingredientIds = [
-    ...new Set(recipeIngredients.map((item) => item.ingredientId)),
+    ...new Set(
+      products.flatMap((product) => {
+        const exploded = explodeComponentRecipeBom(
+          product.recipe_id,
+          graph.recipes,
+          graph.recipeIngredients,
+          graph.recipeComponents,
+        );
+        return exploded.ok
+          ? exploded.ingredients.map((item) => item.ingredientId)
+          : [];
+      }),
+    ),
   ];
   const stockResult = await fetchIngredientStock(ingredientIds);
 
@@ -630,6 +636,7 @@ async function runDomainPlanCalculation(
     lines: toDomainPlanLines(products),
     recipes,
     recipeIngredients,
+    recipeComponents: graph.recipeComponents,
     inventory,
   });
 
@@ -865,25 +872,36 @@ async function maybeMarkReadyToProduce(
 export const productionService = {
   async getRecipeOptions(): Promise<ServiceResult<ProductionRecipeOption[]>> {
     try {
-      // Only pre-produced components are planned/produced ahead of time —
-      // assembly dishes are built from components at sale time and are
-      // never selectable here (Critical Finding #4).
-      const { data, error } = await supabase
-        .from("recipes")
-        .select("id, name, yield_quantity, yield_unit, is_active")
-        .eq("is_active", true)
-        .eq("recipe_role", "component")
-        .order("name");
+      const [nestedResult, recipesResult] = await Promise.all([
+        fetchNestedComponentRecipeIds(),
+        supabase
+          .from("recipes")
+          .select("id, name, yield_quantity, yield_unit, is_active")
+          .eq("is_active", true)
+          .eq("recipe_role", "component")
+          .order("name"),
+      ]);
 
-      if (error) {
+      if (nestedResult.error || !nestedResult.data) {
         return {
           data: null,
-          error: toUserError(error, "Failed to load recipes"),
+          error: nestedResult.error ?? "Failed to load recipes",
         };
       }
 
+      if (recipesResult.error) {
+        return {
+          data: null,
+          error: toUserError(recipesResult.error, "Failed to load recipes"),
+        };
+      }
+
+      const nestedIds = nestedResult.data;
+
       return {
-        data: ((data ?? []) as RecipeRow[]).map(mapRecipeOption),
+        data: ((recipesResult.data ?? []) as RecipeRow[])
+          .filter((row) => !nestedIds.has(row.id))
+          .map(mapRecipeOption),
         error: null,
       };
     } catch (error) {
@@ -1212,6 +1230,18 @@ export const productionService = {
           data: null,
           error: `Recipe "${recipe.name}" has an invalid yield`,
         };
+      }
+
+      const nestedResult = await fetchNestedComponentRecipeIds();
+      if (nestedResult.error || !nestedResult.data) {
+        return {
+          data: null,
+          error: nestedResult.error ?? "Failed to load recipe components",
+        };
+      }
+
+      if (nestedResult.data.has(recipe.id)) {
+        return { data: null, error: NESTED_COMPONENT_RECIPE_ERROR };
       }
 
       const nextSortOrder =

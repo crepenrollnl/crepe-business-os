@@ -13,9 +13,11 @@ import { resolvePlanningCalculationConfig } from "../types/config";
 import type { PlanningInventoryItem } from "../types/inventory";
 import type {
   PlanningRecipe,
+  PlanningRecipeComponentLine,
   PlanningRecipeIngredientLine,
   ResolvedRecipeBom,
 } from "../types/recipe";
+import { explodeComponentRecipeBom } from "./explode-component-bom";
 import type { PlanValidationIssue } from "../types/validation";
 import { validatePlanningInventory } from "../validators/validate-planning-inventory";
 import { validateProductionPlan } from "../validators/validate-production-plan";
@@ -28,6 +30,11 @@ export interface CalculateProductionPlanInput {
   lines: readonly ProductionPlanLine[];
   recipes: readonly PlanningRecipe[];
   recipeIngredients: readonly PlanningRecipeIngredientLine[];
+  /**
+   * Optional Component-in-Component rows. Only parents with
+   * `recipeRole = 'component'` are exploded into raw ingredients.
+   */
+  recipeComponents?: readonly PlanningRecipeComponentLine[];
   inventory: readonly PlanningInventoryItem[];
   config?: Partial<PlanningCalculationConfig>;
 }
@@ -73,6 +80,7 @@ function resolveRecipeBoms(
   lines: readonly ProductionPlanLine[],
   recipes: readonly PlanningRecipe[],
   recipeIngredients: readonly PlanningRecipeIngredientLine[],
+  recipeComponents: readonly PlanningRecipeComponentLine[],
 ): {
   bomsByRecipeId: Map<EntityId, ResolvedRecipeBom>;
   recipesById: Map<
@@ -83,6 +91,7 @@ function resolveRecipeBoms(
       yieldQuantity: number;
     }
   >;
+  issues: PlanValidationIssue[];
 } {
   const recipesById = new Map<
     EntityId,
@@ -101,24 +110,11 @@ function resolveRecipeBoms(
     });
   }
 
-  const ingredientsByRecipeId = new Map<
-    EntityId,
-    PlanningRecipeIngredientLine[]
-  >();
-
-  for (const ingredient of recipeIngredients) {
-    const existing = ingredientsByRecipeId.get(ingredient.recipeId);
-    if (existing) {
-      existing.push(ingredient);
-    } else {
-      ingredientsByRecipeId.set(ingredient.recipeId, [ingredient]);
-    }
-  }
-
   const bomsByRecipeId = new Map<EntityId, ResolvedRecipeBom>();
   const recipesByEntity = new Map(
     recipes.map((recipe) => [recipe.id, recipe] as const),
   );
+  const issues: PlanValidationIssue[] = [];
 
   for (const line of lines) {
     if (bomsByRecipeId.has(line.recipeId)) {
@@ -128,18 +124,23 @@ function resolveRecipeBoms(
     if (!recipe) {
       continue;
     }
-    const ingredients = ingredientsByRecipeId.get(line.recipeId) ?? [];
+    const exploded = explodeComponentRecipeBom(
+      line.recipeId,
+      recipes,
+      recipeIngredients,
+      recipeComponents,
+    );
+    if (!exploded.ok) {
+      issues.push(...exploded.issues);
+      continue;
+    }
     bomsByRecipeId.set(line.recipeId, {
       recipe,
-      ingredients: ingredients.map((ingredient) => ({
-        ingredientId: ingredient.ingredientId,
-        quantityPerYield: ingredient.quantityPerYield,
-        unit: ingredient.unit,
-      })),
+      ingredients: exploded.ingredients,
     });
   }
 
-  return { bomsByRecipeId, recipesById };
+  return { bomsByRecipeId, recipesById, issues };
 }
 
 /**
@@ -163,11 +164,13 @@ export function calculateProductionPlan(
   const lines = clonePlanLines(input.lines);
 
   // STEP 2 (partial) — index recipes for validation + resolution
-  const { bomsByRecipeId, recipesById } = resolveRecipeBoms(
-    lines,
-    input.recipes,
-    input.recipeIngredients,
-  );
+  const { bomsByRecipeId, recipesById, issues: explodeIssues } =
+    resolveRecipeBoms(
+      lines,
+      input.recipes,
+      input.recipeIngredients,
+      input.recipeComponents ?? [],
+    );
 
   // STEP 1 — Validate Production Plan
   const planValidation = validateProductionPlan({
@@ -177,6 +180,10 @@ export function calculateProductionPlan(
 
   if (!planValidation.ok) {
     return { ok: false, issues: planValidation.issues };
+  }
+
+  if (explodeIssues.length > 0) {
+    return { ok: false, issues: explodeIssues };
   }
 
   // STEP 3 + 4 — Expand + Aggregate identical ingredients (before inventory)

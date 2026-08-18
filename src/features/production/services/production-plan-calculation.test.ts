@@ -58,6 +58,7 @@ function makeBuilder(result: QueryResult) {
   builder.delete = vi.fn(chain);
   builder.eq = vi.fn(chain);
   builder.in = vi.fn(chain);
+  builder.not = vi.fn(chain);
   builder.order = vi.fn(chain);
   builder.single = vi.fn(chain);
   builder.maybeSingle = vi.fn(chain);
@@ -139,7 +140,7 @@ function baseTables(
     production_plan_ingredients: { data: [], error: null },
     production_plan_shopping_items: { data: [], error: null },
     purchases: { data: [], error: null },
-    recipes: { data: [recipeRow()], error: null },
+    recipes: { data: [recipeRow({ recipe_role: "component" })], error: null },
     recipe_items: {
       data: [
         { recipe_id: RECIPE_ID, ingredient_id: FLOUR_ID, quantity: 2, unit: "kg" },
@@ -147,6 +148,7 @@ function baseTables(
       ],
       error: null,
     },
+    recipe_components: { data: [], error: null },
     ingredients: {
       data: [
         { id: FLOUR_ID, name: "Flour", unit: "kg", current_stock: 10 },

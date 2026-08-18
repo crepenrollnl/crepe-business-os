@@ -44,6 +44,7 @@ function makeRecipe(
     status: "active",
     yieldQuantity: 10,
     yieldUnit: "portion",
+    recipeRole: "component",
     ...overrides,
   };
 }
@@ -573,6 +574,124 @@ describe("calculateProductionPlan", () => {
 
     expect(
       output.issues.some((issue) => issue.code === "duplicate_inventory"),
+    ).toBe(true);
+  });
+
+  it("explodes nested component recipe_items into the planned parent BOM", () => {
+    const output = calculateProductionPlan(
+      baseInput({
+        recipes: [
+          makeRecipe({
+            id: "chicken",
+            finishedGoodId: "chicken",
+            yieldQuantity: 1,
+            yieldUnit: "kg",
+          }),
+          makeRecipe({
+            id: "marinade",
+            finishedGoodId: "marinade",
+            yieldQuantity: 1,
+            yieldUnit: "kg",
+          }),
+        ],
+        recipeIngredients: [
+          makeIngredient({
+            recipeId: "chicken",
+            ingredientId: "breast",
+            quantityPerYield: 0.8,
+            unit: "kg",
+          }),
+          makeIngredient({
+            recipeId: "marinade",
+            ingredientId: "soy",
+            quantityPerYield: 0.05,
+            unit: "kg",
+          }),
+        ],
+        recipeComponents: [
+          {
+            parentRecipeId: "chicken",
+            componentRecipeId: "marinade",
+            ingredientId: null,
+            quantityPerYield: 0.2,
+            unit: "kg",
+          },
+        ],
+        lines: [
+          makeLine({
+            finishedGoodId: "chicken",
+            recipeId: "chicken",
+            plannedQuantity: 1,
+            unit: "kg",
+          }),
+        ],
+        inventory: makeInventory([
+          ["breast", 10],
+          ["soy", 10],
+        ]),
+      }),
+    );
+
+    expect(output.ok).toBe(true);
+    if (!output.ok) return;
+
+    const byId = Object.fromEntries(
+      output.result.ingredientRequirements.map((row) => [
+        row.ingredientId,
+        row,
+      ]),
+    );
+    expect(byId.breast.requiredQuantity).toBe(0.8);
+    expect(byId.soy.requiredQuantity).toBe(0.01);
+    expect(output.result.summary.ingredientCount).toBe(2);
+  });
+
+  it("rejects a circular sub-component graph", () => {
+    const output = calculateProductionPlan(
+      baseInput({
+        recipes: [
+          makeRecipe({ id: "recipe-a", finishedGoodId: "fg-a", yieldQuantity: 1 }),
+          makeRecipe({ id: "recipe-b", finishedGoodId: "fg-b", yieldQuantity: 1 }),
+        ],
+        recipeIngredients: [
+          makeIngredient({
+            recipeId: "recipe-a",
+            ingredientId: "flour",
+            quantityPerYield: 1,
+            unit: "kg",
+          }),
+        ],
+        recipeComponents: [
+          {
+            parentRecipeId: "recipe-a",
+            componentRecipeId: "recipe-b",
+            ingredientId: null,
+            quantityPerYield: 1,
+            unit: "kg",
+          },
+          {
+            parentRecipeId: "recipe-b",
+            componentRecipeId: "recipe-a",
+            ingredientId: null,
+            quantityPerYield: 1,
+            unit: "kg",
+          },
+        ],
+        lines: [
+          makeLine({
+            finishedGoodId: "fg-a",
+            recipeId: "recipe-a",
+            plannedQuantity: 1,
+          }),
+        ],
+        inventory: makeInventory([["flour", 10]]),
+      }),
+    );
+
+    expect(output.ok).toBe(false);
+    if (output.ok) return;
+    expect(
+      output.issues.some((issue) => issue.code === "circular_recipe_component"),
     ).toBe(true);
   });
 
