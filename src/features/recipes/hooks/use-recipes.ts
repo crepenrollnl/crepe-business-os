@@ -103,14 +103,22 @@ function recipeToFormValues(recipe: RecipeWithRelations): RecipeFormValues {
             quantity: component.quantity,
             unit: component.unit,
           }))
-        : [
-            {
-              component_recipe_id: null,
-              ingredient_id: null,
-              quantity: null,
-              unit: "",
-            },
-          ],
+        : // Assembly recipes always require at least one component, so this
+          // blank starter row is what the "Add at least one component"
+          // guidance is for. Component recipes' sub-components are
+          // optional (most have none) — starting with a real empty list
+          // means opening an existing Component recipe for editing never
+          // surfaces a phantom unfilled row that would block saving.
+          recipe.recipe_role === "component"
+          ? []
+          : [
+              {
+                component_recipe_id: null,
+                ingredient_id: null,
+                quantity: null,
+                unit: "",
+              },
+            ],
   };
 }
 

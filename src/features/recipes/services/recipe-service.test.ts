@@ -245,3 +245,116 @@ describe("recipeService.createRecipe — recipe_components target validation (sq
     expect(result.error).toMatch(/ingredient can only appear once/i);
   });
 });
+
+describe("recipeService — Component-in-Component sub-components (sql/100)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  function componentInput(
+    overrides?: Partial<RecipeFormValues>,
+  ): RecipeFormValues {
+    return {
+      name: "Roasted chicken",
+      description: "",
+      yield_quantity: 1,
+      yield_unit: "kg",
+      is_active: true,
+      recipe_role: "component",
+      selling_price: null,
+      lines: [{ ingredient_id: INGREDIENT_ID, quantity: 1, unit: "kg" }],
+      components: [],
+      ...overrides,
+    };
+  }
+
+  it("accepts a component recipe with no sub-components (the common case)", async () => {
+    await recipeService.createRecipe(componentInput());
+
+    expect(supabaseMock.from).toHaveBeenCalledWith("recipes");
+  });
+
+  it("accepts a component recipe that references another component recipe as a sub-component", async () => {
+    await recipeService.createRecipe(
+      componentInput({
+        components: [
+          {
+            component_recipe_id: COMPONENT_RECIPE_ID,
+            ingredient_id: null,
+            quantity: 0.2,
+            unit: "kg",
+          },
+        ],
+      }),
+    );
+
+    expect(supabaseMock.from).toHaveBeenCalledWith("recipes");
+  });
+
+  it("rejects a sub-component row with a raw ingredient target", async () => {
+    const result = await recipeService.createRecipe(
+      componentInput({
+        components: [
+          {
+            component_recipe_id: null,
+            ingredient_id: INGREDIENT_ID,
+            quantity: 0.2,
+            unit: "kg",
+          },
+        ],
+      }),
+    );
+
+    expect(result.data).toBeNull();
+    expect(result.error).toMatch(/must reference another Component recipe/i);
+    expect(supabaseMock.from).not.toHaveBeenCalled();
+  });
+
+  it("rejects a sub-component row missing a component recipe", async () => {
+    const result = await recipeService.createRecipe(
+      componentInput({
+        components: [
+          { component_recipe_id: null, ingredient_id: null, quantity: 1, unit: "kg" },
+        ],
+      }),
+    );
+
+    expect(result.data).toBeNull();
+    expect(result.error).toMatch(/must reference a component recipe/i);
+    expect(supabaseMock.from).not.toHaveBeenCalled();
+  });
+
+  it("rejects duplicate sub-component recipes", async () => {
+    const result = await recipeService.createRecipe(
+      componentInput({
+        components: [
+          {
+            component_recipe_id: COMPONENT_RECIPE_ID,
+            ingredient_id: null,
+            quantity: 0.2,
+            unit: "kg",
+          },
+          {
+            component_recipe_id: COMPONENT_RECIPE_ID,
+            ingredient_id: null,
+            quantity: 0.1,
+            unit: "kg",
+          },
+        ],
+      }),
+    );
+
+    expect(result.data).toBeNull();
+    expect(result.error).toMatch(/component can only appear once/i);
+  });
+
+  it("still requires the raw-ingredient lines regardless of sub-components", async () => {
+    const result = await recipeService.createRecipe(
+      componentInput({ lines: [] }),
+    );
+
+    expect(result.data).toBeNull();
+    expect(result.error).toMatch(/add at least one ingredient/i);
+    expect(supabaseMock.from).not.toHaveBeenCalled();
+  });
+});
