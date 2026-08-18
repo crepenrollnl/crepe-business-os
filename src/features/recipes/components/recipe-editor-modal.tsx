@@ -379,12 +379,19 @@ function RecipeEditorForm({
   // rows can never leak into a component's sub-components table (which
   // only accepts component-recipe targets), and it mirrors persistRecipe's
   // existing "the other side is cleared" behavior in recipe-service.ts.
+  //
+  // Guarded on an actual change (current.recipe_role !== role): a <select>
+  // onChange fires even when the browser re-selects its already-current
+  // value under test automation (Playwright's selectOption dispatches
+  // "change" unconditionally, unlike a real click on an already-selected
+  // native option) -- without this guard, re-affirming the same role wipes
+  // out a legitimately-filled components list for no reason.
   const selectRecipeRole = (role: RecipeRole) => {
-    setFormValues((current) => ({
-      ...current,
-      recipe_role: role,
-      components: [],
-    }));
+    setFormValues((current) =>
+      current.recipe_role === role
+        ? current
+        : { ...current, recipe_role: role, components: [] },
+    );
   };
 
   const updateLine = <K extends keyof LineDraft>(
