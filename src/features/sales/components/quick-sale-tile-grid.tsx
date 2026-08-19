@@ -20,7 +20,7 @@ export function QuickSaleTileGrid({
         {Array.from({ length: 8 }).map((_, index) => (
           <div
             key={index}
-            className="h-24 animate-pulse rounded-xl bg-zinc-100"
+            className="min-h-28 animate-pulse rounded-xl bg-zinc-100"
           />
         ))}
       </div>
@@ -56,9 +56,11 @@ export function QuickSaleTileGrid({
           key={product.id}
           type="button"
           onClick={() => onTap(product)}
-          className="flex flex-col items-start gap-1 rounded-xl border border-zinc-200 bg-white p-4 text-left shadow-sm transition-colors hover:border-amber-400 hover:bg-amber-50"
+          className="flex min-h-28 flex-col items-start justify-center gap-1 rounded-xl border border-zinc-200 bg-white p-5 text-left shadow-sm transition-colors hover:border-amber-400 hover:bg-amber-50"
         >
-          <span className="font-medium text-zinc-900">{product.name}</span>
+          <span className="text-base font-medium text-zinc-900">
+            {product.name}
+          </span>
           <span className="text-sm font-semibold text-amber-700">
             {formatSaleMoney(product.selling_price)}
           </span>

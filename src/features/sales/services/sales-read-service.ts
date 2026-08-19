@@ -205,6 +205,48 @@ export const salesReadService = {
   },
 
   /**
+   * List confirmed/paid sales whose confirmed_at falls in a shift window.
+   * Sales have no shift_id — linkage is the time window only
+   * (opened_at … closed_at, or opened_at … now when the shift is still open).
+   */
+  async listSalesConfirmedInWindow(
+    openedAt: string,
+    closedAt: string | null,
+  ): Promise<ServiceResult<SaleListItem[]>> {
+    try {
+      const opened = openedAt?.trim() ?? "";
+      if (!opened) {
+        return fail("Shift opened at is required.");
+      }
+
+      const windowEnd = closedAt?.trim()
+        ? closedAt.trim()
+        : new Date().toISOString();
+
+      const { data, error } = await supabase
+        .from(SALES_LIST_VIEW)
+        .select(LIST_SELECT)
+        .in("status", ["confirmed", "paid"])
+        .gte("confirmed_at", opened)
+        .lte("confirmed_at", windowEnd)
+        .order("confirmed_at", { ascending: false })
+        .order("sale_id", { ascending: true });
+
+      if (error) {
+        return fail(mapReadError(error, "Failed to load sales"));
+      }
+
+      try {
+        return ok(((data as SaleListRow[] | null) ?? []).map(mapListRow));
+      } catch {
+        return fail("Sales list response was invalid.");
+      }
+    } catch (error) {
+      return fail(mapReadError(error, "Failed to load sales"));
+    }
+  },
+
+  /**
    * Load one sale header + lines from sale_details_view.
    */
   async getSale(id: string): Promise<ServiceResult<SaleDetail>> {
