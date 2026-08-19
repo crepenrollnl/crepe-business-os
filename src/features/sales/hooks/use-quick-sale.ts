@@ -12,6 +12,7 @@ export interface QuickSaleProduct {
   id: string;
   name: string;
   selling_price: number;
+  image_url: string | null;
 }
 
 export interface QuickSaleCartLine {
@@ -45,6 +46,7 @@ async function fetchQuickSaleProducts(): Promise<{
       id: recipe.id,
       name: recipe.name,
       selling_price: recipe.selling_price as number,
+      image_url: recipe.image_url,
     }))
     .sort((a, b) =>
       a.name.localeCompare(b.name, undefined, { sensitivity: "base" }),

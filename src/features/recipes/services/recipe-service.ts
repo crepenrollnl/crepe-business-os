@@ -22,6 +22,7 @@ import type {
   SaveRecipeInput,
 } from "../types/recipe";
 import { isRecipeYieldUnit } from "../types/recipe";
+import { recipePhotoService } from "./recipe-photo-service";
 
 const DUPLICATE_NAME_ERROR =
   "A recipe with this name already exists. Please choose a different name.";
@@ -43,6 +44,7 @@ interface RecipeRow {
   is_active: boolean;
   recipe_role: RecipeRole;
   selling_price: number | string | null;
+  image_url?: string | null;
   created_at: string;
   updated_at?: string;
 }
@@ -171,6 +173,15 @@ function toNumber(value: number | string): number {
   return typeof value === "number" ? value : Number(value);
 }
 
+export function mapRecipeImageUrl(value: string | null | undefined): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
 function mapRecipe(row: RecipeRow): Recipe {
   return {
     id: row.id,
@@ -181,6 +192,7 @@ function mapRecipe(row: RecipeRow): Recipe {
     is_active: row.is_active,
     recipe_role: row.recipe_role,
     selling_price: row.selling_price === null ? null : toNumber(row.selling_price),
+    image_url: mapRecipeImageUrl(row.image_url),
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
@@ -390,6 +402,7 @@ function toRecipePayload(input: RecipeFormValues) {
     is_active: input.is_active,
     recipe_role: input.recipe_role,
     selling_price: input.selling_price,
+    image_url: mapRecipeImageUrl(input.image_url),
     updated_at: new Date().toISOString(),
   };
 }
@@ -884,7 +897,58 @@ export const recipeService = {
     }
   },
 
+  async updateRecipeImageUrl(
+    id: string,
+    image_url: string | null,
+  ): Promise<ServiceResult<null>> {
+    try {
+      const { error } = await supabase
+        .from("recipes")
+        .update({
+          image_url: mapRecipeImageUrl(image_url),
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", id);
+
+      if (error) {
+        return {
+          data: null,
+          error: toUserError(error, "Failed to save recipe photo"),
+        };
+      }
+
+      return { data: null, error: null };
+    } catch (error) {
+      return {
+        data: null,
+        error: toUserError(error, "Failed to save recipe photo"),
+      };
+    }
+  },
+
   async deleteRecipe(id: string): Promise<ServiceResult<null>> {
+    let imageUrl: string | null = null;
+
+    try {
+      const { data, error } = await supabase
+        .from("recipes")
+        .select("image_url")
+        .eq("id", id)
+        .maybeSingle();
+
+      if (!error) {
+        imageUrl = mapRecipeImageUrl(
+          (data as { image_url?: string | null } | null)?.image_url,
+        );
+      }
+    } catch {
+      imageUrl = null;
+    }
+
+    if (imageUrl) {
+      await recipePhotoService.removePhotoByUrl(imageUrl);
+    }
+
     try {
       const { error } = await supabase.from("recipes").delete().eq("id", id);
 

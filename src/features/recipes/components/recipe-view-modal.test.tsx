@@ -21,6 +21,7 @@ function componentRecipe(
     is_active: true,
     recipe_role: "component",
     selling_price: null,
+    image_url: null,
     created_at: "2026-01-01T00:00:00.000Z",
     items: [
       {
@@ -49,6 +50,7 @@ function assemblyRecipe(
     is_active: true,
     recipe_role: "assembly",
     selling_price: 7.5,
+    image_url: null,
     created_at: "2026-01-01T00:00:00.000Z",
     items: [],
     components: [

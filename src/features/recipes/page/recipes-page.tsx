@@ -34,6 +34,7 @@ export function RecipesPage() {
     isSaving,
     isDeleting,
     actionError,
+    photoError,
     openCreateModal,
     openEditModal,
     closeModal,
@@ -91,6 +92,7 @@ export function RecipesPage() {
           isLoading={isLoadingRecipe}
           isSaving={isSaving}
           error={actionError}
+          photoError={photoError}
           onClose={closeModal}
           onSave={saveRecipe}
         />

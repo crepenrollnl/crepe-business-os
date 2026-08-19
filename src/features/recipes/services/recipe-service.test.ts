@@ -15,15 +15,23 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { RecipeFormValues } from "../types/recipe";
 
-const { supabaseMock } = vi.hoisted(() => ({
+const { supabaseMock, recipePhotoServiceMock } = vi.hoisted(() => ({
   supabaseMock: { from: vi.fn() },
+  recipePhotoServiceMock: {
+    uploadPhoto: vi.fn(),
+    removePhotoByUrl: vi.fn(),
+  },
 }));
 
 vi.mock("@/lib/supabase", () => ({
   supabase: supabaseMock,
 }));
 
-import { recipeService } from "./recipe-service";
+vi.mock("./recipe-photo-service", () => ({
+  recipePhotoService: recipePhotoServiceMock,
+}));
+
+import { mapRecipeImageUrl, recipeService } from "./recipe-service";
 
 const RECIPE_ID = "44444444-4444-4444-8444-444444444444";
 const COMPONENT_RECIPE_ID = "55555555-5555-4555-8555-555555555555";
@@ -46,6 +54,7 @@ function makeBuilder(result: QueryResult) {
   builder.eq = vi.fn(chain);
   builder.order = vi.fn(chain);
   builder.single = vi.fn(chain);
+  builder.maybeSingle = vi.fn(chain);
   builder.then = (
     resolve: (value: QueryResult) => unknown,
     reject?: (reason: unknown) => unknown,
@@ -65,6 +74,10 @@ function mockRecipesTable(result: QueryResult) {
 describe("recipeService.deleteRecipe", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    recipePhotoServiceMock.removePhotoByUrl.mockResolvedValue({
+      data: null,
+      error: null,
+    });
   });
 
   it("deletes successfully", async () => {
@@ -149,6 +162,37 @@ describe("recipeService.deleteRecipe", () => {
     expect(result.data).toBeNull();
     expect(result.error).toBe("connection lost");
   });
+
+  it("removes the stored photo before deleting the recipe row", async () => {
+    const imageUrl =
+      "https://proj.supabase.co/storage/v1/object/public/recipe-photos/r/1.jpg";
+    mockRecipesTable({ data: { image_url: imageUrl }, error: null });
+
+    const result = await recipeService.deleteRecipe(RECIPE_ID);
+
+    expect(recipePhotoServiceMock.removePhotoByUrl).toHaveBeenCalledWith(
+      imageUrl,
+    );
+    expect(result.error).toBeNull();
+  });
+
+  it("still deletes the recipe when storage cleanup fails", async () => {
+    const imageUrl =
+      "https://proj.supabase.co/storage/v1/object/public/recipe-photos/r/1.jpg";
+    mockRecipesTable({ data: { image_url: imageUrl }, error: null });
+    recipePhotoServiceMock.removePhotoByUrl.mockResolvedValue({
+      data: null,
+      error: "storage down",
+    });
+
+    const result = await recipeService.deleteRecipe(RECIPE_ID);
+
+    expect(recipePhotoServiceMock.removePhotoByUrl).toHaveBeenCalledWith(
+      imageUrl,
+    );
+    expect(result.error).toBeNull();
+    expect(result.data).toBeNull();
+  });
 });
 
 describe("recipeService.createRecipe — recipe_components target validation (sql/089)", () => {
@@ -167,6 +211,7 @@ describe("recipeService.createRecipe — recipe_components target validation (sq
       is_active: true,
       recipe_role: "assembly",
       selling_price: null,
+      image_url: null,
       lines: [],
       components: [
         {
@@ -224,6 +269,7 @@ describe("recipeService.createRecipe — recipe_components target validation (sq
       is_active: true,
       recipe_role: "assembly",
       selling_price: null,
+      image_url: null,
       lines: [],
       components: [
         {
@@ -262,6 +308,7 @@ describe("recipeService — Component-in-Component sub-components (sql/100)", ()
       is_active: true,
       recipe_role: "component",
       selling_price: null,
+      image_url: null,
       lines: [{ ingredient_id: INGREDIENT_ID, quantity: 1, unit: "kg" }],
       components: [],
       ...overrides,
@@ -356,5 +403,74 @@ describe("recipeService — Component-in-Component sub-components (sql/100)", ()
     expect(result.data).toBeNull();
     expect(result.error).toMatch(/add at least one ingredient/i);
     expect(supabaseMock.from).not.toHaveBeenCalled();
+  });
+});
+
+describe("mapRecipeImageUrl", () => {
+  it("returns the trimmed URL when present", () => {
+    expect(mapRecipeImageUrl("  https://cdn.example/photo.jpg  ")).toBe(
+      "https://cdn.example/photo.jpg",
+    );
+  });
+
+  it("maps null, blank, and missing values to null", () => {
+    expect(mapRecipeImageUrl(null)).toBeNull();
+    expect(mapRecipeImageUrl(undefined)).toBeNull();
+    expect(mapRecipeImageUrl("")).toBeNull();
+    expect(mapRecipeImageUrl("   ")).toBeNull();
+  });
+});
+
+describe("recipeService.getRecipes — image_url mapping", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("maps image_url from recipe rows onto the list items", async () => {
+    supabaseMock.from.mockImplementation((table: string) => {
+      if (table === "recipes") {
+        return makeBuilder({
+          data: [
+            {
+              id: RECIPE_ID,
+              name: "Chicken Crepe",
+              description: null,
+              yield_quantity: 1,
+              yield_unit: "pcs",
+              is_active: true,
+              recipe_role: "assembly",
+              selling_price: 7.5,
+              image_url:
+                "https://proj.supabase.co/storage/v1/object/public/recipe-photos/r/1.jpg",
+              created_at: "2026-01-01T00:00:00.000Z",
+            },
+            {
+              id: COMPONENT_RECIPE_ID,
+              name: "Dough",
+              description: null,
+              yield_quantity: 1,
+              yield_unit: "kg",
+              is_active: true,
+              recipe_role: "component",
+              selling_price: null,
+              image_url: "   ",
+              created_at: "2026-01-01T00:00:00.000Z",
+            },
+          ],
+          error: null,
+        });
+      }
+
+      return makeBuilder({ data: [], error: null });
+    });
+
+    const result = await recipeService.getRecipes();
+
+    expect(result.error).toBeNull();
+    expect(result.data).toHaveLength(2);
+    expect(result.data?.[0]?.image_url).toBe(
+      "https://proj.supabase.co/storage/v1/object/public/recipe-photos/r/1.jpg",
+    );
+    expect(result.data?.[1]?.image_url).toBeNull();
   });
 });
