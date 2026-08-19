@@ -63,18 +63,18 @@ export function QuickSaleCart({
                   type="button"
                   onClick={() => onDecrement(line.product_id)}
                   aria-label={`Remove one ${line.name}`}
-                  className="flex h-7 w-7 items-center justify-center rounded-full border border-zinc-300 text-zinc-600 transition-colors hover:bg-zinc-50"
+                  className="flex h-11 w-11 items-center justify-center rounded-full border border-zinc-300 text-lg text-zinc-600 transition-colors hover:bg-zinc-50"
                 >
                   −
                 </button>
-                <span className="w-6 text-center text-sm font-medium text-zinc-900">
+                <span className="w-8 text-center text-base font-medium text-zinc-900">
                   {line.quantity}
                 </span>
                 <button
                   type="button"
                   onClick={() => onIncrement(line.product_id)}
                   aria-label={`Add one ${line.name}`}
-                  className="flex h-7 w-7 items-center justify-center rounded-full border border-zinc-300 text-zinc-600 transition-colors hover:bg-zinc-50"
+                  className="flex h-11 w-11 items-center justify-center rounded-full border border-zinc-300 text-lg text-zinc-600 transition-colors hover:bg-zinc-50"
                 >
                   +
                 </button>
@@ -101,7 +101,7 @@ export function QuickSaleCart({
         type="button"
         onClick={onConfirm}
         disabled={lines.length === 0 || confirming}
-        className="w-full rounded-lg bg-amber-500 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-amber-600 disabled:cursor-not-allowed disabled:opacity-50"
+        className="min-h-12 w-full rounded-lg bg-amber-500 px-4 py-3 text-base font-semibold text-white transition-colors hover:bg-amber-600 disabled:cursor-not-allowed disabled:opacity-50"
       >
         {confirming ? "Confirming..." : "Confirm"}
       </button>

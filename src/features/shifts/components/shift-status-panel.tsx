@@ -157,7 +157,7 @@ export function ShiftStatusPanel({
             onClick={onOpenShift}
             disabled={loading || mutating || isOpen || Boolean(error)}
             data-testid="open-shift-button"
-            className="inline-flex items-center justify-center rounded-lg bg-amber-500 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-amber-600 disabled:cursor-not-allowed disabled:opacity-50"
+            className="inline-flex min-h-12 items-center justify-center rounded-lg bg-amber-500 px-5 py-3 text-base font-semibold text-white transition-colors hover:bg-amber-600 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {mutating && !isOpen ? "Opening…" : "Open Shift"}
           </button>
@@ -166,7 +166,7 @@ export function ShiftStatusPanel({
             onClick={onCloseShift}
             disabled={loading || mutating || !isOpen || Boolean(error)}
             data-testid="close-shift-button"
-            className="inline-flex items-center justify-center rounded-lg border border-zinc-300 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition-colors hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
+            className="inline-flex min-h-12 items-center justify-center rounded-lg border border-zinc-300 bg-white px-5 py-3 text-base font-semibold text-zinc-700 transition-colors hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {mutating && isOpen ? "Closing…" : "Close Shift"}
           </button>

@@ -297,6 +297,217 @@ describe("salesReadService.listSales (DEV-029)", () => {
   });
 });
 
+function mockWindowView(
+  rows: ReturnType<typeof listRow>[],
+  error: unknown = null,
+) {
+  const orderSecond = vi.fn().mockResolvedValue({
+    data: error ? null : rows,
+    error,
+  });
+  const orderFirst = vi.fn().mockReturnValue({
+    order: orderSecond,
+  });
+  const lteMock = vi.fn().mockReturnValue({
+    order: orderFirst,
+  });
+  const gteMock = vi.fn().mockReturnValue({
+    lte: lteMock,
+  });
+  const inMock = vi.fn().mockReturnValue({
+    gte: gteMock,
+  });
+  const selectMock = vi.fn().mockReturnValue({
+    in: inMock,
+  });
+
+  supabaseMock.from.mockImplementation((table: string) => {
+    forbidBaseTables(table);
+
+    if (table === "sales_list_view") {
+      return {
+        select: selectMock,
+        insert: insertMock,
+        update: updateMock,
+        delete: deleteMock,
+      };
+    }
+
+    throw new Error(`Unexpected table: ${table}`);
+  });
+
+  return { selectMock, inMock, gteMock, lteMock, orderFirst, orderSecond };
+}
+
+describe("salesReadService.listSalesConfirmedInWindow", () => {
+  const OPENED_AT = "2026-08-18T08:00:00.000Z";
+  const CLOSED_AT = "2026-08-18T18:00:00.000Z";
+  const NOW = "2026-08-18T21:00:00.000Z";
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    insertMock.mockReset();
+    updateMock.mockReset();
+    deleteMock.mockReset();
+    vi.useRealTimers();
+  });
+
+  it("rejects empty openedAt without querying", async () => {
+    const result = await salesReadService.listSalesConfirmedInWindow(
+      "  ",
+      CLOSED_AT,
+    );
+
+    expect(result.data).toBeNull();
+    expect(result.error).toBe("Shift opened at is required.");
+    expect(supabaseMock.from).not.toHaveBeenCalled();
+    expect(supabaseMock.rpc).not.toHaveBeenCalled();
+  });
+
+  it("queries only sales_list_view for a closed window", async () => {
+    const { selectMock, inMock, gteMock, lteMock, orderFirst, orderSecond } =
+      mockWindowView([listRow()]);
+
+    const result = await salesReadService.listSalesConfirmedInWindow(
+      OPENED_AT,
+      CLOSED_AT,
+    );
+
+    expect(result.error).toBeNull();
+    expect(supabaseMock.from).toHaveBeenCalledTimes(1);
+    expect(supabaseMock.from).toHaveBeenCalledWith("sales_list_view");
+    expect(selectMock).toHaveBeenCalledWith(LIST_SELECT);
+    expect(inMock).toHaveBeenCalledWith("status", ["confirmed", "paid"]);
+    expect(gteMock).toHaveBeenCalledWith("confirmed_at", OPENED_AT);
+    expect(lteMock).toHaveBeenCalledWith("confirmed_at", CLOSED_AT);
+    expect(orderFirst).toHaveBeenCalledWith("confirmed_at", {
+      ascending: false,
+    });
+    expect(orderSecond).toHaveBeenCalledWith("sale_id", { ascending: true });
+
+    const tablesTouched = supabaseMock.from.mock.calls.map((call) => call[0]);
+    expect(tablesTouched).toEqual(["sales_list_view"]);
+    expect(tablesTouched).not.toContain("sales");
+    expect(tablesTouched).not.toContain("sale_lines");
+    expect(supabaseMock.rpc).not.toHaveBeenCalled();
+    expect(insertMock).not.toHaveBeenCalled();
+    expect(updateMock).not.toHaveBeenCalled();
+    expect(deleteMock).not.toHaveBeenCalled();
+  });
+
+  it("uses now as the window end when the shift is still open", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(NOW));
+
+    const { lteMock } = mockWindowView([listRow()]);
+
+    const result = await salesReadService.listSalesConfirmedInWindow(
+      OPENED_AT,
+      null,
+    );
+
+    expect(result.error).toBeNull();
+    expect(lteMock).toHaveBeenCalledWith("confirmed_at", NOW);
+
+    vi.useRealTimers();
+  });
+
+  it("returns mapped SaleListItem[]", async () => {
+    mockWindowView([
+      listRow(),
+      listRow({
+        sale_id: SALE_ID_2,
+        sale_number: "S-1002",
+        status: "paid",
+        confirmed_at: "2026-08-18T12:00:00.000Z",
+        paid_at: "2026-08-18T12:05:00.000Z",
+        total: "40",
+      }),
+    ]);
+
+    const result = await salesReadService.listSalesConfirmedInWindow(
+      OPENED_AT,
+      CLOSED_AT,
+    );
+
+    expect(result.error).toBeNull();
+    expect(result.data).toEqual([
+      {
+        sale_id: SALE_ID,
+        sale_number: "S-1001",
+        status: "confirmed",
+        sale_date: "2026-07-22",
+        customer_id: null,
+        subtotal: 25,
+        tax_total: 0,
+        total: 25,
+        confirmed_at: "2026-07-22T16:00:00.000Z",
+        paid_at: null,
+        cancelled_at: null,
+      },
+      {
+        sale_id: SALE_ID_2,
+        sale_number: "S-1002",
+        status: "paid",
+        sale_date: "2026-07-22",
+        customer_id: null,
+        subtotal: 25,
+        tax_total: 0,
+        total: 40,
+        confirmed_at: "2026-08-18T12:00:00.000Z",
+        paid_at: "2026-08-18T12:05:00.000Z",
+        cancelled_at: null,
+      },
+    ]);
+  });
+
+  it("maps DB errors", async () => {
+    mockWindowView([], {
+      message: 'relation "sales_list_view" does not exist',
+      code: "42P01",
+    });
+
+    const result = await salesReadService.listSalesConfirmedInWindow(
+      OPENED_AT,
+      CLOSED_AT,
+    );
+
+    expect(result.data).toBeNull();
+    expect(result.error).toBe(
+      "Sales read model is not available yet. Apply the sales read-model database script and try again.",
+    );
+  });
+
+  it("never queries base tables, calls RPC, or recalculates totals", async () => {
+    mockWindowView([
+      listRow({
+        subtotal: "100",
+        tax_total: "20",
+        total: "999",
+      }),
+    ]);
+
+    const result = await salesReadService.listSalesConfirmedInWindow(
+      OPENED_AT,
+      CLOSED_AT,
+    );
+
+    expect(result.error).toBeNull();
+    expect(result.data?.[0]?.total).toBe(999);
+    expect(result.data?.[0]?.subtotal).toBe(100);
+    expect(result.data?.[0]?.tax_total).toBe(20);
+
+    const tablesTouched = supabaseMock.from.mock.calls.map((call) => call[0]);
+    expect(tablesTouched).toEqual(["sales_list_view"]);
+    expect(tablesTouched).not.toContain("sales");
+    expect(tablesTouched).not.toContain("sale_lines");
+    expect(supabaseMock.rpc).not.toHaveBeenCalled();
+    expect(insertMock).not.toHaveBeenCalled();
+    expect(updateMock).not.toHaveBeenCalled();
+    expect(deleteMock).not.toHaveBeenCalled();
+  });
+});
+
 describe("salesReadService.getSale (DEV-029)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
