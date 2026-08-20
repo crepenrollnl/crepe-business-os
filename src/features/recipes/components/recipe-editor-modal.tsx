@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import {
   NumericInput,
   formatNumericInput,
@@ -10,6 +10,7 @@ import type {
   ComponentRecipeOption,
   RecipeFormValues,
   RecipeIngredientOption,
+  RecipePhotoSaveIntent,
   RecipeRole,
   RecipeWithRelations,
   RecipeYieldUnit,
@@ -20,6 +21,7 @@ import {
   RECIPE_YIELD_UNITS,
   isRecipeYieldUnit,
 } from "../types/recipe";
+import { validateRecipePhotoFile } from "../services/recipe-photo-service";
 
 type RecipeEditorModalProps = {
   isOpen: boolean;
@@ -30,8 +32,12 @@ type RecipeEditorModalProps = {
   isLoading: boolean;
   isSaving: boolean;
   error: string | null;
+  photoError?: string | null;
   onClose: () => void;
-  onSave: (values: RecipeFormValues) => Promise<boolean>;
+  onSave: (
+    values: RecipeFormValues,
+    photo: RecipePhotoSaveIntent,
+  ) => Promise<boolean>;
 };
 
 type LineDraft = {
@@ -58,6 +64,7 @@ type FormDraft = {
   is_active: boolean;
   recipe_role: RecipeRole;
   selling_price: string;
+  image_url: string;
   lines: LineDraft[];
   components: ComponentLineDraft[];
 };
@@ -98,6 +105,7 @@ function valuesToDraft(values: RecipeFormValues): FormDraft {
     is_active: values.is_active,
     recipe_role: values.recipe_role,
     selling_price: formatNumericInput(values.selling_price),
+    image_url: values.image_url ?? "",
     lines: values.lines.map((line) => ({
       ingredient_id: line.ingredient_id,
       quantity: formatNumericInput(line.quantity),
@@ -122,6 +130,7 @@ function draftToValues(draft: FormDraft): RecipeFormValues {
     is_active: draft.is_active,
     recipe_role: draft.recipe_role,
     selling_price: parseNumericInput(draft.selling_price),
+    image_url: draft.image_url.trim() ? draft.image_url.trim() : null,
     lines: draft.lines.map((line) => ({
       ingredient_id: line.ingredient_id,
       quantity: parseNumericInput(line.quantity),
@@ -343,6 +352,7 @@ function RecipeEditorForm({
   isLoading,
   isSaving,
   error,
+  photoError,
   onClose,
   onSave,
 }: RecipeEditorFormProps) {
@@ -350,6 +360,28 @@ function RecipeEditorForm({
     valuesToDraft(initialValues),
   );
   const [hasAttemptedSubmit, setHasAttemptedSubmit] = useState(false);
+  const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const [photoCleared, setPhotoCleared] = useState(false);
+  const [photoFieldError, setPhotoFieldError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const photoObjectUrl = useMemo(() => {
+    if (!photoFile) {
+      return null;
+    }
+
+    return URL.createObjectURL(photoFile);
+  }, [photoFile]);
+
+  useEffect(() => {
+    return () => {
+      if (photoObjectUrl) {
+        URL.revokeObjectURL(photoObjectUrl);
+      }
+    };
+  }, [photoObjectUrl]);
+
+  const photoPreviewSrc = photoObjectUrl || formValues.image_url || null;
 
   const fieldErrors = validateDraft(formValues);
   const isFormValid = Object.keys(fieldErrors).length === 0;
@@ -540,6 +572,37 @@ function RecipeEditorForm({
     }));
   };
 
+  const handlePhotoChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+
+    if (!file) {
+      return;
+    }
+
+    const validationError = validateRecipePhotoFile(file);
+
+    if (validationError) {
+      setPhotoFieldError(validationError);
+      event.target.value = "";
+      return;
+    }
+
+    setPhotoFieldError(null);
+    setPhotoFile(file);
+    setPhotoCleared(false);
+  };
+
+  const clearPhoto = () => {
+    setPhotoFile(null);
+    setPhotoCleared(true);
+    setPhotoFieldError(null);
+    setFormValues((current) => ({ ...current, image_url: "" }));
+
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  };
+
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setHasAttemptedSubmit(true);
@@ -548,7 +611,10 @@ function RecipeEditorForm({
       return;
     }
 
-    await onSave(draftToValues(formValues));
+    await onSave(draftToValues(formValues), {
+      file: photoFile,
+      clear: photoCleared,
+    });
   };
 
   if (isLoading) {
@@ -586,6 +652,15 @@ function RecipeEditorForm({
           className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
         >
           {error}
+        </div>
+      )}
+
+      {photoError && (
+        <div
+          role="status"
+          className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800"
+        >
+          {photoError}
         </div>
       )}
 
@@ -706,6 +781,51 @@ function RecipeEditorForm({
             {hasAttemptedSubmit && fieldErrors.selling_price && (
               <p className="text-sm text-red-600">{fieldErrors.selling_price}</p>
             )}
+          </div>
+
+          <div className="space-y-2">
+            <label
+              htmlFor="recipe_photo"
+              className="block text-sm font-medium text-zinc-700"
+            >
+              Photo{" "}
+              <span className="font-normal text-zinc-500">(optional)</span>
+            </label>
+            {photoPreviewSrc ? (
+              // Public Storage URLs are not in next.config images.remotePatterns.
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={photoPreviewSrc}
+                alt=""
+                className="h-24 w-full rounded-lg object-cover"
+              />
+            ) : (
+              <div className="flex h-24 w-full items-center justify-center rounded-lg bg-zinc-100 text-sm text-zinc-400">
+                No photo
+              </div>
+            )}
+            <input
+              ref={fileInputRef}
+              id="recipe_photo"
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              disabled={isSaving}
+              onChange={handlePhotoChange}
+              className="block w-full text-sm text-zinc-600 file:mr-3 file:rounded-lg file:border-0 file:bg-zinc-100 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-zinc-700"
+            />
+            {photoPreviewSrc ? (
+              <button
+                type="button"
+                onClick={clearPhoto}
+                disabled={isSaving}
+                className="text-sm font-medium text-zinc-600 hover:text-zinc-900 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Clear
+              </button>
+            ) : null}
+            {photoFieldError ? (
+              <p className="text-sm text-red-600">{photoFieldError}</p>
+            ) : null}
           </div>
 
           <div className="space-y-2 sm:col-span-2">
@@ -1300,6 +1420,7 @@ export function RecipeEditorModal({
   isLoading,
   isSaving,
   error,
+  photoError,
   onClose,
   onSave,
 }: RecipeEditorModalProps) {
@@ -1326,6 +1447,7 @@ export function RecipeEditorModal({
         isLoading={isLoading}
         isSaving={isSaving}
         error={error}
+        photoError={photoError}
         onClose={onClose}
         onSave={onSave}
       />

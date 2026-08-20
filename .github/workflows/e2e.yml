@@ -6,7 +6,7 @@ on:
 jobs:
   e2e:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -20,8 +20,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # playwright.config.ts only runs Chromium (plus a setup project).
+      # Installing Firefox/WebKit OS deps is unused work and was timing out
+      # against azure.archive.ubuntu.com.
       - name: Install Playwright browsers
-        run: npx playwright install --with-deps
+        run: npx playwright install --with-deps chromium
 
       - name: Run E2E tests
         run: npm run test:e2e

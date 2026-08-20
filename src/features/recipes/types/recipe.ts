@@ -52,6 +52,8 @@ export interface Recipe {
   recipe_role: RecipeRole;
   /** Optional list price. Null when not set yet — see sql/086_quick_sale.sql. */
   selling_price: number | null;
+  /** Optional dish photo public URL. Null when not set — see sql/103_recipe_photos.sql. */
+  image_url: string | null;
   created_at: string;
   updated_at?: string;
 }
@@ -132,6 +134,8 @@ export interface RecipeFormValues {
   recipe_role: RecipeRole;
   /** Optional. null means empty/unset, not zero. */
   selling_price: number | null;
+  /** Optional dish photo public URL. Null when unset or cleared. */
+  image_url: string | null;
   /** Raw ingredients. Used when recipe_role = 'component'. */
   lines: RecipeLineInput[];
   /**
@@ -147,6 +151,12 @@ export interface RecipeFormValues {
 
 export interface SaveRecipeInput extends RecipeFormValues {
   id?: string;
+}
+
+/** Photo file intent collected by the editor; never sent to persistRecipe as a File. */
+export interface RecipePhotoSaveIntent {
+  file: File | null;
+  clear: boolean;
 }
 
 export interface RecipeCostSummary {

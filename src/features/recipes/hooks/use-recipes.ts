@@ -2,10 +2,12 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { recipeService } from "../services/recipe-service";
+import { recipePhotoService } from "../services/recipe-photo-service";
 import type {
   ComponentRecipeOption,
   RecipeFormValues,
   RecipeIngredientOption,
+  RecipePhotoSaveIntent,
   RecipeListItem,
   RecipeSortDirection,
   RecipeSortField,
@@ -69,6 +71,7 @@ function emptyFormValues(): RecipeFormValues {
     is_active: true,
     recipe_role: DEFAULT_RECIPE_ROLE,
     selling_price: null,
+    image_url: null,
     lines: [{ ingredient_id: "", quantity: null, unit: "" }],
     components: [
       { component_recipe_id: null, ingredient_id: null, quantity: null, unit: "" },
@@ -87,6 +90,7 @@ function recipeToFormValues(recipe: RecipeWithRelations): RecipeFormValues {
     is_active: recipe.is_active,
     recipe_role: recipe.recipe_role,
     selling_price: recipe.selling_price,
+    image_url: recipe.image_url,
     lines:
       recipe.items.length > 0
         ? recipe.items.map((item) => ({
@@ -147,6 +151,7 @@ export function useRecipes() {
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [photoError, setPhotoError] = useState<string | null>(null);
 
   const applyState = useCallback(
     (state: Awaited<ReturnType<typeof fetchRecipesState>>) => {
@@ -213,6 +218,7 @@ export function useRecipes() {
   const openCreateModal = useCallback(() => {
     setEditingRecipe(null);
     setActionError(null);
+    setPhotoError(null);
     setIsLoadingRecipe(false);
     setIsModalOpen(true);
   }, []);
@@ -222,6 +228,7 @@ export function useRecipes() {
   // just the id of the recipe it already has loaded, no cast needed.
   const openEditModal = useCallback(async (item: { id: string }) => {
     setActionError(null);
+    setPhotoError(null);
     setEditingRecipe(null);
     setIsLoadingRecipe(true);
     setIsModalOpen(true);
@@ -247,6 +254,7 @@ export function useRecipes() {
     setIsModalOpen(false);
     setEditingRecipe(null);
     setActionError(null);
+    setPhotoError(null);
     setIsLoadingRecipe(false);
   }, [isSaving]);
 
@@ -300,18 +308,124 @@ export function useRecipes() {
   }, []);
 
   const saveRecipe = useCallback(
-    async (values: RecipeFormValues) => {
+    async (
+      values: RecipeFormValues,
+      photo: RecipePhotoSaveIntent = { file: null, clear: false },
+    ) => {
       setIsSaving(true);
       setActionError(null);
+      setPhotoError(null);
 
-      const result = editingRecipe
-        ? await recipeService.updateRecipe(editingRecipe.id, values)
-        : await recipeService.createRecipe(values);
+      const previousUrl = editingRecipe?.image_url ?? null;
+      const PHOTO_SAVE_WARNING =
+        "Recipe saved, but the photo could not be uploaded.";
+
+      if (!editingRecipe) {
+        const created = await recipeService.createRecipe({
+          ...values,
+          image_url: null,
+        });
+
+        if (created.error || !created.data) {
+          setActionError(created.error ?? "Failed to create recipe");
+          setIsSaving(false);
+          return false;
+        }
+
+        if (photo.file) {
+          const uploaded = await recipePhotoService.uploadPhoto(
+            created.data.id,
+            photo.file,
+          );
+
+          if (uploaded.error || !uploaded.data) {
+            setPhotoError(
+              `${PHOTO_SAVE_WARNING} ${uploaded.error ?? "Upload failed."}`,
+            );
+            setEditingRecipe(created.data);
+            await loadRecipes({ silent: true });
+            setIsSaving(false);
+            return false;
+          }
+
+          const linked = await recipeService.updateRecipeImageUrl(
+            created.data.id,
+            uploaded.data.url,
+          );
+
+          if (linked.error) {
+            setPhotoError(`${PHOTO_SAVE_WARNING} ${linked.error}`);
+            setEditingRecipe({
+              ...created.data,
+              image_url: uploaded.data.url,
+            });
+            await loadRecipes({ silent: true });
+            setIsSaving(false);
+            return false;
+          }
+        }
+
+        await loadRecipes({ silent: true });
+        setIsSaving(false);
+        closeModal();
+        return true;
+      }
+
+      let nextImageUrl = previousUrl;
+
+      if (photo.clear && !photo.file) {
+        nextImageUrl = null;
+      }
+
+      if (photo.file) {
+        const uploaded = await recipePhotoService.uploadPhoto(
+          editingRecipe.id,
+          photo.file,
+        );
+
+        if (uploaded.error || !uploaded.data) {
+          const persisted = await recipeService.updateRecipe(editingRecipe.id, {
+            ...values,
+            image_url: previousUrl,
+          });
+
+          if (persisted.error) {
+            setActionError(persisted.error);
+            setIsSaving(false);
+            return false;
+          }
+
+          setPhotoError(
+            `${PHOTO_SAVE_WARNING} ${uploaded.error ?? "Upload failed."}`,
+          );
+          await loadRecipes({ silent: true });
+          setIsSaving(false);
+          return false;
+        }
+
+        nextImageUrl = uploaded.data.url;
+      }
+
+      const result = await recipeService.updateRecipe(editingRecipe.id, {
+        ...values,
+        image_url: nextImageUrl,
+      });
 
       if (result.error) {
         setActionError(result.error);
         setIsSaving(false);
         return false;
+      }
+
+      if (photo.clear && previousUrl) {
+        await recipePhotoService.removePhotoByUrl(previousUrl);
+      } else if (
+        photo.file &&
+        previousUrl &&
+        nextImageUrl &&
+        previousUrl !== nextImageUrl
+      ) {
+        await recipePhotoService.removePhotoByUrl(previousUrl);
       }
 
       await loadRecipes({ silent: true });
@@ -371,6 +485,7 @@ export function useRecipes() {
     isSaving,
     isDeleting,
     actionError,
+    photoError,
     openCreateModal,
     openEditModal,
     closeModal,
