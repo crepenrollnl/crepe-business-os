@@ -11,7 +11,7 @@ type QuickSaleTileGridProps = {
   onTap: (product: QuickSaleProduct) => void;
 };
 
-const TILE_PHOTO_HEIGHT_CLASS = "h-24";
+const TILE_PHOTO_HEIGHT_CLASS = "h-40";
 
 function tileInitial(name: string): string {
   const letter = name.trim().charAt(0);
