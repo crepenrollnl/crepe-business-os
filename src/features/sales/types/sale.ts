@@ -28,6 +28,7 @@ export interface Sale {
   confirmed_at: string | null;
   paid_at: string | null;
   cancelled_at: string | null;
+  fulfilled_at: string | null;
   subtotal: number;
   tax_total: number;
   total: number;
@@ -172,6 +173,27 @@ export interface SaleDetail {
   paid_at: string | null;
   cancelled_at: string | null;
   lines: SaleDetailLine[];
+}
+
+/**
+ * One line of a kitchen-queue ticket. product_id is the recipe id
+ * (sql/013); the display name is resolved in the POS hook via
+ * recipeService.getRecipes(), not stored on sale_lines.
+ */
+export interface QueuedSaleLine {
+  product_id: string;
+  quantity: number;
+}
+
+/**
+ * Confirmed/paid sale waiting in the kitchen queue (fulfilled_at IS NULL).
+ */
+export interface QueuedSale {
+  sale_id: string;
+  sale_number: string;
+  confirmed_at: string | null;
+  total: number;
+  lines: QueuedSaleLine[];
 }
 
 export type { ServiceResult } from "@/types/service";

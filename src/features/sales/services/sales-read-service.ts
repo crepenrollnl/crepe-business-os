@@ -1,15 +1,19 @@
 /**
  * Sales read service (DEV-029).
  *
- * Reads only from sales_list_view and sale_details_view.
- * Does NOT confirm sales, allocate inventory, calculate totals/COGS/FIFO,
- * or query base tables.
+ * List/detail reads go through sales_list_view and sale_details_view.
+ * The kitchen queue (listQueuedSales) reads sales + sale_lines directly —
+ * same pattern as reloadConfirmedSale — so polling does not pull the
+ * full details-view join. Does NOT confirm sales, allocate inventory,
+ * calculate totals/COGS/FIFO.
  */
 
 import { toUserError } from "@/lib/service-errors";
 import { supabase } from "@/lib/supabase";
 import { fail, ok, type ServiceResult } from "@/types/service";
 import type {
+  QueuedSale,
+  QueuedSaleLine,
   SaleDetail,
   SaleDetailLine,
   SaleListItem,
@@ -60,6 +64,20 @@ interface SaleDetailsRow {
   quantity: number | string | null;
   unit_price: number | string | null;
   line_total: number | string | null;
+}
+
+interface QueueSaleRow {
+  id: string;
+  sale_number: string;
+  confirmed_at: string | null;
+  total: number | string;
+  fulfilled_at: string | null;
+}
+
+interface QueueLineRow {
+  sale_id: string;
+  product_id: string;
+  quantity: number | string;
 }
 
 function toNumber(value: number | string): number {
@@ -142,6 +160,42 @@ function mapDetail(rows: SaleDetailsRow[]): SaleDetail {
     cancelled_at: first.cancelled_at,
     lines,
   };
+}
+
+function mapQueuedSales(
+  headers: QueueSaleRow[],
+  lineRows: QueueLineRow[],
+): QueuedSale[] {
+  const linesBySaleId = new Map<string, QueuedSaleLine[]>();
+
+  for (const row of lineRows) {
+    const quantity = toNumber(row.quantity);
+    if (!row.sale_id || !row.product_id || Number.isNaN(quantity)) {
+      throw new Error("Kitchen queue line is invalid.");
+    }
+
+    const lines = linesBySaleId.get(row.sale_id) ?? [];
+    lines.push({
+      product_id: row.product_id,
+      quantity,
+    });
+    linesBySaleId.set(row.sale_id, lines);
+  }
+
+  return headers.map((row) => {
+    const total = toNumber(row.total);
+    if (!row.id || !row.sale_number || Number.isNaN(total)) {
+      throw new Error("Kitchen queue sale is invalid.");
+    }
+
+    return {
+      sale_id: row.id,
+      sale_number: row.sale_number,
+      confirmed_at: row.confirmed_at,
+      total,
+      lines: linesBySaleId.get(row.id) ?? [],
+    };
+  });
 }
 
 function mapReadError(error: unknown, fallback: string): string {
@@ -278,6 +332,53 @@ export const salesReadService = {
       }
     } catch (error) {
       return fail(mapReadError(error, "Failed to load sale"));
+    }
+  },
+
+  /**
+   * Kitchen queue: confirmed/paid sales whose fulfilled_at is still NULL.
+   * Reads sales + sale_lines (not sale_details_view) so a poll only loads
+   * tickets actually in the queue. Display names are joined in the POS hook.
+   */
+  async listQueuedSales(): Promise<ServiceResult<QueuedSale[]>> {
+    try {
+      const { data: saleData, error: saleError } = await supabase
+        .from("sales")
+        .select("id, sale_number, confirmed_at, total, fulfilled_at")
+        .in("status", ["confirmed", "paid"])
+        .is("fulfilled_at", null)
+        .order("confirmed_at", { ascending: true })
+        .order("id", { ascending: true });
+
+      if (saleError) {
+        return fail(mapReadError(saleError, "Failed to load the kitchen queue"));
+      }
+
+      const headers = (saleData as QueueSaleRow[] | null) ?? [];
+      if (headers.length === 0) {
+        return ok([]);
+      }
+
+      const saleIds = headers.map((row) => row.id);
+
+      const { data: lineData, error: lineError } = await supabase
+        .from("sale_lines")
+        .select("sale_id, product_id, quantity")
+        .in("sale_id", saleIds)
+        .order("created_at", { ascending: true })
+        .order("id", { ascending: true });
+
+      if (lineError) {
+        return fail(mapReadError(lineError, "Failed to load queue sale lines"));
+      }
+
+      try {
+        return ok(mapQueuedSales(headers, (lineData as QueueLineRow[] | null) ?? []));
+      } catch {
+        return fail("Kitchen queue response was invalid.");
+      }
+    } catch (error) {
+      return fail(mapReadError(error, "Failed to load the kitchen queue"));
     }
   },
 };

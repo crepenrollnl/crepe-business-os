@@ -8,10 +8,16 @@ import { PosTabNav, type PosTab } from "./pos-tab-nav";
 type PosShellProps = {
   activeTab: PosTab;
   onTabChange: (tab: PosTab) => void;
+  queueCount?: number;
   children: ReactNode;
 };
 
-export function PosShell({ activeTab, onTabChange, children }: PosShellProps) {
+export function PosShell({
+  activeTab,
+  onTabChange,
+  queueCount = 0,
+  children,
+}: PosShellProps) {
   return (
     <div className="flex h-dvh flex-col bg-zinc-50">
       <header className="flex shrink-0 items-center justify-between gap-3 border-b border-zinc-200 bg-white px-4 py-3">
@@ -34,7 +40,11 @@ export function PosShell({ activeTab, onTabChange, children }: PosShellProps) {
         {children}
       </main>
 
-      <PosTabNav activeTab={activeTab} onTabChange={onTabChange} />
+      <PosTabNav
+        activeTab={activeTab}
+        onTabChange={onTabChange}
+        queueCount={queueCount}
+      />
     </div>
   );
 }

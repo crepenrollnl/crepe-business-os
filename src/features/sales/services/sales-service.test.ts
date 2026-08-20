@@ -9,7 +9,7 @@
  * Finished Goods / Sale rows, or calculate COGS / totals locally.
  */
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { supabaseMock, postJournalsForSaleCompletedMock } = vi.hoisted(() => {
   const supabaseMock = {
@@ -64,6 +64,7 @@ function saleRow() {
     confirmed_at: "2026-07-22T16:00:00.000Z",
     paid_at: null,
     cancelled_at: null,
+    fulfilled_at: "2026-07-22T16:00:00.000Z",
     subtotal: 25,
     tax_total: 0,
     total: 25,
@@ -247,7 +248,7 @@ describe("salesService.confirmSale (DEV-027)", () => {
     expect(supabaseMock.from).toHaveBeenCalledWith("sales");
     expect(supabaseMock.from).toHaveBeenCalledWith("sale_lines");
     expect(saleSelect).toHaveBeenCalledWith(
-      "id, sale_number, customer_id, status, sale_date, confirmed_at, paid_at, cancelled_at, subtotal, tax_total, total, notes, created_at, updated_at",
+      "id, sale_number, customer_id, status, sale_date, confirmed_at, paid_at, cancelled_at, fulfilled_at, subtotal, tax_total, total, notes, created_at, updated_at",
     );
     expect(saleEq).toHaveBeenCalledWith("id", SALE_ID);
     expect(linesSelect).toHaveBeenCalledWith(
@@ -1116,5 +1117,97 @@ describe("salesService.confirmSaleAndPostJournals (DEV-109)", () => {
     expect(result.data).toBeNull();
     expect(result.error).toBe("Only draft sales can be confirmed.");
     expect(postJournalsForSaleCompletedMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("salesService.markSaleQueued / markSaleFulfilled", () => {
+  function mockSalesUpdate(error: unknown = null) {
+    const notMock = vi.fn().mockResolvedValue({ data: null, error });
+    const isMock = vi.fn().mockResolvedValue({ data: null, error });
+    const eqMock = vi.fn().mockReturnValue({
+      not: notMock,
+      is: isMock,
+    });
+    const updateFn = vi.fn().mockReturnValue({ eq: eqMock });
+
+    supabaseMock.from.mockImplementation((table: string) => {
+      if (table === "sales") {
+        return {
+          update: updateFn,
+          select: vi.fn(),
+          insert: insertMock,
+          delete: deleteMock,
+        };
+      }
+
+      throw new Error(`Unexpected table: ${table}`);
+    });
+
+    return { updateFn, eqMock, notMock, isMock };
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    insertMock.mockReset();
+    updateMock.mockReset();
+    deleteMock.mockReset();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("rejects an invalid sale id without touching the table", async () => {
+    const result = await salesService.markSaleQueued("not-a-uuid");
+
+    expect(result.data).toBeNull();
+    expect(result.error).toBe("Sale id is required.");
+    expect(supabaseMock.from).not.toHaveBeenCalled();
+  });
+
+  it("clears fulfilled_at only when it is already set", async () => {
+    const { updateFn, eqMock, notMock, isMock } = mockSalesUpdate();
+
+    const result = await salesService.markSaleQueued(SALE_ID);
+
+    expect(result.error).toBeNull();
+    expect(result.data).toEqual({ id: SALE_ID });
+    expect(supabaseMock.from).toHaveBeenCalledWith("sales");
+    expect(updateFn).toHaveBeenCalledWith({ fulfilled_at: null });
+    expect(eqMock).toHaveBeenCalledWith("id", SALE_ID);
+    expect(notMock).toHaveBeenCalledWith("fulfilled_at", "is", null);
+    expect(isMock).not.toHaveBeenCalled();
+    expect(supabaseMock.rpc).not.toHaveBeenCalled();
+  });
+
+  it("stamps fulfilled_at only when it is still null", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-20T10:00:00.000Z"));
+    const { updateFn, eqMock, isMock, notMock } = mockSalesUpdate();
+
+    const result = await salesService.markSaleFulfilled(SALE_ID);
+
+    expect(result.error).toBeNull();
+    expect(result.data).toEqual({ id: SALE_ID });
+    expect(updateFn).toHaveBeenCalledWith({
+      fulfilled_at: "2026-08-20T10:00:00.000Z",
+    });
+    expect(eqMock).toHaveBeenCalledWith("id", SALE_ID);
+    expect(isMock).toHaveBeenCalledWith("fulfilled_at", null);
+    expect(notMock).not.toHaveBeenCalled();
+    expect(supabaseMock.rpc).not.toHaveBeenCalled();
+    vi.useRealTimers();
+  });
+
+  it("maps database errors without throwing", async () => {
+    mockSalesUpdate({});
+
+    const queued = await salesService.markSaleQueued(SALE_ID);
+    expect(queued.data).toBeNull();
+    expect(queued.error).toBe("Failed to send sale to the queue.");
+
+    const fulfilled = await salesService.markSaleFulfilled(SALE_ID);
+    expect(fulfilled.data).toBeNull();
+    expect(fulfilled.error).toBe("Failed to mark sale as ready.");
   });
 });
