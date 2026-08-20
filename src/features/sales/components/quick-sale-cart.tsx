@@ -8,6 +8,8 @@ type QuickSaleCartProps = {
   actionError: string | null;
   postingError: string | null;
   lastConfirmedSaleNumber: string | null;
+  sendToQueue: boolean;
+  onSendToQueueChange: (value: boolean) => void;
   onIncrement: (productId: string) => void;
   onDecrement: (productId: string) => void;
   onConfirm: () => void;
@@ -20,6 +22,8 @@ export function QuickSaleCart({
   actionError,
   postingError,
   lastConfirmedSaleNumber,
+  sendToQueue,
+  onSendToQueueChange,
   onIncrement,
   onDecrement,
   onConfirm,
@@ -96,6 +100,17 @@ export function QuickSaleCart({
           {actionError}
         </p>
       ) : null}
+
+      <label className="flex min-h-11 cursor-pointer items-center gap-3 text-sm text-zinc-700">
+        <input
+          type="checkbox"
+          checked={sendToQueue}
+          disabled={confirming}
+          onChange={(event) => onSendToQueueChange(event.target.checked)}
+          className="h-5 w-5 rounded border-zinc-300 text-amber-500 focus:ring-amber-500/30"
+        />
+        Send to queue
+      </label>
 
       <button
         type="button"

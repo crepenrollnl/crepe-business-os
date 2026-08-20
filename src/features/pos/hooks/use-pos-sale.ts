@@ -63,6 +63,7 @@ export function usePosSale() {
   const [lastConfirmedSaleNumber, setLastConfirmedSaleNumber] = useState<
     string | null
   >(null);
+  const [sendToQueue, setSendToQueue] = useState(false);
 
   const loadProducts = useCallback(async () => {
     setLoading(true);
@@ -176,6 +177,13 @@ export function usePosSale() {
       setPostingError(
         contextResult.error ?? "Accounting posting was skipped.",
       );
+
+      if (sendToQueue) {
+        const queued = await salesService.markSaleQueued(fallback.data.sale.id);
+        if (queued.error) {
+          setPostingError(queued.error);
+        }
+      }
     } else {
       const posted = await salesService.createAndConfirmSaleAndPostJournals(
         { lines },
@@ -190,12 +198,20 @@ export function usePosSale() {
 
       setLastConfirmedSaleNumber(posted.data.sale.sale_number);
       setPostingError(posted.data.postingError);
+
+      if (sendToQueue) {
+        const queued = await salesService.markSaleQueued(posted.data.sale.id);
+        if (queued.error) {
+          setPostingError(posted.data.postingError ?? queued.error);
+        }
+      }
     }
 
     setCart({});
+    setSendToQueue(false);
     setConfirming(false);
     return true;
-  }, [cartLines]);
+  }, [cartLines, sendToQueue]);
 
   return {
     products,
@@ -207,9 +223,11 @@ export function usePosSale() {
     actionError,
     postingError,
     lastConfirmedSaleNumber,
+    sendToQueue,
     addToCart,
     incrementLine,
     decrementLine,
+    setSendToQueue,
     confirm,
     retry: loadProducts,
   };

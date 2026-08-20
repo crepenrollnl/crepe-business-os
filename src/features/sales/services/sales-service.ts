@@ -2,6 +2,8 @@
  * Sales service (DEV-027 / DEV-034 / DEV-035).
  *
  * Orchestrates create_draft_sale, sale-line RPCs, and confirm_sale only.
+ * Kitchen-queue flags (markSaleQueued / markSaleFulfilled) are the only
+ * client UPDATEs on sales — they touch fulfilled_at, never money or stock.
  * Does NOT implement FIFO, COGS math, remaining quantity, ledger writes,
  * Finished Goods updates, or commercial total/tax calculation in TypeScript.
  */
@@ -35,7 +37,7 @@ const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const SALE_SELECT =
-  "id, sale_number, customer_id, status, sale_date, confirmed_at, paid_at, cancelled_at, subtotal, tax_total, total, notes, created_at, updated_at";
+  "id, sale_number, customer_id, status, sale_date, confirmed_at, paid_at, cancelled_at, fulfilled_at, subtotal, tax_total, total, notes, created_at, updated_at";
 
 const SALE_LINE_SELECT =
   "id, sale_id, product_id, quantity, unit_price, line_total, created_at";
@@ -49,6 +51,7 @@ interface SaleRow {
   confirmed_at: string | null;
   paid_at: string | null;
   cancelled_at: string | null;
+  fulfilled_at: string | null;
   subtotal: number | string;
   tax_total: number | string;
   total: number | string;
@@ -555,6 +558,7 @@ function mapSale(row: SaleRow): Sale {
     confirmed_at: row.confirmed_at,
     paid_at: row.paid_at,
     cancelled_at: row.cancelled_at,
+    fulfilled_at: row.fulfilled_at ?? null,
     subtotal: toNumber(row.subtotal),
     tax_total: toNumber(row.tax_total),
     total: toNumber(row.total),
@@ -1001,5 +1005,66 @@ export const salesService = {
       posting: posting.data,
       postingError: null,
     });
+  },
+
+  /**
+   * Put a just-confirmed sale into the kitchen queue by clearing the
+   * default-ready stamp the draft→confirmed trigger wrote. Call only when
+   * the seller ticked "Send to queue". Does not touch confirm_sale.
+   */
+  async markSaleQueued(saleId: string): Promise<ServiceResult<{ id: string }>> {
+    const validationError = validateConfirmSaleInput(saleId);
+    if (validationError) {
+      return fail(validationError);
+    }
+
+    const trimmed = saleId.trim();
+
+    try {
+      const { error } = await supabase
+        .from("sales")
+        .update({ fulfilled_at: null })
+        .eq("id", trimmed)
+        .not("fulfilled_at", "is", null);
+
+      if (error) {
+        return fail(toUserError(error, "Failed to send sale to the queue."));
+      }
+
+      return ok({ id: trimmed });
+    } catch (error) {
+      return fail(toUserError(error, "Failed to send sale to the queue."));
+    }
+  },
+
+  /**
+   * Mark a queued sale as ready (cook pressed Done). Does not touch
+   * confirm_sale, stock, or journals.
+   */
+  async markSaleFulfilled(
+    saleId: string,
+  ): Promise<ServiceResult<{ id: string }>> {
+    const validationError = validateConfirmSaleInput(saleId);
+    if (validationError) {
+      return fail(validationError);
+    }
+
+    const trimmed = saleId.trim();
+
+    try {
+      const { error } = await supabase
+        .from("sales")
+        .update({ fulfilled_at: new Date().toISOString() })
+        .eq("id", trimmed)
+        .is("fulfilled_at", null);
+
+      if (error) {
+        return fail(toUserError(error, "Failed to mark sale as ready."));
+      }
+
+      return ok({ id: trimmed });
+    } catch (error) {
+      return fail(toUserError(error, "Failed to mark sale as ready."));
+    }
   },
 };

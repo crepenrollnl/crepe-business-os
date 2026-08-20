@@ -1,9 +1,11 @@
 /**
  * Service-level coverage for salesReadService (DEV-029).
  *
- * Reads must go only through sales_list_view / sale_details_view.
- * The service must not query base tables, call RPCs, recalculate totals,
- * compute COGS, or implement FIFO.
+ * List/detail reads must go only through sales_list_view / sale_details_view.
+ * listQueuedSales is the documented exception: it reads sales + sale_lines
+ * (same pattern as reloadConfirmedSale) for the kitchen queue poll.
+ * The service must not call RPCs, recalculate totals, compute COGS, or
+ * implement FIFO.
  */
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -683,5 +685,170 @@ describe("salesReadService.getSale (DEV-029)", () => {
     expect(insertMock).not.toHaveBeenCalled();
     expect(updateMock).not.toHaveBeenCalled();
     expect(deleteMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("salesReadService.listQueuedSales", () => {
+  function queueSaleRow(overrides?: Record<string, unknown>) {
+    return {
+      id: SALE_ID,
+      sale_number: "S-1001",
+      confirmed_at: "2026-08-20T08:00:00.000Z",
+      total: "28.50",
+      fulfilled_at: null,
+      ...overrides,
+    };
+  }
+
+  function queueLineRow(overrides?: Record<string, unknown>) {
+    return {
+      sale_id: SALE_ID,
+      product_id: PRODUCT_ID,
+      quantity: "3",
+      ...overrides,
+    };
+  }
+
+  function mockQueueTables(
+    sales: ReturnType<typeof queueSaleRow>[],
+    lines: ReturnType<typeof queueLineRow>[],
+    salesError: unknown = null,
+    linesError: unknown = null,
+  ) {
+    const salesOrderSecond = vi.fn().mockResolvedValue({
+      data: salesError ? null : sales,
+      error: salesError,
+    });
+    const salesOrderFirst = vi.fn().mockReturnValue({
+      order: salesOrderSecond,
+    });
+    const salesIs = vi.fn().mockReturnValue({
+      order: salesOrderFirst,
+    });
+    const salesIn = vi.fn().mockReturnValue({
+      is: salesIs,
+    });
+    const salesSelect = vi.fn().mockReturnValue({
+      in: salesIn,
+    });
+
+    const linesOrderSecond = vi.fn().mockResolvedValue({
+      data: linesError ? null : lines,
+      error: linesError,
+    });
+    const linesOrderFirst = vi.fn().mockReturnValue({
+      order: linesOrderSecond,
+    });
+    const linesIn = vi.fn().mockReturnValue({
+      order: linesOrderFirst,
+    });
+    const linesSelect = vi.fn().mockReturnValue({
+      in: linesIn,
+    });
+
+    supabaseMock.from.mockImplementation((table: string) => {
+      if (table === "sales") {
+        return {
+          select: salesSelect,
+          insert: insertMock,
+          update: updateMock,
+          delete: deleteMock,
+        };
+      }
+
+      if (table === "sale_lines") {
+        return {
+          select: linesSelect,
+          insert: insertMock,
+          update: updateMock,
+          delete: deleteMock,
+        };
+      }
+
+      throw new Error(`Unexpected table: ${table}`);
+    });
+
+    return {
+      salesSelect,
+      salesIn,
+      salesIs,
+      salesOrderFirst,
+      linesSelect,
+      linesIn,
+    };
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    insertMock.mockReset();
+    updateMock.mockReset();
+    deleteMock.mockReset();
+  });
+
+  it("reads sales + sale_lines for confirmed/paid rows with fulfilled_at NULL", async () => {
+    const { salesSelect, salesIn, salesIs, linesSelect, linesIn } =
+      mockQueueTables([queueSaleRow()], [queueLineRow()]);
+
+    const result = await salesReadService.listQueuedSales();
+
+    expect(result.error).toBeNull();
+    expect(result.data).toEqual([
+      {
+        sale_id: SALE_ID,
+        sale_number: "S-1001",
+        confirmed_at: "2026-08-20T08:00:00.000Z",
+        total: 28.5,
+        lines: [
+          {
+            product_id: PRODUCT_ID,
+            quantity: 3,
+          },
+        ],
+      },
+    ]);
+    expect(supabaseMock.from).toHaveBeenCalledWith("sales");
+    expect(supabaseMock.from).toHaveBeenCalledWith("sale_lines");
+    expect(salesSelect).toHaveBeenCalledWith(
+      "id, sale_number, confirmed_at, total, fulfilled_at",
+    );
+    expect(salesIn).toHaveBeenCalledWith("status", ["confirmed", "paid"]);
+    expect(salesIs).toHaveBeenCalledWith("fulfilled_at", null);
+    expect(linesSelect).toHaveBeenCalledWith("sale_id, product_id, quantity");
+    expect(linesIn).toHaveBeenCalledWith("sale_id", [SALE_ID]);
+    expect(supabaseMock.rpc).not.toHaveBeenCalled();
+  });
+
+  it("does not query sale_lines when the queue is empty", async () => {
+    mockQueueTables([], []);
+
+    const result = await salesReadService.listQueuedSales();
+
+    expect(result.error).toBeNull();
+    expect(result.data).toEqual([]);
+    expect(supabaseMock.from).toHaveBeenCalledWith("sales");
+    expect(supabaseMock.from).not.toHaveBeenCalledWith("sale_lines");
+  });
+
+  it("orders oldest confirmed_at first", async () => {
+    const { salesOrderFirst } = mockQueueTables(
+      [
+        queueSaleRow({
+          id: SALE_ID,
+          confirmed_at: "2026-08-20T08:00:00.000Z",
+        }),
+        queueSaleRow({
+          id: SALE_ID_2,
+          sale_number: "S-1002",
+          confirmed_at: "2026-08-20T09:00:00.000Z",
+        }),
+      ],
+      [],
+    );
+
+    await salesReadService.listQueuedSales();
+
+    expect(salesOrderFirst).toHaveBeenCalledWith("confirmed_at", {
+      ascending: true,
+    });
   });
 });
