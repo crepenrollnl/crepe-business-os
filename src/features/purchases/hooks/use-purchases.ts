@@ -228,8 +228,20 @@ export function usePurchases() {
     }
 
     setEditingPurchase(result.data);
-    // Document totals only — journal proposals are not persisted.
-    setAccountingPreview(mapPurchaseTotalsToAccountingPreview(result.data));
+    // Document totals only — journal proposals are not persisted. Only
+    // show this persisted DB snapshot for purchases that are no longer
+    // editable (received/cancelled — same condition as `isReadOnly` in
+    // purchase-document-modal.tsx). For an editable draft, leave this
+    // null so the modal's live tax preview (which recalculates on every
+    // line edit) always drives the Subtotal/Tax total/Grand total —
+    // otherwise this frozen DB snapshot from load time permanently wins
+    // over the `??` fallback and the footer totals stop updating the
+    // moment the user adds/edits a line in a reopened draft.
+    const isEditable =
+      result.data.status !== "received" && result.data.status !== "cancelled";
+    setAccountingPreview(
+      isEditable ? null : mapPurchaseTotalsToAccountingPreview(result.data),
+    );
     setIsLoadingPurchase(false);
   }, []);
 

@@ -256,10 +256,19 @@ function PurchaseDocumentForm({
   // derivation from formValues, so it happens at render time, not in the
   // effect. The effect below owns only the genuine external subscription:
   // debouncing edits and awaiting the tax preview RPC.
+  const hasCompletePreviewLine = formValues.lines.some((line) => {
+    const quantity = coerceNumericField(line.quantity);
+    const unitCost = coerceNumericField(line.unit_cost);
+    return (
+      quantity > 0 &&
+      unitCost >= 0 &&
+      line.tax_category.trim().length > 0
+    );
+  });
+
   const hasTaxPreviewInputs =
-    formValues.lines.length > 0 &&
+    hasCompletePreviewLine &&
     Boolean(formValues.purchased_at) &&
-    formValues.lines.every((line) => line.tax_category.trim().length > 0) &&
     !(
       isReadOnly &&
       formValues.lines.some(
@@ -287,6 +296,12 @@ function PurchaseDocumentForm({
         suppliers,
         documentId: purchase?.id,
       });
+
+      if (document.lines.length === 0) {
+        setTaxPreview(null);
+        setIsTaxPreviewLoading(false);
+        return;
+      }
 
       void purchaseTaxService.previewPurchaseTaxes(document).then((result) => {
         if (cancelled) {
@@ -707,14 +722,16 @@ function PurchaseDocumentForm({
                       (row) => row.line_id === `line-${index + 1}`,
                     );
                     const storedItem = purchase?.items[index];
-                    const netLineTotal = taxLine
-                      ? taxLine.net_amount
-                      : line.price_mode === "inclusive"
-                        ? null
-                        : roundMoney(
-                            quantity * coerceNumericField(line.unit_cost) -
-                              coerceNumericField(line.discount),
-                          );
+                    const selectedIngredient = ingredients.find(
+                      (ingredient) => ingredient.id === line.ingredient_id,
+                    );
+                    // "Line total" — сколько реально стоит эта строка
+                    // (net + tax = gross), а не net-only. Известно только
+                    // после ответа RPC для этой строки: до этого — "—",
+                    // а не приблизительная net-цифра, которая раньше и
+                    // путала (не совпадала с qty × unit price при "Price
+                    // includes tax").
+                    const lineTotal = taxLine ? taxLine.gross_amount : null;
                     const netUnitCost =
                       taxLine && quantity > 0
                         ? taxLine.net_amount / quantity
@@ -760,18 +777,27 @@ function PurchaseDocumentForm({
                           )}
                         </td>
                         <td className="px-3 py-3 align-top">
-                          <NumericInput
-                            value={line.quantity}
-                            onChange={(value) =>
-                              updateLine(index, "quantity", value)
-                            }
-                            disabled={isReadOnly || isSaving}
-                            className="text-right"
-                            placeholder="0"
-                            aria-invalid={Boolean(
-                              hasAttemptedSubmit && lineError?.quantity,
+                          <div className="flex items-center gap-2">
+                            <div className="min-w-0 flex-1">
+                              <NumericInput
+                                value={line.quantity}
+                                onChange={(value) =>
+                                  updateLine(index, "quantity", value)
+                                }
+                                disabled={isReadOnly || isSaving}
+                                className="text-right"
+                                placeholder="0"
+                                aria-invalid={Boolean(
+                                  hasAttemptedSubmit && lineError?.quantity,
+                                )}
+                              />
+                            </div>
+                            {selectedIngredient && (
+                              <span className="shrink-0 text-sm text-zinc-500">
+                                {selectedIngredient.unit}
+                              </span>
                             )}
-                          />
+                          </div>
                           {hasAttemptedSubmit && lineError?.quantity && (
                             <p className="mt-1 text-sm text-red-600">
                               {lineError.quantity}
@@ -897,9 +923,9 @@ function PurchaseDocumentForm({
                           {taxLine ? formatMoney(taxLine.tax_amount) : "—"}
                         </td>
                         <td className="px-3 py-3 text-right align-top text-sm font-medium text-zinc-900">
-                          {netLineTotal === null
+                          {lineTotal === null
                             ? "—"
-                            : formatMoney(netLineTotal)}
+                            : formatMoney(lineTotal)}
                         </td>
                         {!isReadOnly && (
                           <td className="px-3 py-3 text-right align-top">

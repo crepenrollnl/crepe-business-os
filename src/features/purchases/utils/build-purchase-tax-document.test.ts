@@ -57,7 +57,7 @@ describe("buildPurchaseTaxDocument", () => {
     });
   });
 
-  it("does not substitute goods/standard_vat when tax fields are blank", () => {
+  it("omits incomplete lines instead of sending blank tax fields", () => {
     const document = buildPurchaseTaxDocument({
       values: values({
         lines: [
@@ -74,10 +74,41 @@ describe("buildPurchaseTaxDocument", () => {
       suppliers,
     });
 
+    expect(document.lines).toEqual([]);
+  });
+
+  it("keeps original line_id after skipping an incomplete row", () => {
+    const document = buildPurchaseTaxDocument({
+      values: values({
+        lines: [
+          {
+            ingredient_id: "ing-1",
+            quantity: 0,
+            unit_cost: 0,
+            tax_category: "",
+            tax_regime: "",
+            price_mode: null,
+          },
+          {
+            ingredient_id: "ing-2",
+            quantity: 6,
+            unit_cost: 0.98,
+            tax_category: "food",
+            tax_regime: "reduced_vat",
+            price_mode: "inclusive",
+          },
+        ],
+      }),
+      suppliers,
+    });
+
+    expect(document.lines).toHaveLength(1);
     expect(document.lines[0]).toMatchObject({
-      price_mode: "exclusive",
-      tax_category: "",
-      tax_regime: null,
+      line_id: "line-2",
+      quantity: 6,
+      unit_price: 0.98,
+      price_mode: "inclusive",
+      tax_category: "food",
     });
   });
 });
