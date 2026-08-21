@@ -48,6 +48,8 @@ type PurchaseDocumentModalProps = {
 
 type NumericLineField = "quantity" | "unit_cost";
 
+type LineLastEditedField = "quantity" | "unit_cost" | "line_total" | null;
+
 type LineDraft = Omit<
   PurchaseLineInput,
   | NumericLineField
@@ -60,6 +62,7 @@ type LineDraft = Omit<
   quantity: string;
   unit_cost: string;
   line_total: string;
+  last_edited_field: LineLastEditedField;
   discount: string;
   tax_category: string;
   tax_regime: string;
@@ -118,6 +121,7 @@ function valuesToDraft(
       line_total: options?.emptyNumericDefaults
         ? ""
         : formatNumericInput(roundMoney(line.quantity * line.unit_cost)),
+      last_edited_field: null,
       tax_category: line.tax_category ?? "",
       tax_regime: line.tax_regime ?? "",
       price_mode:
@@ -396,15 +400,26 @@ function PurchaseDocumentForm({
         if (lineIndex !== index) {
           return line;
         }
-        const pinnedTotal = parseNumericInput(line.line_total);
         const newQuantity = parseNumericInput(value);
-        if (pinnedTotal !== null && newQuantity !== null && newQuantity > 0) {
+        if (line.last_edited_field === "line_total") {
+          const pinnedTotal = parseNumericInput(line.line_total);
+          if (pinnedTotal !== null && newQuantity !== null && newQuantity > 0) {
+            return {
+              ...line,
+              quantity: value,
+              unit_cost: formatNumericInput(
+                roundUnitCost(pinnedTotal / newQuantity),
+              ),
+            };
+          }
+          return { ...line, quantity: value };
+        }
+        const unitCost = parseNumericInput(line.unit_cost);
+        if (newQuantity !== null && newQuantity > 0 && unitCost !== null) {
           return {
             ...line,
             quantity: value,
-            unit_cost: formatNumericInput(
-              roundUnitCost(pinnedTotal / newQuantity),
-            ),
+            line_total: formatNumericInput(roundMoney(newQuantity * unitCost)),
           };
         }
         return { ...line, quantity: value };
@@ -425,12 +440,13 @@ function PurchaseDocumentForm({
           return {
             ...line,
             unit_cost: value,
+            last_edited_field: "unit_cost",
             line_total: formatNumericInput(
               roundMoney(quantity * newUnitCost),
             ),
           };
         }
-        return { ...line, unit_cost: value };
+        return { ...line, unit_cost: value, last_edited_field: "unit_cost" };
       }),
     }));
   };
@@ -448,12 +464,13 @@ function PurchaseDocumentForm({
           return {
             ...line,
             line_total: value,
+            last_edited_field: "line_total",
             unit_cost: formatNumericInput(
               roundUnitCost(newTotal / quantity),
             ),
           };
         }
-        return { ...line, line_total: value };
+        return { ...line, line_total: value, last_edited_field: "line_total" };
       }),
     }));
   };
@@ -486,6 +503,7 @@ function PurchaseDocumentForm({
           quantity: "",
           unit_cost: "",
           line_total: "",
+          last_edited_field: null,
           discount: "",
           tax_category: "goods",
           tax_regime: "standard_vat",
