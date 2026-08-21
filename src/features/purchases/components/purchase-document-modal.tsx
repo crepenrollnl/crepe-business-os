@@ -59,6 +59,7 @@ type LineDraft = Omit<
 > & {
   quantity: string;
   unit_cost: string;
+  line_total: string;
   discount: string;
   tax_category: string;
   tax_regime: string;
@@ -87,6 +88,10 @@ function roundMoney(value: number): number {
   return Math.round(value * 100) / 100;
 }
 
+function roundUnitCost(value: number): number {
+  return Math.round(value * 10000) / 10000;
+}
+
 function coerceNumericField(value: string): number {
   return parseNumericInput(value) ?? 0;
 }
@@ -110,6 +115,9 @@ function valuesToDraft(
       discount: options?.emptyNumericDefaults
         ? ""
         : formatNumericInput(line.discount ?? 0),
+      line_total: options?.emptyNumericDefaults
+        ? ""
+        : formatNumericInput(roundMoney(line.quantity * line.unit_cost)),
       tax_category: line.tax_category ?? "",
       tax_regime: line.tax_regime ?? "",
       price_mode:
@@ -381,6 +389,75 @@ function PurchaseDocumentForm({
     }));
   };
 
+  const updateLineQuantity = (index: number, value: string) => {
+    setFormValues((current) => ({
+      ...current,
+      lines: current.lines.map((line, lineIndex) => {
+        if (lineIndex !== index) {
+          return line;
+        }
+        const pinnedTotal = parseNumericInput(line.line_total);
+        const newQuantity = parseNumericInput(value);
+        if (pinnedTotal !== null && newQuantity !== null && newQuantity > 0) {
+          return {
+            ...line,
+            quantity: value,
+            unit_cost: formatNumericInput(
+              roundUnitCost(pinnedTotal / newQuantity),
+            ),
+          };
+        }
+        return { ...line, quantity: value };
+      }),
+    }));
+  };
+
+  const updateLineUnitCost = (index: number, value: string) => {
+    setFormValues((current) => ({
+      ...current,
+      lines: current.lines.map((line, lineIndex) => {
+        if (lineIndex !== index) {
+          return line;
+        }
+        const quantity = parseNumericInput(line.quantity);
+        const newUnitCost = parseNumericInput(value);
+        if (quantity !== null && quantity > 0 && newUnitCost !== null) {
+          return {
+            ...line,
+            unit_cost: value,
+            line_total: formatNumericInput(
+              roundMoney(quantity * newUnitCost),
+            ),
+          };
+        }
+        return { ...line, unit_cost: value };
+      }),
+    }));
+  };
+
+  const updateLineTotal = (index: number, value: string) => {
+    setFormValues((current) => ({
+      ...current,
+      lines: current.lines.map((line, lineIndex) => {
+        if (lineIndex !== index) {
+          return line;
+        }
+        const quantity = parseNumericInput(line.quantity);
+        const newTotal = parseNumericInput(value);
+        if (quantity !== null && quantity > 0 && newTotal !== null) {
+          return {
+            ...line,
+            line_total: value,
+            unit_cost: formatNumericInput(
+              roundUnitCost(newTotal / quantity),
+            ),
+          };
+        }
+        return { ...line, line_total: value };
+      }),
+    }));
+  };
+
   const updateLineTaxCategory = (index: number, category: string) => {
     setFormValues((current) => ({
       ...current,
@@ -408,6 +485,7 @@ function PurchaseDocumentForm({
           ingredient_id: "",
           quantity: "",
           unit_cost: "",
+          line_total: "",
           discount: "",
           tax_category: "goods",
           tax_regime: "standard_vat",
@@ -782,7 +860,7 @@ function PurchaseDocumentForm({
                               <NumericInput
                                 value={line.quantity}
                                 onChange={(value) =>
-                                  updateLine(index, "quantity", value)
+                                  updateLineQuantity(index, value)
                                 }
                                 disabled={isReadOnly || isSaving}
                                 className="text-right"
@@ -808,7 +886,7 @@ function PurchaseDocumentForm({
                           <NumericInput
                             value={line.unit_cost}
                             onChange={(value) =>
-                              updateLine(index, "unit_cost", value)
+                              updateLineUnitCost(index, value)
                             }
                             disabled={isReadOnly || isSaving}
                             className="text-right"
@@ -923,9 +1001,24 @@ function PurchaseDocumentForm({
                           {taxLine ? formatMoney(taxLine.tax_amount) : "—"}
                         </td>
                         <td className="px-3 py-3 text-right align-top text-sm font-medium text-zinc-900">
-                          {lineTotal === null
-                            ? "—"
-                            : formatMoney(lineTotal)}
+                          {isReadOnly ? (
+                            lineTotal === null ? (
+                              "—"
+                            ) : (
+                              formatMoney(lineTotal)
+                            )
+                          ) : (
+                            <NumericInput
+                              value={line.line_total}
+                              onChange={(value) =>
+                                updateLineTotal(index, value)
+                              }
+                              disabled={isSaving}
+                              className="text-right"
+                              placeholder="0.00"
+                              aria-label="Line total"
+                            />
+                          )}
                         </td>
                         {!isReadOnly && (
                           <td className="px-3 py-3 text-right align-top">
