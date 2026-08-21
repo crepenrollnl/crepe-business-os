@@ -722,6 +722,9 @@ function PurchaseDocumentForm({
                       (row) => row.line_id === `line-${index + 1}`,
                     );
                     const storedItem = purchase?.items[index];
+                    const selectedIngredient = ingredients.find(
+                      (ingredient) => ingredient.id === line.ingredient_id,
+                    );
                     // "Line total" — сколько реально стоит эта строка
                     // (net + tax = gross), а не net-only. Известно только
                     // после ответа RPC для этой строки: до этого — "—",
@@ -774,18 +777,27 @@ function PurchaseDocumentForm({
                           )}
                         </td>
                         <td className="px-3 py-3 align-top">
-                          <NumericInput
-                            value={line.quantity}
-                            onChange={(value) =>
-                              updateLine(index, "quantity", value)
-                            }
-                            disabled={isReadOnly || isSaving}
-                            className="text-right"
-                            placeholder="0"
-                            aria-invalid={Boolean(
-                              hasAttemptedSubmit && lineError?.quantity,
+                          <div className="flex items-center gap-2">
+                            <div className="min-w-0 flex-1">
+                              <NumericInput
+                                value={line.quantity}
+                                onChange={(value) =>
+                                  updateLine(index, "quantity", value)
+                                }
+                                disabled={isReadOnly || isSaving}
+                                className="text-right"
+                                placeholder="0"
+                                aria-invalid={Boolean(
+                                  hasAttemptedSubmit && lineError?.quantity,
+                                )}
+                              />
+                            </div>
+                            {selectedIngredient && (
+                              <span className="shrink-0 text-sm text-zinc-500">
+                                {selectedIngredient.unit}
+                              </span>
                             )}
-                          />
+                          </div>
                           {hasAttemptedSubmit && lineError?.quantity && (
                             <p className="mt-1 text-sm text-red-600">
                               {lineError.quantity}
