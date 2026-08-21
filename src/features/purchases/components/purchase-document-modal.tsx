@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import {
   NumericInput,
   formatNumericInput,
@@ -26,6 +26,10 @@ import {
   type PurchaseTaxResult,
 } from "../types/purchase-tax";
 import { buildPurchaseTaxDocument } from "../utils/build-purchase-tax-document";
+import {
+  deriveExclusiveUnitCostFromLineTotal,
+  LINE_TOTAL_UNIT_PRICE_ERROR,
+} from "../utils/derive-exclusive-unit-cost-from-line-total";
 
 /** Debounce delay before re-requesting the tax preview RPC after an edit. */
 const TAX_PREVIEW_DEBOUNCE_MS = 400;
@@ -50,7 +54,7 @@ type NumericLineField = "quantity" | "unit_cost";
 
 type LineLastEditedField = "quantity" | "unit_cost" | "line_total" | null;
 
-type LineDraft = Omit<
+export type LineDraft = Omit<
   PurchaseLineInput,
   | NumericLineField
   | "discount"
@@ -69,7 +73,7 @@ type LineDraft = Omit<
   price_mode: "" | "exclusive" | "inclusive";
 };
 
-type FormDraft = Omit<PurchaseFormValues, "lines"> & {
+export type FormDraft = Omit<PurchaseFormValues, "lines"> & {
   supplier_country: string;
   tax_country: string;
   lines: LineDraft[];
@@ -132,7 +136,7 @@ function valuesToDraft(
   };
 }
 
-function draftToValues(draft: FormDraft): PurchaseFormValues {
+export function draftToValues(draft: FormDraft): PurchaseFormValues {
   return {
     supplier_id: draft.supplier_id,
     invoice_number: draft.invoice_number,
@@ -262,6 +266,10 @@ function PurchaseDocumentForm({
     data: PurchaseTaxResult | null;
   } | null>(null);
   const [isTaxPreviewLoadingState, setIsTaxPreviewLoading] = useState(false);
+  const [lineTotalDeriveByIndex, setLineTotalDeriveByIndex] = useState<
+    Record<number, { loading: boolean; error: string | null }>
+  >({});
+  const appliedLineTotalProbeKeysRef = useRef<Record<number, string>>({});
 
   // The RPC preview only applies once the draft has enough content to price
   // (matches validateDraft's own requirements) — that check is pure
@@ -339,6 +347,123 @@ function PurchaseDocumentForm({
 
   const taxPreview = hasTaxPreviewInputs ? taxPreviewState : null;
   const isTaxPreviewLoading = hasTaxPreviewInputs && isTaxPreviewLoadingState;
+
+  // Isolated inclusive-probe: exclusive Line total → net unit_cost via RPC.
+  // Separate from the document-level tax preview that drives the footer.
+  useEffect(() => {
+    if (isReadOnly) {
+      return;
+    }
+
+    let cancelled = false;
+    const timerIds: number[] = [];
+
+    formValues.lines.forEach((line, index) => {
+      if (line.price_mode === "inclusive") {
+        return;
+      }
+      if (line.last_edited_field !== "line_total") {
+        return;
+      }
+
+      const quantity = parseNumericInput(line.quantity);
+      const lineTotal = parseNumericInput(line.line_total);
+      if (quantity === null || quantity <= 0 || lineTotal === null) {
+        return;
+      }
+
+      const probeKey = [
+        quantity,
+        lineTotal,
+        line.tax_category,
+        line.tax_regime,
+        formValues.purchased_at,
+        formValues.tax_country,
+        formValues.supplier_country,
+        formValues.supplier_id,
+      ].join("|");
+
+      if (appliedLineTotalProbeKeysRef.current[index] === probeKey) {
+        return;
+      }
+
+      const timerId = window.setTimeout(() => {
+        if (cancelled) {
+          return;
+        }
+
+        setLineTotalDeriveByIndex((current) => ({
+          ...current,
+          [index]: { loading: true, error: null },
+        }));
+
+        const supplier = suppliers.find(
+          (row) => row.id === formValues.supplier_id,
+        );
+
+        void deriveExclusiveUnitCostFromLineTotal({
+          purchasedAt: formValues.purchased_at,
+          taxCountry: formValues.tax_country,
+          supplierCountry: formValues.supplier_country,
+          supplierId: formValues.supplier_id,
+          supplierName: supplier?.name ?? null,
+          documentId: purchase?.id,
+          quantity,
+          lineTotal,
+          taxCategory: line.tax_category,
+          taxRegime: line.tax_regime,
+          discount: parseNumericInput(line.discount) ?? 0,
+        }).then((result) => {
+          if (cancelled) {
+            return;
+          }
+
+          appliedLineTotalProbeKeysRef.current[index] = probeKey;
+
+          if (result.error || !result.data) {
+            setLineTotalDeriveByIndex((current) => ({
+              ...current,
+              [index]: {
+                loading: false,
+                error: result.error ?? LINE_TOTAL_UNIT_PRICE_ERROR,
+              },
+            }));
+            return;
+          }
+
+          setLineTotalDeriveByIndex((current) => ({
+            ...current,
+            [index]: { loading: false, error: null },
+          }));
+          setFormValues((current) => ({
+            ...current,
+            lines: current.lines.map((currentLine, lineIndex) => {
+              if (lineIndex !== index) {
+                return currentLine;
+              }
+              if (currentLine.last_edited_field !== "line_total") {
+                return currentLine;
+              }
+              if (parseNumericInput(currentLine.line_total) !== lineTotal) {
+                return currentLine;
+              }
+              return {
+                ...currentLine,
+                unit_cost: formatNumericInput(result.data.unitCost),
+              };
+            }),
+          }));
+        });
+      }, TAX_PREVIEW_DEBOUNCE_MS);
+
+      timerIds.push(timerId);
+    });
+
+    return () => {
+      cancelled = true;
+      timerIds.forEach((timerId) => window.clearTimeout(timerId));
+    };
+  }, [formValues, isReadOnly, purchase?.id, suppliers]);
 
   const subtotal = useMemo(() => {
     return roundMoney(
@@ -449,6 +574,10 @@ function PurchaseDocumentForm({
         return { ...line, unit_cost: value, last_edited_field: "unit_cost" };
       }),
     }));
+    setLineTotalDeriveByIndex((current) => ({
+      ...current,
+      [index]: { loading: false, error: null },
+    }));
   };
 
   const updateLineTotal = (index: number, value: string) => {
@@ -460,19 +589,31 @@ function PurchaseDocumentForm({
         }
         const quantity = parseNumericInput(line.quantity);
         const newTotal = parseNumericInput(value);
-        if (quantity !== null && quantity > 0 && newTotal !== null) {
+        if (
+          line.price_mode !== "inclusive" ||
+          quantity === null ||
+          quantity <= 0 ||
+          newTotal === null
+        ) {
           return {
             ...line,
             line_total: value,
             last_edited_field: "line_total",
-            unit_cost: formatNumericInput(
-              roundUnitCost(newTotal / quantity),
-            ),
           };
         }
-        return { ...line, line_total: value, last_edited_field: "line_total" };
+        return {
+          ...line,
+          line_total: value,
+          last_edited_field: "line_total",
+          unit_cost: formatNumericInput(roundUnitCost(newTotal / quantity)),
+        };
       }),
     }));
+    setLineTotalDeriveByIndex((current) => ({
+      ...current,
+      [index]: { loading: false, error: null },
+    }));
+    delete appliedLineTotalProbeKeysRef.current[index];
   };
 
   const updateLineTaxCategory = (index: number, category: string) => {
@@ -906,13 +1047,27 @@ function PurchaseDocumentForm({
                             onChange={(value) =>
                               updateLineUnitCost(index, value)
                             }
-                            disabled={isReadOnly || isSaving}
+                            disabled={
+                              isReadOnly ||
+                              isSaving ||
+                              Boolean(lineTotalDeriveByIndex[index]?.loading)
+                            }
                             className="text-right"
                             placeholder="0.00"
                             aria-invalid={Boolean(
                               hasAttemptedSubmit && lineError?.unit_cost,
                             )}
                           />
+                          {lineTotalDeriveByIndex[index]?.loading && (
+                            <p className="mt-1 text-xs text-zinc-500">
+                              Calculating…
+                            </p>
+                          )}
+                          {lineTotalDeriveByIndex[index]?.error && (
+                            <p className="mt-1 text-xs text-amber-700">
+                              {lineTotalDeriveByIndex[index]?.error}
+                            </p>
+                          )}
                           {hasAttemptedSubmit && lineError?.unit_cost && (
                             <p className="mt-1 text-sm text-red-600">
                               {lineError.unit_cost}
