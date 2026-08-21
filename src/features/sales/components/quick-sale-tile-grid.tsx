@@ -11,8 +11,13 @@ type QuickSaleTileGridProps = {
   onTap: (product: QuickSaleProduct) => void;
 };
 
-const TILE_HEIGHT_CLASS = "h-64";
-const TILE_PHOTO_CLASS = "min-h-0 flex-1 w-full";
+/**
+ * Photo box aspect-ratio, not a fixed pixel height. Tile width changes
+ * across grid-cols-2 / sm:grid-cols-3 / lg:grid-cols-4; a constant h-*
+ * made object-cover crop a different slice at every breakpoint.
+ * 4:3 is the default phone still (and typical food-photo) frame.
+ */
+const TILE_PHOTO_CLASS = "aspect-[4/3] w-full";
 
 function tileInitial(name: string): string {
   const letter = name.trim().charAt(0);
@@ -64,7 +69,7 @@ export function QuickSaleTileGrid({
         {Array.from({ length: 8 }).map((_, index) => (
           <div
             key={index}
-            className={`flex ${TILE_HEIGHT_CLASS} flex-col overflow-hidden rounded-xl bg-zinc-100`}
+            className="flex flex-col overflow-hidden rounded-xl bg-zinc-100"
           >
             <div className={`${TILE_PHOTO_CLASS} animate-pulse bg-zinc-200`} />
             <div className="space-y-1 px-3 py-2">
@@ -106,7 +111,7 @@ export function QuickSaleTileGrid({
           key={product.id}
           type="button"
           onClick={() => onTap(product)}
-          className={`flex ${TILE_HEIGHT_CLASS} flex-col overflow-hidden rounded-xl border border-zinc-200 bg-white text-left shadow-sm transition-colors hover:border-amber-400 hover:bg-amber-50`}
+          className="flex flex-col overflow-hidden rounded-xl border border-zinc-200 bg-white text-left shadow-sm transition-colors hover:border-amber-400 hover:bg-amber-50"
         >
           <TilePhoto
             key={product.image_url ?? "none"}
