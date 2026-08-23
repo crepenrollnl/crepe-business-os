@@ -80,6 +80,8 @@ export const ERP_MODULES: readonly ErpModuleDefinition[] = [
     id: "finished-goods",
     label: "Finished Goods",
     featurePath: "src/features/finished-goods",
+    // Domain module stays separate: FIFO, valuation, and COGS services live
+    // here. UI is hosted as a tab on /inventory, not a nav item of its own.
     status: "live",
     priority: 9,
   },

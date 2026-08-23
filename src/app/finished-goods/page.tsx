@@ -1,10 +1,6 @@
-import { AuthGuard } from "@/features/auth/components/auth-guard";
-import { FinishedGoodsPage } from "@/features/finished-goods/page/finished-goods-page";
+import { redirect } from "next/navigation";
 
+/** Legacy path — Finished Goods lives as a tab on `/inventory`. */
 export default function Page() {
-  return (
-    <AuthGuard>
-      <FinishedGoodsPage />
-    </AuthGuard>
-  );
+  redirect("/inventory?tab=finished-goods");
 }
