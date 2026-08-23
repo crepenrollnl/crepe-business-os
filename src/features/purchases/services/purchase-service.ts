@@ -363,7 +363,13 @@ async function replacePurchaseItems(
   };
 }
 
-function isMissingRpcError(error: unknown): boolean {
+interface ReceiveLineStockSnapshot {
+  previous_stock: number | null;
+  previous_cost_per_unit: number | null;
+  warning: string | null;
+}
+
+function isMissingReceiveStockRpcError(error: unknown): boolean {
   if (typeof error !== "object" || error === null) {
     return false;
   }
@@ -380,69 +386,124 @@ function isMissingRpcError(error: unknown): boolean {
 
   return (
     code === "42883" ||
-    message.includes("increment_ingredient_stock") ||
+    message.includes("receive_purchase_line_stock_and_cost") ||
     message.includes("could not find the function")
   );
 }
 
-/**
- * The increment_ingredient_stock RPC is missing from this database.
- * Fail loudly instead of a non-atomic read-then-write, which would race
- * under concurrent purchases and silently drop stock increments.
- */
-async function increaseIngredientStockFallback(
-  ingredientId: string,
-  quantity: number,
-): Promise<ServiceResult<null>> {
+function asRpcNullableNumber(value: unknown): number | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === "string" && value.trim() !== "") {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  return null;
+}
+
+function parseReceiveLineStockResult(
+  data: unknown,
+): ReceiveLineStockSnapshot | null {
+  if (typeof data !== "object" || data === null) {
+    return null;
+  }
+
+  const row = data as Record<string, unknown>;
+  const warning =
+    typeof row.warning === "string" && row.warning.trim().length > 0
+      ? row.warning
+      : null;
+
   return {
-    data: null,
-    error: `Cannot update inventory stock for ingredient ${ingredientId} (delta ${quantity}): the increment_ingredient_stock database function is not installed. Apply sql/001_create_purchases.sql and try again.`,
+    previous_stock: asRpcNullableNumber(row.previous_stock),
+    previous_cost_per_unit: asRpcNullableNumber(row.previous_cost_per_unit),
+    warning,
   };
 }
 
-async function applyIngredientStockDelta(
+function missingReceiveStockRpcError(
   ingredientId: string,
   quantity: number,
-): Promise<ServiceResult<null>> {
-  const { error } = await supabase.rpc("increment_ingredient_stock", {
-    p_ingredient_id: ingredientId,
-    p_quantity: quantity,
-  });
+): ServiceResult<ReceiveLineStockSnapshot> {
+  return {
+    data: null,
+    error: `Cannot update inventory stock and unit cost for ingredient ${ingredientId} (quantity ${quantity}): the receive_purchase_line_stock_and_cost database function is not installed. Apply sql/105_receive_purchase_line_stock_and_cost.sql and try again.`,
+  };
+}
 
-  if (!error) {
-    return { data: null, error: null };
-  }
+async function applyReceiveLineStockAndCost(
+  ingredientId: string,
+  quantity: number,
+  netUnitCost: number,
+): Promise<ServiceResult<ReceiveLineStockSnapshot>> {
+  const { data, error } = await supabase.rpc(
+    "receive_purchase_line_stock_and_cost",
+    {
+      p_ingredient_id: ingredientId,
+      p_quantity: quantity,
+      p_net_unit_cost: netUnitCost,
+    },
+  );
 
-  if (!isMissingRpcError(error)) {
+  if (error) {
+    if (isMissingReceiveStockRpcError(error)) {
+      return missingReceiveStockRpcError(ingredientId, quantity);
+    }
+
     return {
       data: null,
-      error: toUserError(error, "Failed to update inventory stock"),
+      error: toUserError(
+        error,
+        "Failed to update inventory stock and unit cost",
+      ),
     };
   }
 
-  return increaseIngredientStockFallback(ingredientId, quantity);
+  const snapshot = parseReceiveLineStockResult(data);
+
+  if (!snapshot) {
+    return {
+      data: null,
+      error: "Failed to update inventory stock and unit cost",
+    };
+  }
+
+  if (snapshot.warning) {
+    console.warn(
+      `Receive skipped cost_per_unit for ingredient ${ingredientId}: ${snapshot.warning}`,
+    );
+  }
+
+  return { data: snapshot, error: null };
 }
 
-/**
- * Compensates a previously-applied increment_ingredient_stock call by
- * invoking the same atomic RPC with a negated quantity. Used to unwind
- * earlier lines when a later line in a multi-line purchase fails partway
- * through — never a JS-side read-then-write, for the same reason the
- * forward path avoids one.
- */
-async function reverseIngredientStockDelta(
+async function reverseReceiveLineStockAndCost(
   ingredientId: string,
-  quantity: number,
+  snapshot: ReceiveLineStockSnapshot,
 ): Promise<ServiceResult<null>> {
-  const { error } = await supabase.rpc("increment_ingredient_stock", {
-    p_ingredient_id: ingredientId,
-    p_quantity: -quantity,
-  });
+  const { error } = await supabase.rpc(
+    "reverse_receive_purchase_line_stock_and_cost",
+    {
+      p_ingredient_id: ingredientId,
+      p_previous_stock: snapshot.previous_stock,
+      p_previous_cost_per_unit: snapshot.previous_cost_per_unit,
+    },
+  );
 
   if (error) {
     return {
       data: null,
-      error: toUserError(error, "Failed to reverse inventory stock increment"),
+      error: toUserError(
+        error,
+        "Failed to reverse inventory stock and unit cost",
+      ),
     };
   }
 
@@ -450,28 +511,36 @@ async function reverseIngredientStockDelta(
 }
 
 async function increaseIngredientStock(
-  lines: Array<{ ingredient_id: string; quantity: number }>,
+  lines: Array<{
+    ingredient_id: string;
+    quantity: number;
+    net_unit_cost: number;
+  }>,
 ): Promise<ServiceResult<null>> {
-  const applied: Array<{ ingredient_id: string; quantity: number }> = [];
+  const applied: Array<{
+    ingredient_id: string;
+    snapshot: ReceiveLineStockSnapshot;
+  }> = [];
 
   for (const line of lines) {
-    const result = await applyIngredientStockDelta(
+    const result = await applyReceiveLineStockAndCost(
       line.ingredient_id,
       line.quantity,
+      line.net_unit_cost,
     );
 
-    if (result.error) {
+    if (result.error || !result.data) {
       const reversalFailures: string[] = [];
 
       for (const previous of applied.reverse()) {
-        const reversal = await reverseIngredientStockDelta(
+        const reversal = await reverseReceiveLineStockAndCost(
           previous.ingredient_id,
-          previous.quantity,
+          previous.snapshot,
         );
 
         if (reversal.error) {
           reversalFailures.push(
-            `ingredient ${previous.ingredient_id} (delta ${previous.quantity}): ${reversal.error}`,
+            `ingredient ${previous.ingredient_id}: ${reversal.error}`,
           );
         }
       }
@@ -479,16 +548,19 @@ async function increaseIngredientStock(
       if (reversalFailures.length > 0) {
         return {
           data: null,
-          error: `${result.error} Additionally, failed to reverse already-applied stock increments — stock may now be inconsistent: ${reversalFailures.join("; ")}`,
+          error: `${result.error} Additionally, failed to reverse already-applied stock increments — stock and unit cost may now be inconsistent: ${reversalFailures.join("; ")}`,
         };
       }
 
-      return result;
+      return {
+        data: null,
+        error: result.error ?? "Failed to update inventory stock and unit cost",
+      };
     }
 
     applied.push({
       ingredient_id: line.ingredient_id,
-      quantity: line.quantity,
+      snapshot: result.data,
     });
   }
 
@@ -946,6 +1018,7 @@ export const purchaseService = {
         result.data.items.map((item) => ({
           ingredient_id: item.ingredient_id,
           quantity: item.quantity,
+          net_unit_cost: item.unit_cost,
         })),
       );
 
