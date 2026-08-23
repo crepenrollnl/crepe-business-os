@@ -7,6 +7,10 @@ import {
   formatExecutionDate,
   getExecutablePlanStatusBadgeClass,
 } from "../utils/format-execution-plan";
+import {
+  formatPlanSessionFactLabel,
+  pickLatestCompletedPlanSession,
+} from "../utils/format-plan-session-history";
 
 type ProductionExecutionPlanHeaderProps = {
   plan: ProductionExecutionPlanDetail;
@@ -22,7 +26,7 @@ export function ProductionExecutionPlanHeader({
   onStartProduction,
 }: ProductionExecutionPlanHeaderProps) {
   const openSession = plan.open_session;
-  const completedSession = plan.latest_completed_session;
+  const completedSession = pickLatestCompletedPlanSession(plan.sessions);
 
   return (
     <div className="space-y-6">
@@ -106,9 +110,9 @@ export function ProductionExecutionPlanHeader({
           {!openSession && completedSession ? (
             <Link
               href={`/production-execution/sessions/${completedSession.id}`}
-              className="text-sm font-medium text-zinc-600 underline-offset-2 hover:text-zinc-900 hover:underline"
+              className="max-w-sm text-right text-sm font-medium text-zinc-600 underline-offset-2 hover:text-zinc-900 hover:underline"
             >
-              Reopen Session #{completedSession.session_number}
+              {formatPlanSessionFactLabel(completedSession)}
             </Link>
           ) : null}
 

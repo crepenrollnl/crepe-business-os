@@ -80,7 +80,7 @@ export const ERP_MODULES: readonly ErpModuleDefinition[] = [
     id: "finished-goods",
     label: "Finished Goods",
     featurePath: "src/features/finished-goods",
-    status: "planned",
+    status: "live",
     priority: 9,
   },
   {

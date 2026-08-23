@@ -122,3 +122,19 @@ export interface FinishedGoodsAvailableBatch {
   /** Calculated: available_quantity × unit_cost. */
   remaining_value: number;
 }
+
+/**
+ * Product-level remaining stock for the Finished Goods screen (2A).
+ * Quantities and values come from report_finished_goods_summary.
+ * yield_unit is joined from recipes — not recalculated in TypeScript.
+ */
+export interface FinishedGoodsListRow {
+  product_id: string;
+  product_name: string | null;
+  available_quantity: number;
+  yield_unit: string | null;
+  average_unit_cost: number | null;
+  remaining_value: number | null;
+  newest_batch_at: string | null;
+  production_status: "available" | "out_of_stock";
+}

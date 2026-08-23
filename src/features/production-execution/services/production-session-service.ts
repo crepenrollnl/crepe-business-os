@@ -12,6 +12,8 @@ import { supabase } from "@/lib/supabase";
 import { fail, ok, type ServiceResult } from "@/types/service";
 import type {
   CompleteProductionSessionInput,
+  ProductionPlanSessionHistoryItem,
+  ProductionPlanSessionLineFact,
   ProductionSession,
   ProductionSessionLine,
   ProductionSessionStatus,
@@ -79,6 +81,29 @@ interface PlanHeaderRow {
   id: string;
   plan_number: number;
   name: string;
+}
+
+interface PlanSessionHistoryRow {
+  id: string;
+  session_number: number;
+  status: ProductionSessionStatus;
+  started_at: string;
+  completed_at: string | null;
+}
+
+interface PlanSessionLineHistoryRow {
+  id: string;
+  production_session_id: string;
+  recipe_id: string;
+  product_name: string;
+  actual_produced_quantity: number | string | null;
+  yield_unit: string;
+  sort_order: number;
+}
+
+interface PlanSessionBatchRow {
+  production_session_line_id: string;
+  produced_quantity: number | string;
 }
 
 interface IngredientCostRow {
@@ -624,41 +649,106 @@ export const productionSessionService = {
     }
   },
 
-  async getLatestCompletedSessionForPlan(
+  /**
+   * All sessions for a plan, with per-recipe produced quantity.
+   * Prefers production_batches.produced_quantity; falls back to
+   * production_session_lines.actual_produced_quantity. Read-only.
+   */
+  async listSessionsForPlan(
     productionPlanId: string,
-  ): Promise<
-    ServiceResult<Pick<
-      ProductionSession,
-      "id" | "session_number" | "status" | "started_at" | "completed_at"
-    > | null>
-  > {
+  ): Promise<ServiceResult<ProductionPlanSessionHistoryItem[]>> {
     try {
-      const { data, error } = await supabase
+      const { data: sessionRows, error: sessionError } = await supabase
         .from("production_sessions")
         .select("id, session_number, status, started_at, completed_at")
         .eq("production_plan_id", productionPlanId)
-        .eq("status", "completed")
-        .order("completed_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
+        .order("session_number", { ascending: true });
 
-      if (error) {
-        return fail(toUserError(error, "Failed to load production session"));
+      if (sessionError) {
+        return fail(
+          toUserError(sessionError, "Failed to load production sessions"),
+        );
       }
 
-      if (!data) {
-        return ok(null);
+      const sessions = (sessionRows as PlanSessionHistoryRow[] | null) ?? [];
+      if (sessions.length === 0) {
+        return ok([]);
       }
 
-      return ok({
-        id: data.id as string,
-        session_number: data.session_number as number,
-        status: data.status as ProductionSessionStatus,
-        started_at: data.started_at as string,
-        completed_at: (data.completed_at as string | null) ?? null,
-      });
+      const sessionIds = sessions.map((session) => session.id);
+
+      const { data: lineRows, error: lineError } = await supabase
+        .from("production_session_lines")
+        .select(
+          "id, production_session_id, recipe_id, product_name, actual_produced_quantity, yield_unit, sort_order",
+        )
+        .in("production_session_id", sessionIds)
+        .order("sort_order", { ascending: true });
+
+      if (lineError) {
+        return fail(
+          toUserError(lineError, "Failed to load production session lines"),
+        );
+      }
+
+      const lines = (lineRows as PlanSessionLineHistoryRow[] | null) ?? [];
+      const lineIds = lines.map((line) => line.id);
+      const batchByLineId = new Map<string, number>();
+
+      if (lineIds.length > 0) {
+        const { data: batchRows, error: batchError } = await supabase
+          .from("production_batches")
+          .select("production_session_line_id, produced_quantity")
+          .in("production_session_line_id", lineIds);
+
+        if (batchError) {
+          return fail(
+            toUserError(batchError, "Failed to load production batches"),
+          );
+        }
+
+        for (const row of (batchRows as PlanSessionBatchRow[] | null) ?? []) {
+          batchByLineId.set(
+            row.production_session_line_id,
+            toNumber(row.produced_quantity),
+          );
+        }
+      }
+
+      const linesBySessionId = new Map<string, ProductionPlanSessionLineFact[]>();
+
+      for (const line of lines) {
+        const batchQuantity = batchByLineId.get(line.id);
+        const producedQuantity =
+          batchQuantity !== undefined
+            ? batchQuantity
+            : toNullableNumber(line.actual_produced_quantity);
+        const facts = linesBySessionId.get(line.production_session_id) ?? [];
+
+        facts.push({
+          recipe_id: line.recipe_id,
+          product_name: line.product_name,
+          yield_unit: line.yield_unit,
+          produced_quantity: producedQuantity,
+          sort_order: line.sort_order,
+        });
+        linesBySessionId.set(line.production_session_id, facts);
+      }
+
+      return ok(
+        sessions.map((session) => ({
+          id: session.id,
+          session_number: session.session_number,
+          status: session.status,
+          started_at: session.started_at,
+          completed_at: session.completed_at ?? null,
+          lines: (linesBySessionId.get(session.id) ?? []).sort(
+            (a, b) => a.sort_order - b.sort_order,
+          ),
+        })),
+      );
     } catch (error) {
-      return fail(toUserError(error, "Failed to load production session"));
+      return fail(toUserError(error, "Failed to load production sessions"));
     }
   },
 

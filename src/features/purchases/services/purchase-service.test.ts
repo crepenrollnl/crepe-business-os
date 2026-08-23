@@ -2,10 +2,11 @@
  * Purchase Service coverage — multi-line stock increment safety.
  *
  * Regression coverage for Plan V1 Phase 1 item 1.3: when a multi-line
- * purchase partially applies increment_ingredient_stock and a later line
- * fails, already-applied lines must be reversed through the same atomic
- * RPC (negated quantity) — never a no-op stand-in whose result is
- * discarded, which would leave stock silently inflated.
+ * purchase partially applies receive_purchase_line_stock_and_cost and a
+ * later line fails, already-applied lines must be reversed through
+ * reverse_receive_purchase_line_stock_and_cost (snapshot restore) —
+ * never a no-op stand-in whose result is discarded, which would leave
+ * stock and cost_per_unit silently inflated.
  */
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -128,13 +129,35 @@ function installMock(stockRpcErrors: Record<string, { message: string } | null>)
         };
       }
 
-      if (fn === "increment_ingredient_stock") {
+      if (fn === "receive_purchase_line_stock_and_cost") {
         const ingredientId = args.p_ingredient_id as string;
-        const quantity = args.p_quantity as number;
-        const direction = quantity > 0 ? "forward" : "reverse";
-        const key = `${ingredientId}:${direction}`;
+        const key = `${ingredientId}:forward`;
+        const error = stockRpcErrors[key] ?? null;
 
-        return { data: null, error: stockRpcErrors[key] ?? null };
+        if (error) {
+          return { data: null, error };
+        }
+
+        return {
+          data: {
+            ingredient_id: ingredientId,
+            previous_stock: 0,
+            previous_cost_per_unit: 0,
+            new_stock: args.p_quantity,
+            new_cost_per_unit: args.p_net_unit_cost,
+            cost_updated: true,
+            warning: null,
+          },
+          error: null,
+        };
+      }
+
+      if (fn === "reverse_receive_purchase_line_stock_and_cost") {
+        const ingredientId = args.p_ingredient_id as string;
+        return {
+          data: null,
+          error: stockRpcErrors[`${ingredientId}:reverse`] ?? null,
+        };
       }
 
       throw new Error(`Unexpected rpc call: ${fn}`);
@@ -198,7 +221,7 @@ describe("purchaseService.receivePurchase — partial stock increment failure", 
     vi.clearAllMocks();
   });
 
-  it("reverses already-applied lines via the real RPC (negated quantity), not a no-op", async () => {
+  it("reverses already-applied lines via the snapshot RPC, not a no-op", async () => {
     const { updateCalls } = installMock({
       [`${INGREDIENT_B}:forward`]: { message: "deadlock detected" },
     });
@@ -209,15 +232,37 @@ describe("purchaseService.receivePurchase — partial stock increment failure", 
     expect(result.error).toBeTruthy();
 
     const stockCalls = supabaseMock.rpc.mock.calls.filter(
-      ([fn]) => fn === "increment_ingredient_stock",
+      ([fn]) =>
+        fn === "receive_purchase_line_stock_and_cost" ||
+        fn === "reverse_receive_purchase_line_stock_and_cost",
     );
 
-    // Line A applied (+10), line B failed (+10 attempted), line A reversed (-10)
-    // through the same real RPC — never a discarded stand-in.
+    // Line A applied, line B failed, line A reversed through the snapshot RPC.
     expect(stockCalls).toEqual([
-      ["increment_ingredient_stock", { p_ingredient_id: INGREDIENT_A, p_quantity: 10 }],
-      ["increment_ingredient_stock", { p_ingredient_id: INGREDIENT_B, p_quantity: 10 }],
-      ["increment_ingredient_stock", { p_ingredient_id: INGREDIENT_A, p_quantity: -10 }],
+      [
+        "receive_purchase_line_stock_and_cost",
+        {
+          p_ingredient_id: INGREDIENT_A,
+          p_quantity: 10,
+          p_net_unit_cost: 1,
+        },
+      ],
+      [
+        "receive_purchase_line_stock_and_cost",
+        {
+          p_ingredient_id: INGREDIENT_B,
+          p_quantity: 10,
+          p_net_unit_cost: 1,
+        },
+      ],
+      [
+        "reverse_receive_purchase_line_stock_and_cost",
+        {
+          p_ingredient_id: INGREDIENT_A,
+          p_previous_stock: 0,
+          p_previous_cost_per_unit: 0,
+        },
+      ],
     ]);
 
     expect(updateCalls).toEqual([
@@ -226,6 +271,111 @@ describe("purchaseService.receivePurchase — partial stock increment failure", 
         payload: expect.objectContaining({ status: "draft" }),
       },
     ]);
+  });
+
+  it("still receives the purchase when the RPC warns that cost_per_unit was skipped", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    supabaseMock.rpc.mockImplementation(
+      async (fn: string, args: Record<string, unknown>) => {
+        if (fn === "calculate_purchase_totals") {
+          return {
+            data: {
+              lines: [
+                {
+                  ingredient_id: INGREDIENT_A,
+                  quantity: 10,
+                  unit_cost: 0,
+                  line_total: 0,
+                },
+              ],
+              subtotal: 0,
+              tax_total: 0,
+              total: 0,
+            },
+            error: null,
+          };
+        }
+
+        if (fn === "receive_purchase_line_stock_and_cost") {
+          return {
+            data: {
+              ingredient_id: args.p_ingredient_id,
+              previous_stock: 4,
+              previous_cost_per_unit: 9,
+              new_stock: 14,
+              new_cost_per_unit: 9,
+              cost_updated: false,
+              warning:
+                "Purchase line net unit cost is missing or not positive; stock increased without updating cost_per_unit.",
+            },
+            error: null,
+          };
+        }
+
+        throw new Error(`Unexpected rpc call: ${fn}`);
+      },
+    );
+
+    supabaseMock.from.mockImplementation((table: string) => {
+      if (table === "purchases") {
+        return {
+          insert: vi.fn(() =>
+            chainable({
+              data: { ...purchaseRow, subtotal: 0, total: 0 },
+              error: null,
+            }),
+          ),
+          update: vi.fn(() => chainable({ data: null, error: null })),
+          select: vi.fn(() => chainable({ data: [], error: null })),
+        };
+      }
+
+      if (table === "purchase_items") {
+        return {
+          delete: vi.fn(() => chainable({ data: null, error: null })),
+          insert: vi.fn(() =>
+            chainable({
+              data: [
+                {
+                  id: "item-1",
+                  purchase_id: PURCHASE_ID,
+                  ingredient_id: INGREDIENT_A,
+                  quantity: 10,
+                  unit_cost: 0,
+                  line_total: 0,
+                },
+              ],
+              error: null,
+            }),
+          ),
+        };
+      }
+
+      if (table === "suppliers") {
+        return { select: vi.fn(() => chainable({ data: [], error: null })) };
+      }
+
+      if (table === "ingredients") {
+        return { select: vi.fn(() => chainable({ data: [], error: null })) };
+      }
+
+      throw new Error(`Unexpected table: ${table}`);
+    });
+
+    const result = await purchaseService.receivePurchase({
+      supplier_id: "supplier-1",
+      invoice_number: "INV-1",
+      purchased_at: "2026-07-30",
+      notes: "",
+      lines: [{ ingredient_id: INGREDIENT_A, quantity: 10, unit_cost: 0 }],
+    });
+
+    expect(result.error).toBeNull();
+    expect(result.data?.status).toBe("received");
+    expect(warn).toHaveBeenCalled();
+
+    warn.mockRestore();
   });
 
   it("surfaces a reversal failure in the returned error instead of discarding it", async () => {
@@ -250,12 +400,26 @@ describe("purchaseService.receivePurchase — partial stock increment failure", 
     expect(result.data?.status).toBe("received");
 
     const stockCalls = supabaseMock.rpc.mock.calls.filter(
-      ([fn]) => fn === "increment_ingredient_stock",
+      ([fn]) => fn === "receive_purchase_line_stock_and_cost",
     );
 
     expect(stockCalls).toEqual([
-      ["increment_ingredient_stock", { p_ingredient_id: INGREDIENT_A, p_quantity: 10 }],
-      ["increment_ingredient_stock", { p_ingredient_id: INGREDIENT_B, p_quantity: 10 }],
+      [
+        "receive_purchase_line_stock_and_cost",
+        {
+          p_ingredient_id: INGREDIENT_A,
+          p_quantity: 10,
+          p_net_unit_cost: 1,
+        },
+      ],
+      [
+        "receive_purchase_line_stock_and_cost",
+        {
+          p_ingredient_id: INGREDIENT_B,
+          p_quantity: 10,
+          p_net_unit_cost: 1,
+        },
+      ],
     ]);
   });
 });

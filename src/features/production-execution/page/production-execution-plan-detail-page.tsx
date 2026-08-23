@@ -3,6 +3,7 @@
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { ProductionExecutionIngredientsSection } from "../components/production-execution-ingredients-section";
 import { ProductionExecutionPlanHeader } from "../components/production-execution-plan-header";
+import { ProductionExecutionPreviousRunsSection } from "../components/production-execution-previous-runs-section";
 import { ProductionExecutionProductsSection } from "../components/production-execution-products-section";
 import { ProductionExecutionShoppingSummary } from "../components/production-execution-shopping-summary";
 import { ProductionExecutionSummaryPlaceholder } from "../components/production-execution-summary-placeholder";
@@ -61,6 +62,7 @@ export function ProductionExecutionPlanDetailPage({
               }}
             />
             <ProductionExecutionProductsSection products={plan.products} />
+            <ProductionExecutionPreviousRunsSection sessions={plan.sessions} />
             <ProductionExecutionIngredientsSection
               ingredients={plan.ingredients}
             />
@@ -70,7 +72,9 @@ export function ProductionExecutionPlanDetailPage({
             />
             <ProductionExecutionSummaryPlaceholder
               hasOpenSession={Boolean(plan.open_session)}
-              hasCompletedSession={Boolean(plan.latest_completed_session)}
+              hasCompletedSession={plan.sessions.some(
+                (session) => session.status === "completed",
+              )}
             />
           </>
         )}
