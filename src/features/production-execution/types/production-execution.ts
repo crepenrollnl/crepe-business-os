@@ -19,6 +19,7 @@ import type {
 } from "@/features/production/types/production";
 import type { ServiceResult } from "@/types/service";
 import type {
+  ProductionPlanSessionHistoryItem,
   ProductionSession,
   ProductionSessionStatus,
   ProductionSessionWithRelations,
@@ -41,11 +42,8 @@ export type ProductionExecutionPlanDetail = ProductionPlanWithRelations & {
     ProductionSession,
     "id" | "session_number" | "status" | "started_at"
   > | null;
-  /** Most recently completed session, if any (for reopen). */
-  latest_completed_session: Pick<
-    ProductionSession,
-    "id" | "session_number" | "status" | "started_at" | "completed_at"
-  > | null;
+  /** All sessions of this plan (oldest session_number first). */
+  sessions: ProductionPlanSessionHistoryItem[];
 };
 
 export type ProductionExecutionSortField =
@@ -61,6 +59,7 @@ export type {
   ProductionPlanIngredient,
   ProductionPlanProduct,
   ProductionPlanShoppingItem,
+  ProductionPlanSessionHistoryItem,
   ProductionSession,
   ProductionSessionStatus,
   ProductionSessionWithRelations,

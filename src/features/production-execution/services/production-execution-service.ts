@@ -48,8 +48,8 @@ export const productionExecutionService = {
   },
 
   /**
-   * Loads a plan for execution review, including any open/completed session links.
-   * Rejects plans that are not ready for production.
+   * Loads a plan for execution review, including open session and all
+   * previous production runs. Rejects plans that are not ready for production.
    */
   async getExecutablePlanById(
     id: string,
@@ -72,9 +72,9 @@ export const productionExecutionService = {
         };
       }
 
-      const [openSessionResult, completedSessionResult] = await Promise.all([
+      const [openSessionResult, sessionsResult] = await Promise.all([
         productionSessionService.getOpenSessionForPlan(id),
-        productionSessionService.getLatestCompletedSessionForPlan(id),
+        productionSessionService.listSessionsForPlan(id),
       ]);
 
       if (openSessionResult.error) {
@@ -84,10 +84,10 @@ export const productionExecutionService = {
         };
       }
 
-      if (completedSessionResult.error) {
+      if (sessionsResult.error) {
         return {
           data: null,
-          error: completedSessionResult.error,
+          error: sessionsResult.error,
         };
       }
 
@@ -96,7 +96,7 @@ export const productionExecutionService = {
           ...result.data,
           status: EXECUTABLE_PLAN_STATUS,
           open_session: openSessionResult.data,
-          latest_completed_session: completedSessionResult.data,
+          sessions: sessionsResult.data ?? [],
         },
         error: null,
       };

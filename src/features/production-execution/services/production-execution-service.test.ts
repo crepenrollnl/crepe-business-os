@@ -30,7 +30,7 @@ const { productionServiceMock, productionSessionServiceMock } = vi.hoisted(
     },
     productionSessionServiceMock: {
       getOpenSessionForPlan: vi.fn(),
-      getLatestCompletedSessionForPlan: vi.fn(),
+      listSessionsForPlan: vi.fn(),
     },
   }),
 );
@@ -187,9 +187,9 @@ describe("productionExecutionService", () => {
         },
         error: null,
       });
-      productionSessionServiceMock.getLatestCompletedSessionForPlan.mockResolvedValue(
+      productionSessionServiceMock.listSessionsForPlan.mockResolvedValue(
         {
-          data: null,
+          data: [],
           error: null,
         },
       );
@@ -205,12 +205,12 @@ describe("productionExecutionService", () => {
         status: "in_progress",
         started_at: "2026-08-01T09:00:00.000Z",
       });
-      expect(result.data?.latest_completed_session).toBeNull();
+      expect(result.data?.sessions).toEqual([]);
       expect(
         productionSessionServiceMock.getOpenSessionForPlan,
       ).toHaveBeenCalledWith(PLAN_ID);
       expect(
-        productionSessionServiceMock.getLatestCompletedSessionForPlan,
+        productionSessionServiceMock.listSessionsForPlan,
       ).toHaveBeenCalledWith(PLAN_ID);
     });
 
@@ -231,7 +231,7 @@ describe("productionExecutionService", () => {
         productionSessionServiceMock.getOpenSessionForPlan,
       ).not.toHaveBeenCalled();
       expect(
-        productionSessionServiceMock.getLatestCompletedSessionForPlan,
+        productionSessionServiceMock.listSessionsForPlan,
       ).not.toHaveBeenCalled();
     });
 
@@ -257,8 +257,8 @@ describe("productionExecutionService", () => {
         data: null,
         error: "Failed to load production session",
       });
-      productionSessionServiceMock.getLatestCompletedSessionForPlan.mockResolvedValue(
-        { data: null, error: null },
+      productionSessionServiceMock.listSessionsForPlan.mockResolvedValue(
+        { data: [], error: null },
       );
 
       const result =
@@ -268,7 +268,7 @@ describe("productionExecutionService", () => {
       expect(result.error).toBe("Failed to load production session");
     });
 
-    it("propagates the error when loading the latest completed session fails", async () => {
+    it("propagates the error when loading plan sessions fails", async () => {
       productionServiceMock.getProductionPlanById.mockResolvedValue({
         data: planWithRelations(),
         error: null,
@@ -277,15 +277,15 @@ describe("productionExecutionService", () => {
         data: null,
         error: null,
       });
-      productionSessionServiceMock.getLatestCompletedSessionForPlan.mockResolvedValue(
-        { data: null, error: "Failed to load completed session" },
+      productionSessionServiceMock.listSessionsForPlan.mockResolvedValue(
+        { data: null, error: "Failed to load production sessions" },
       );
 
       const result =
         await productionExecutionService.getExecutablePlanById(PLAN_ID);
 
       expect(result.data).toBeNull();
-      expect(result.error).toBe("Failed to load completed session");
+      expect(result.error).toBe("Failed to load production sessions");
     });
 
     it("maps a thrown exception to a fallback message", async () => {

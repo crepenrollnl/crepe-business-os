@@ -45,7 +45,7 @@ export function ProductionExecutionProductsSection({
                   Product
                 </th>
                 <th className="px-4 py-3 text-right text-sm font-semibold text-zinc-700">
-                  Planned Quantity
+                  Target / Planned
                 </th>
                 <th className="px-4 py-3 text-left text-sm font-semibold text-zinc-700">
                   Unit

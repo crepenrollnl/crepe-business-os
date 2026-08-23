@@ -72,6 +72,29 @@ export interface ProductionSessionPlanSummary {
   name: string;
 }
 
+/** Actual produced qty for one recipe on a past/current session of a plan. */
+export interface ProductionPlanSessionLineFact {
+  recipe_id: string;
+  product_name: string;
+  yield_unit: string;
+  /**
+   * Batch `produced_quantity` when a lot exists; otherwise session-line
+   * `actual_produced_quantity`. null = not entered and no batch.
+   */
+  produced_quantity: number | null;
+  sort_order: number;
+}
+
+/** One production session of a plan, with per-recipe produced facts. */
+export interface ProductionPlanSessionHistoryItem {
+  id: string;
+  session_number: number;
+  status: ProductionSessionStatus;
+  started_at: string;
+  completed_at: string | null;
+  lines: ProductionPlanSessionLineFact[];
+}
+
 /** Session-level production accounting status (DEV-105 / DEV-106). */
 export type ProductionAccountingPostingStatus = "posted" | "pending";
 
