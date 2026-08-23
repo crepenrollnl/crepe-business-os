@@ -5,7 +5,14 @@ import { FinishedGoodsTable } from "../components/finished-goods-table";
 import { FinishedGoodsToolbar } from "../components/finished-goods-toolbar";
 import { useFinishedGoods } from "../hooks/use-finished-goods";
 
-export function FinishedGoodsPage() {
+type FinishedGoodsPageProps = {
+  /** Skip DashboardLayout when composed under Inventory workspace tabs. */
+  embedded?: boolean;
+};
+
+export function FinishedGoodsPage({
+  embedded = false,
+}: FinishedGoodsPageProps) {
   const {
     items,
     totalCount,
@@ -26,39 +33,45 @@ export function FinishedGoodsPage() {
     retry,
   } = useFinishedGoods();
 
-  return (
-    <DashboardLayout activePath="/finished-goods">
-      <div className="mx-auto max-w-7xl space-y-8">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight text-zinc-900 sm:text-4xl">
-            Finished Goods
-          </h1>
-          <p className="mt-2 text-base text-zinc-600 sm:text-lg">
-            Remaining produced goods and components. Quantities are calculated
-            from production batches minus sales — not a second inventory ledger.
-          </p>
-        </div>
-
-        <FinishedGoodsToolbar search={search} onSearchChange={setSearch} />
-
-        <FinishedGoodsTable
-          items={items}
-          totalCount={totalCount}
-          filteredCount={filteredCount}
-          hasActiveFilters={hasActiveFilters}
-          loading={loading}
-          error={error}
-          sortField={sortField}
-          sortDirection={sortDirection}
-          page={page}
-          totalPages={totalPages}
-          pageSize={pageSize}
-          onSort={toggleSort}
-          onRetry={retry}
-          onPageChange={setPage}
-          onPageSizeChange={setPageSize}
-        />
+  const content = (
+    <div className="mx-auto max-w-7xl space-y-8">
+      <div>
+        <h1 className="text-3xl font-bold tracking-tight text-zinc-900 sm:text-4xl">
+          Finished Goods
+        </h1>
+        <p className="mt-2 text-base text-zinc-600 sm:text-lg">
+          Remaining produced goods and components. Quantities are calculated
+          from production batches minus sales — not a second inventory ledger.
+        </p>
       </div>
-    </DashboardLayout>
+
+      <FinishedGoodsToolbar search={search} onSearchChange={setSearch} />
+
+      <FinishedGoodsTable
+        items={items}
+        totalCount={totalCount}
+        filteredCount={filteredCount}
+        hasActiveFilters={hasActiveFilters}
+        loading={loading}
+        error={error}
+        sortField={sortField}
+        sortDirection={sortDirection}
+        page={page}
+        totalPages={totalPages}
+        pageSize={pageSize}
+        onSort={toggleSort}
+        onRetry={retry}
+        onPageChange={setPage}
+        onPageSizeChange={setPageSize}
+      />
+    </div>
+  );
+
+  if (embedded) {
+    return content;
+  }
+
+  return (
+    <DashboardLayout activePath="/inventory">{content}</DashboardLayout>
   );
 }

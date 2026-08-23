@@ -10,7 +10,6 @@ export const navItems: NavItem[] = [
   { label: "Purchases", href: "/purchases" },
   { label: "Production Planning", href: "/production-planning" },
   { label: "Production Execution", href: "/production-execution" },
-  { label: "Finished Goods", href: "/finished-goods" },
   { label: "Sales", href: "/sales" },
   { label: "Expenses", href: "/expenses" },
   { label: "Fixed Assets", href: "/fixed-assets" },
