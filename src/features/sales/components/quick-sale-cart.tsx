@@ -9,7 +9,9 @@ type QuickSaleCartProps = {
   postingError: string | null;
   lastConfirmedSaleNumber: string | null;
   sendToQueue: boolean;
+  kitchenNote: string;
   onSendToQueueChange: (value: boolean) => void;
+  onKitchenNoteChange: (value: string) => void;
   onIncrement: (productId: string) => void;
   onDecrement: (productId: string) => void;
   onConfirm: () => void;
@@ -23,7 +25,9 @@ export function QuickSaleCart({
   postingError,
   lastConfirmedSaleNumber,
   sendToQueue,
+  kitchenNote,
   onSendToQueueChange,
+  onKitchenNoteChange,
   onIncrement,
   onDecrement,
   onConfirm,
@@ -100,6 +104,18 @@ export function QuickSaleCart({
           {actionError}
         </p>
       ) : null}
+
+      <label className="flex flex-col gap-1.5 text-sm text-zinc-700">
+        <span>Kitchen note</span>
+        <textarea
+          value={kitchenNote}
+          disabled={confirming}
+          rows={2}
+          onChange={(event) => onKitchenNoteChange(event.target.value)}
+          placeholder="Allergy, extra sauce, no onions…"
+          className="min-h-16 w-full resize-y rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-900 placeholder:text-zinc-400 focus:border-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-500/30 disabled:cursor-not-allowed disabled:bg-zinc-50"
+        />
+      </label>
 
       <label className="flex min-h-11 cursor-pointer items-center gap-3 text-sm text-zinc-700">
         <input

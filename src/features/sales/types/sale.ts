@@ -29,10 +29,12 @@ export interface Sale {
   paid_at: string | null;
   cancelled_at: string | null;
   fulfilled_at: string | null;
+  is_paid: boolean;
   subtotal: number;
   tax_total: number;
   total: number;
   notes: string | null;
+  kitchen_note: string | null;
   created_at: string;
   updated_at?: string;
 }
@@ -124,6 +126,7 @@ export interface QuickSaleLineInput {
  */
 export interface CreateAndConfirmSaleInput {
   customer_id?: string | null;
+  kitchen_note?: string | null;
   lines: QuickSaleLineInput[];
 }
 
@@ -193,6 +196,8 @@ export interface QueuedSale {
   sale_number: string;
   confirmed_at: string | null;
   total: number;
+  is_paid: boolean;
+  kitchen_note: string | null;
   lines: QueuedSaleLine[];
 }
 

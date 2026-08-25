@@ -16,10 +16,12 @@ export function PosSalePane() {
     postingError,
     lastConfirmedSaleNumber,
     sendToQueue,
+    kitchenNote,
     addToCart,
     incrementLine,
     decrementLine,
     setSendToQueue,
+    setKitchenNote,
     confirm,
   } = usePosSale();
 
@@ -40,7 +42,9 @@ export function PosSalePane() {
         postingError={postingError}
         lastConfirmedSaleNumber={lastConfirmedSaleNumber}
         sendToQueue={sendToQueue}
+        kitchenNote={kitchenNote}
         onSendToQueueChange={setSendToQueue}
+        onKitchenNoteChange={setKitchenNote}
         onIncrement={incrementLine}
         onDecrement={decrementLine}
         onConfirm={() => {

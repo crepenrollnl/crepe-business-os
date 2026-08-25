@@ -9,10 +9,12 @@ import type { QueuedSale } from "@/features/sales/types/sale";
 const {
   listQueuedSalesMock,
   markSaleFulfilledMock,
+  markSalePaidMock,
   getRecipesMock,
 } = vi.hoisted(() => ({
   listQueuedSalesMock: vi.fn(),
   markSaleFulfilledMock: vi.fn(),
+  markSalePaidMock: vi.fn(),
   getRecipesMock: vi.fn(),
 }));
 
@@ -25,6 +27,7 @@ vi.mock("@/features/sales/services/sales-read-service", () => ({
 vi.mock("@/features/sales/services/sales-service", () => ({
   salesService: {
     markSaleFulfilled: (...args: unknown[]) => markSaleFulfilledMock(...args),
+    markSalePaid: (...args: unknown[]) => markSalePaidMock(...args),
   },
 }));
 
@@ -45,6 +48,8 @@ function queuedSale(overrides?: Partial<QueuedSale>): QueuedSale {
     sale_number: "S-000034",
     confirmed_at: "2026-08-20T08:00:00.000Z",
     total: 28.5,
+    is_paid: false,
+    kitchen_note: null,
     lines: [
       {
         product_id: PRODUCT_ID,
@@ -70,6 +75,10 @@ describe("usePosQueue", () => {
       error: null,
     });
     markSaleFulfilledMock.mockResolvedValue({
+      data: { id: SALE_ID },
+      error: null,
+    });
+    markSalePaidMock.mockResolvedValue({
       data: { id: SALE_ID },
       error: null,
     });
@@ -127,6 +136,8 @@ describe("usePosQueue", () => {
         sale_number: "S-000034",
         confirmed_at: "2026-08-20T08:00:00.000Z",
         total: 28.5,
+        is_paid: false,
+        kitchen_note: null,
         lines: [
           {
             product_id: PRODUCT_ID,
@@ -182,6 +193,32 @@ describe("usePosQueue", () => {
 
     expect(markSaleFulfilledMock).toHaveBeenCalledWith(SALE_ID);
     expect(result.current.items).toEqual([]);
+    expect(result.current.actionError).toBeNull();
+  });
+
+  it("sets is_paid locally after markPaid succeeds without removing the ticket", async () => {
+    listQueuedSalesMock.mockResolvedValue({
+      data: [queuedSale({ kitchen_note: "No onions" })],
+      error: null,
+    });
+
+    const { result } = renderHook(() => usePosQueue());
+
+    await waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+
+    expect(result.current.items[0]?.is_paid).toBe(false);
+    expect(result.current.items[0]?.kitchen_note).toBe("No onions");
+
+    await act(async () => {
+      await result.current.markPaid(SALE_ID);
+    });
+
+    expect(markSalePaidMock).toHaveBeenCalledWith(SALE_ID);
+    expect(result.current.items).toHaveLength(1);
+    expect(result.current.items[0]?.is_paid).toBe(true);
+    expect(result.current.items[0]?.kitchen_note).toBe("No onions");
     expect(result.current.actionError).toBeNull();
   });
 });

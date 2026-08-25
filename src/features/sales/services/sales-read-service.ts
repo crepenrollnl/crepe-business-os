@@ -72,6 +72,8 @@ interface QueueSaleRow {
   confirmed_at: string | null;
   total: number | string;
   fulfilled_at: string | null;
+  is_paid: boolean;
+  kitchen_note: string | null;
 }
 
 interface QueueLineRow {
@@ -193,6 +195,8 @@ function mapQueuedSales(
       sale_number: row.sale_number,
       confirmed_at: row.confirmed_at,
       total,
+      is_paid: row.is_paid === true,
+      kitchen_note: row.kitchen_note ?? null,
       lines: linesBySaleId.get(row.id) ?? [],
     };
   });
@@ -344,7 +348,9 @@ export const salesReadService = {
     try {
       const { data: saleData, error: saleError } = await supabase
         .from("sales")
-        .select("id, sale_number, confirmed_at, total, fulfilled_at")
+        .select(
+          "id, sale_number, confirmed_at, total, fulfilled_at, is_paid, kitchen_note",
+        )
         .in("status", ["confirmed", "paid"])
         .is("fulfilled_at", null)
         .order("confirmed_at", { ascending: true })

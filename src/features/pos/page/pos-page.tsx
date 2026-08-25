@@ -38,11 +38,15 @@ export function PosPage() {
           error={queue.error}
           actionError={queue.actionError}
           fulfillingId={queue.fulfillingId}
+          payingId={queue.payingId}
           onRetry={() => {
             void queue.retry();
           }}
           onMarkFulfilled={(saleId) => {
             void queue.markFulfilled(saleId);
+          }}
+          onMarkPaid={(saleId) => {
+            void queue.markPaid(saleId);
           }}
         />
       ) : null}

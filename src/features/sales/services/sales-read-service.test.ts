@@ -696,6 +696,8 @@ describe("salesReadService.listQueuedSales", () => {
       confirmed_at: "2026-08-20T08:00:00.000Z",
       total: "28.50",
       fulfilled_at: null,
+      is_paid: false,
+      kitchen_note: null,
       ...overrides,
     };
   }
@@ -798,6 +800,8 @@ describe("salesReadService.listQueuedSales", () => {
         sale_number: "S-1001",
         confirmed_at: "2026-08-20T08:00:00.000Z",
         total: 28.5,
+        is_paid: false,
+        kitchen_note: null,
         lines: [
           {
             product_id: PRODUCT_ID,
@@ -809,7 +813,7 @@ describe("salesReadService.listQueuedSales", () => {
     expect(supabaseMock.from).toHaveBeenCalledWith("sales");
     expect(supabaseMock.from).toHaveBeenCalledWith("sale_lines");
     expect(salesSelect).toHaveBeenCalledWith(
-      "id, sale_number, confirmed_at, total, fulfilled_at",
+      "id, sale_number, confirmed_at, total, fulfilled_at, is_paid, kitchen_note",
     );
     expect(salesIn).toHaveBeenCalledWith("status", ["confirmed", "paid"]);
     expect(salesIs).toHaveBeenCalledWith("fulfilled_at", null);

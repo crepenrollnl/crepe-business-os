@@ -64,6 +64,7 @@ export function usePosSale() {
     string | null
   >(null);
   const [sendToQueue, setSendToQueue] = useState(false);
+  const [kitchenNote, setKitchenNote] = useState("");
 
   const loadProducts = useCallback(async () => {
     setLoading(true);
@@ -165,7 +166,10 @@ export function usePosSale() {
       await accountingContextService.getCurrentAccountingContext();
 
     if (contextResult.error || !contextResult.data) {
-      const fallback = await salesService.createAndConfirmSale({ lines });
+      const fallback = await salesService.createAndConfirmSale({
+        lines,
+        kitchen_note: kitchenNote,
+      });
 
       if (fallback.error || !fallback.data) {
         setActionError(fallback.error ?? "Failed to confirm sale");
@@ -186,7 +190,7 @@ export function usePosSale() {
       }
     } else {
       const posted = await salesService.createAndConfirmSaleAndPostJournals(
-        { lines },
+        { lines, kitchen_note: kitchenNote },
         contextResult.data,
       );
 
@@ -209,9 +213,10 @@ export function usePosSale() {
 
     setCart({});
     setSendToQueue(false);
+    setKitchenNote("");
     setConfirming(false);
     return true;
-  }, [cartLines, sendToQueue]);
+  }, [cartLines, sendToQueue, kitchenNote]);
 
   return {
     products,
@@ -224,10 +229,12 @@ export function usePosSale() {
     postingError,
     lastConfirmedSaleNumber,
     sendToQueue,
+    kitchenNote,
     addToCart,
     incrementLine,
     decrementLine,
     setSendToQueue,
+    setKitchenNote,
     confirm,
     retry: loadProducts,
   };
