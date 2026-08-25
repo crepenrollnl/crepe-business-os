@@ -119,10 +119,12 @@ function sale(overrides?: Partial<SaleWithLines>): SaleWithLines {
     paid_at: null,
     cancelled_at: null,
     fulfilled_at: "2026-07-26T11:00:00.000Z",
+    is_paid: false,
     subtotal: 100,
     tax_total: 21,
     total: 121,
     notes: null,
+    kitchen_note: null,
     created_at: "2026-07-26T10:00:00.000Z",
     lines: [
       {

@@ -20,6 +20,8 @@ export interface PosQueueOrder {
   sale_number: string;
   confirmed_at: string | null;
   total: number;
+  is_paid: boolean;
+  kitchen_note: string | null;
   lines: PosQueueLine[];
 }
 
@@ -39,6 +41,8 @@ function mapQueuedSales(
     sale_number: sale.sale_number,
     confirmed_at: sale.confirmed_at,
     total: sale.total,
+    is_paid: sale.is_paid,
+    kitchen_note: sale.kitchen_note,
     lines: sale.lines.map((line) => ({
       product_id: line.product_id,
       quantity: line.quantity,
@@ -59,6 +63,7 @@ export function usePosQueue() {
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [fulfillingId, setFulfillingId] = useState<string | null>(null);
+  const [payingId, setPayingId] = useState<string | null>(null);
 
   const loadNames = useCallback(async () => {
     const result = await recipeService.getRecipes();
@@ -139,13 +144,36 @@ export function usePosQueue() {
     return true;
   }, []);
 
+  const markPaid = useCallback(async (saleId: string) => {
+    setActionError(null);
+    setPayingId(saleId);
+
+    const result = await salesService.markSalePaid(saleId);
+
+    if (result.error) {
+      setActionError(result.error);
+      setPayingId(null);
+      return false;
+    }
+
+    setQueuedSales((current) =>
+      current.map((item) =>
+        item.sale_id === saleId ? { ...item, is_paid: true } : item,
+      ),
+    );
+    setPayingId(null);
+    return true;
+  }, []);
+
   return {
     items,
     loading,
     error,
     actionError,
     fulfillingId,
+    payingId,
     markFulfilled,
+    markPaid,
     retry: loadQueue,
   };
 }

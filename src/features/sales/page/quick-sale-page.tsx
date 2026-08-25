@@ -18,10 +18,12 @@ export function QuickSalePage() {
     postingError,
     lastConfirmedSaleNumber,
     sendToQueue,
+    kitchenNote,
     addToCart,
     incrementLine,
     decrementLine,
     setSendToQueue,
+    setKitchenNote,
     confirm,
   } = useQuickSale();
 
@@ -57,7 +59,9 @@ export function QuickSalePage() {
             postingError={postingError}
             lastConfirmedSaleNumber={lastConfirmedSaleNumber}
             sendToQueue={sendToQueue}
+            kitchenNote={kitchenNote}
             onSendToQueueChange={setSendToQueue}
+            onKitchenNoteChange={setKitchenNote}
             onIncrement={incrementLine}
             onDecrement={decrementLine}
             onConfirm={() => {

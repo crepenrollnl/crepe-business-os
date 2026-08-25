@@ -65,10 +65,12 @@ function saleRow() {
     paid_at: null,
     cancelled_at: null,
     fulfilled_at: "2026-07-22T16:00:00.000Z",
+    is_paid: false,
     subtotal: 25,
     tax_total: 0,
     total: 25,
     notes: null,
+    kitchen_note: null,
     created_at: "2026-07-22T15:00:00.000Z",
     updated_at: "2026-07-22T16:00:00.000Z",
   };
@@ -248,7 +250,7 @@ describe("salesService.confirmSale (DEV-027)", () => {
     expect(supabaseMock.from).toHaveBeenCalledWith("sales");
     expect(supabaseMock.from).toHaveBeenCalledWith("sale_lines");
     expect(saleSelect).toHaveBeenCalledWith(
-      "id, sale_number, customer_id, status, sale_date, confirmed_at, paid_at, cancelled_at, fulfilled_at, subtotal, tax_total, total, notes, created_at, updated_at",
+      "id, sale_number, customer_id, status, sale_date, confirmed_at, paid_at, cancelled_at, fulfilled_at, is_paid, subtotal, tax_total, total, notes, kitchen_note, created_at, updated_at",
     );
     expect(saleEq).toHaveBeenCalledWith("id", SALE_ID);
     expect(linesSelect).toHaveBeenCalledWith(
@@ -1209,5 +1211,48 @@ describe("salesService.markSaleQueued / markSaleFulfilled", () => {
     const fulfilled = await salesService.markSaleFulfilled(SALE_ID);
     expect(fulfilled.data).toBeNull();
     expect(fulfilled.error).toBe("Failed to mark sale as ready.");
+  });
+});
+
+describe("salesService.markSalePaid", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("rejects an invalid sale id without calling the RPC", async () => {
+    const result = await salesService.markSalePaid("not-a-uuid");
+
+    expect(result.data).toBeNull();
+    expect(result.error).toBe("Sale id is required.");
+    expect(supabaseMock.rpc).not.toHaveBeenCalled();
+    expect(supabaseMock.from).not.toHaveBeenCalled();
+  });
+
+  it("calls set_sale_paid_flag with is_paid true and does not UPDATE sales", async () => {
+    supabaseMock.rpc.mockResolvedValue({ data: null, error: null });
+
+    const result = await salesService.markSalePaid(SALE_ID);
+
+    expect(result.error).toBeNull();
+    expect(result.data).toEqual({ id: SALE_ID });
+    expect(supabaseMock.rpc).toHaveBeenCalledTimes(1);
+    expect(supabaseMock.rpc).toHaveBeenCalledWith("set_sale_paid_flag", {
+      p_sale_id: SALE_ID,
+      p_is_paid: true,
+    });
+    expect(supabaseMock.from).not.toHaveBeenCalled();
+  });
+
+  it("maps database errors without throwing", async () => {
+    supabaseMock.rpc.mockResolvedValue({
+      data: null,
+      error: { message: "Sale was not found." },
+    });
+
+    const result = await salesService.markSalePaid(SALE_ID);
+
+    expect(result.data).toBeNull();
+    expect(result.error).toBe("Sale was not found.");
+    expect(supabaseMock.from).not.toHaveBeenCalled();
   });
 });

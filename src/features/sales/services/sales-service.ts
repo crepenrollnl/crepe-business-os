@@ -2,8 +2,9 @@
  * Sales service (DEV-027 / DEV-034 / DEV-035).
  *
  * Orchestrates create_draft_sale, sale-line RPCs, and confirm_sale only.
- * Kitchen-queue flags (markSaleQueued / markSaleFulfilled) are the only
+ * Kitchen-queue flags: markSaleQueued / markSaleFulfilled are the only
  * client UPDATEs on sales — they touch fulfilled_at, never money or stock.
+ * markSalePaid goes through set_sale_paid_flag and updates is_paid only.
  * Does NOT implement FIFO, COGS math, remaining quantity, ledger writes,
  * Finished Goods updates, or commercial total/tax calculation in TypeScript.
  */
@@ -37,7 +38,7 @@ const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const SALE_SELECT =
-  "id, sale_number, customer_id, status, sale_date, confirmed_at, paid_at, cancelled_at, fulfilled_at, subtotal, tax_total, total, notes, created_at, updated_at";
+  "id, sale_number, customer_id, status, sale_date, confirmed_at, paid_at, cancelled_at, fulfilled_at, is_paid, subtotal, tax_total, total, notes, kitchen_note, created_at, updated_at";
 
 const SALE_LINE_SELECT =
   "id, sale_id, product_id, quantity, unit_price, line_total, created_at";
@@ -52,10 +53,12 @@ interface SaleRow {
   paid_at: string | null;
   cancelled_at: string | null;
   fulfilled_at: string | null;
+  is_paid: boolean;
   subtotal: number | string;
   tax_total: number | string;
   total: number | string;
   notes: string | null;
+  kitchen_note: string | null;
   created_at: string;
   updated_at?: string;
 }
@@ -559,10 +562,12 @@ function mapSale(row: SaleRow): Sale {
     paid_at: row.paid_at,
     cancelled_at: row.cancelled_at,
     fulfilled_at: row.fulfilled_at ?? null,
+    is_paid: row.is_paid === true,
     subtotal: toNumber(row.subtotal),
     tax_total: toNumber(row.tax_total),
     total: toNumber(row.total),
     notes: row.notes,
+    kitchen_note: row.kitchen_note ?? null,
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
@@ -935,9 +940,14 @@ export const salesService = {
         return fail("You must be signed in to confirm a sale.");
       }
 
+      const kitchenNote = input.kitchen_note?.trim()
+        ? input.kitchen_note.trim()
+        : null;
+
       const { data, error } = await supabase.rpc("create_and_confirm_sale", {
         p_customer_id: customerId.length > 0 ? customerId : null,
         p_lines: input.lines,
+        p_kitchen_note: kitchenNote,
       });
 
       if (error) {
@@ -1065,6 +1075,35 @@ export const salesService = {
       return ok({ id: trimmed });
     } catch (error) {
       return fail(toUserError(error, "Failed to mark sale as ready."));
+    }
+  },
+
+  /**
+   * Kitchen-queue payment flag. Calls set_sale_paid_flag so the client
+   * never UPDATEs sales.is_paid through the wide RLS policy. Does not
+   * touch status, paid_at, fulfilled_at, confirm_sale, stock, or journals.
+   */
+  async markSalePaid(saleId: string): Promise<ServiceResult<{ id: string }>> {
+    const validationError = validateConfirmSaleInput(saleId);
+    if (validationError) {
+      return fail(validationError);
+    }
+
+    const trimmed = saleId.trim();
+
+    try {
+      const { error } = await supabase.rpc("set_sale_paid_flag", {
+        p_sale_id: trimmed,
+        p_is_paid: true,
+      });
+
+      if (error) {
+        return fail(toUserError(error, "Failed to mark sale as paid."));
+      }
+
+      return ok({ id: trimmed });
+    } catch (error) {
+      return fail(toUserError(error, "Failed to mark sale as paid."));
     }
   },
 };
