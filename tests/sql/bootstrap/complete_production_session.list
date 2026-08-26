@@ -1,0 +1,36 @@
+# Proven bootstrap for tests/sql/complete_production_session_zero_cost.sql
+# Applied in this order on clean PostgreSQL 16.14 (no Supabase), 26.08.2026.
+# sql/098 is the whole file, not a REPLACE extract.
+#
+# Scratch extras (not numbered migrations):
+tests/sql/bootstrap/prelude_auth.sql
+tests/sql/bootstrap/stub_suppliers.sql
+#
+# Numbered sql/ files that were required:
+sql/000_backfill_ingredients_ingredient_categories.sql
+sql/001_create_purchases.sql
+sql/019_create_suppliers.sql
+sql/002_create_recipes.sql
+sql/004_create_production_plans.sql
+sql/006_create_production_sessions.sql
+sql/007_complete_production.sql
+sql/010_finished_goods_batch_consumptions.sql
+sql/013_create_sales.sql
+sql/060_create_shifts.sql
+sql/085_recipe_assembly_layer.sql
+sql/087_fix_finished_goods_consumption_rounding.sql
+sql/088_fix_finished_goods_total_cost_check.sql
+sql/089_recipe_components_ingredients.sql
+sql/093_raw_material_scale_override.sql
+sql/097_profiles_and_role_guard.sql
+sql/098_role_guard_purchases_production.sql
+sql/100_component_in_component.sql
+sql/101_component_bom_explosion.sql
+sql/106_reject_zero_cost_production_consumption.sql
+#
+# Applied OK in an earlier pass but not required for this test:
+#   sql/003_create_production.sql
+#   sql/005_production_plans_name_draft.sql
+#   sql/008_start_production_session.sql
+#   sql/009_save_production_session.sql
+#   sql/011_allocate_finished_goods_fifo.sql  (replaced by sql/085 then sql/087)
