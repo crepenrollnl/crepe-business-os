@@ -55,3 +55,6 @@ jobs:
 
       - name: complete_production_session zero-cost guard
         run: psql -v ON_ERROR_STOP=1 -f tests/sql/complete_production_session_zero_cost.sql
+
+      - name: allocate_finished_goods_fifo
+        run: psql -v ON_ERROR_STOP=1 -f tests/sql/allocate_finished_goods_fifo.sql
