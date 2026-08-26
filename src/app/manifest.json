@@ -2,7 +2,7 @@
   "name": "Crepe 'n Roll",
   "short_name": "Crepe 'n Roll",
   "description": "Crepe'n Roll — order and business management",
-  "start_url": "/",
+  "start_url": "/pos",
   "display": "standalone",
   "background_color": "#ffffff",
   "theme_color": "#9c5221",

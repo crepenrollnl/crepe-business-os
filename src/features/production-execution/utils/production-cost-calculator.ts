@@ -74,6 +74,10 @@ export function validateInventoryUnitCost(
     return `Inventory unit cost for "${ingredientName}" cannot be negative.`;
   }
 
+  if (unitCost === 0) {
+    return `Missing inventory valuation for "${ingredientName}".`;
+  }
+
   return null;
 }
 

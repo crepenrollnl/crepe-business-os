@@ -24,7 +24,7 @@ export interface CompleteProductionRecipeIngredient {
   quantity_per_yield: number;
   unit: string;
   /**
-   * Actual inventory unit cost. null = missing valuation (rejected).
+   * Actual inventory unit cost. null or 0 = missing valuation (rejected).
    */
   cost_per_unit: number | null;
   name: string;
@@ -129,6 +129,80 @@ export function roundUnitCost(value: number): number {
   return roundProductionUnitCost(value);
 }
 
+function scaledConsumedQuantity(
+  line: CompleteProductionLineInput,
+  bom: CompleteProductionRecipeBom,
+  ingredient: CompleteProductionRecipeIngredient,
+): number {
+  return scaleRecipeIngredientNeed(
+    {
+      ingredientId: ingredient.ingredient_id,
+      quantityPerYield: ingredient.quantity_per_yield,
+      unit: ingredient.unit,
+    },
+    line.raw_material_scale != null
+      ? line.raw_material_scale * bom.yield_quantity
+      : line.actual_produced_quantity,
+    bom.yield_quantity,
+  );
+}
+
+function isMissingOrZeroUnitCost(costPerUnit: number | null): boolean {
+  return (
+    costPerUnit === null || !Number.isFinite(costPerUnit) || costPerUnit === 0
+  );
+}
+
+/**
+ * UX preview of ingredients that sql/106 will reject (consumed qty > 0 and
+ * unit cost missing or zero). Not a second source of truth — the RPC still
+ * decides. Names are unique and sorted.
+ */
+export function listZeroUnitCostConsumptions(
+  lines: readonly CompleteProductionLineInput[],
+  bomsByRecipeId: ReadonlyMap<string, CompleteProductionRecipeBom>,
+): readonly string[] {
+  const names = new Set<string>();
+
+  for (const line of lines) {
+    if (line.actual_produced_quantity <= 0) {
+      continue;
+    }
+
+    const bom = bomsByRecipeId.get(line.recipe_id);
+    if (!bom || !bom.is_active || bom.yield_quantity <= 0) {
+      continue;
+    }
+
+    for (const ingredient of bom.ingredients) {
+      if (ingredient.is_missing) {
+        continue;
+      }
+
+      const scaled = scaledConsumedQuantity(line, bom, ingredient);
+      if (scaled <= 0) {
+        continue;
+      }
+
+      if (isMissingOrZeroUnitCost(ingredient.cost_per_unit)) {
+        names.add(ingredient.name);
+      }
+    }
+  }
+
+  return [...names].sort((a, b) => a.localeCompare(b));
+}
+
+export function formatZeroCostConsumptionWarning(
+  ingredientNames: readonly string[],
+): string | null {
+  if (ingredientNames.length === 0) {
+    return null;
+  }
+
+  return `These ingredients have no unit cost: ${ingredientNames.join(", ")}. Set Cost per unit in Inventory before finishing.`;
+}
+
 /**
  * Build consumption + batch plans from actual produced quantities.
  * Batch costs come only from Production Cost Calculator.
@@ -198,17 +272,7 @@ export function buildCompleteProductionPlan(
         };
       }
 
-      const scaled = scaleRecipeIngredientNeed(
-        {
-          ingredientId: ingredient.ingredient_id,
-          quantityPerYield: ingredient.quantity_per_yield,
-          unit: ingredient.unit,
-        },
-        line.raw_material_scale != null
-          ? line.raw_material_scale * bom.yield_quantity
-          : line.actual_produced_quantity,
-        bom.yield_quantity,
-      );
+      const scaled = scaledConsumedQuantity(line, bom, ingredient);
 
       if (scaled <= 0) {
         continue;
@@ -353,6 +417,10 @@ export function mapCompleteProductionRpcError(message: string): string | null {
   }
 
   if (normalized.includes("missing inventory valuation")) {
+    return message;
+  }
+
+  if (normalized.includes("no unit cost")) {
     return message;
   }
 

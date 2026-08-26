@@ -612,6 +612,12 @@ export const productionSessionService = {
     }
   },
 
+  /**
+   * Recipe BOMs + current ingredient stock/cost for completion preview.
+   * Same loader completeSession uses before the RPC.
+   */
+  loadRecipeBomsForCompletion,
+
   async getOpenSessionForPlan(
     productionPlanId: string,
   ): Promise<
