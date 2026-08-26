@@ -5,6 +5,12 @@ import { accountingContextService } from "@/features/accounting/services/account
 import { productionSessionService } from "../services/production-session-service";
 import type { ProductionSessionWithRelations } from "../types/production-session";
 import {
+  formatZeroCostConsumptionWarning,
+  listZeroUnitCostConsumptions,
+  type CompleteProductionLineInput,
+  type CompleteProductionRecipeBom,
+} from "../utils/complete-production";
+import {
   canFinishProductionSession,
   parseProducedQuantityInput,
   parseRawMaterialScaleInput,
@@ -70,6 +76,10 @@ export function useProductionSession(sessionId: string) {
   const [finishing, setFinishing] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [postingError, setPostingError] = useState<string | null>(null);
+  const [completionBoms, setCompletionBoms] = useState<Map<
+    string,
+    CompleteProductionRecipeBom
+  > | null>(null);
 
   const applySession = useCallback((next: ProductionSessionWithRelations) => {
     setSession(next);
@@ -125,6 +135,40 @@ export function useProductionSession(sessionId: string) {
     session && isOpenProductionSessionStatus(session.status),
   );
 
+  const completionBomKey =
+    session && canEdit
+      ? `${session.id}:${session.lines.map((line) => line.recipe_id).join(",")}`
+      : null;
+
+  useEffect(() => {
+    if (!session || !completionBomKey) {
+      setCompletionBoms(null);
+      return;
+    }
+
+    let cancelled = false;
+    const recipeIds = session.lines.map((line) => line.recipe_id);
+
+    void productionSessionService
+      .loadRecipeBomsForCompletion(recipeIds)
+      .then((result) => {
+        if (cancelled) {
+          return;
+        }
+
+        if (result.error || !result.data) {
+          setCompletionBoms(null);
+          return;
+        }
+
+        setCompletionBoms(result.data);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [completionBomKey, session]);
+
   const lineInputs = useMemo(() => {
     if (!session) {
       return [];
@@ -153,6 +197,33 @@ export function useProductionSession(sessionId: string) {
     canEdit &&
     !hasFieldErrors &&
     canFinishProductionSession(lineInputs);
+
+  const zeroCostWarning = useMemo(() => {
+    if (!session || !canEdit || !completionBoms) {
+      return null;
+    }
+
+    const previewLines: CompleteProductionLineInput[] = [];
+
+    for (const line of session.lines) {
+      const produced = drafts[line.id]?.value;
+      if (produced === null || produced === undefined || produced <= 0) {
+        continue;
+      }
+
+      previewLines.push({
+        line_id: line.id,
+        recipe_id: line.recipe_id,
+        product_name: line.product_name,
+        actual_produced_quantity: produced,
+        raw_material_scale: rawMaterialScaleDrafts[line.id]?.value ?? null,
+      });
+    }
+
+    return formatZeroCostConsumptionWarning(
+      listZeroUnitCostConsumptions(previewLines, completionBoms),
+    );
+  }, [canEdit, completionBoms, drafts, rawMaterialScaleDrafts, session]);
 
   const onProducedChange = useCallback((lineId: string, raw: string) => {
     const parsed = parseProducedQuantityInput(raw);
@@ -315,6 +386,7 @@ export function useProductionSession(sessionId: string) {
     finishing,
     actionError,
     postingError,
+    zeroCostWarning,
     onNotesChange,
     onProducedChange,
     onRawMaterialScaleChange,

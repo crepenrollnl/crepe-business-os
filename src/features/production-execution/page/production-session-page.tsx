@@ -29,6 +29,7 @@ export function ProductionSessionPage({ sessionId }: ProductionSessionPageProps)
     saveProgress,
     finishProduction,
     retry,
+    zeroCostWarning,
   } = useProductionSession(sessionId);
 
   return (
@@ -66,6 +67,7 @@ export function ProductionSessionPage({ sessionId }: ProductionSessionPageProps)
               finishing={finishing}
               saving={saving}
               actionError={actionError}
+              zeroCostWarning={zeroCostWarning}
               onNotesChange={onNotesChange}
               onSaveProgress={() => {
                 void saveProgress();

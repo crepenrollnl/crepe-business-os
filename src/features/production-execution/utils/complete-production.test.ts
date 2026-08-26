@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   assertCanCompleteProductionSession,
   buildCompleteProductionPlan,
+  formatZeroCostConsumptionWarning,
+  listZeroUnitCostConsumptions,
   logProductionCompleted,
   mapCompleteProductionRpcError,
   validateInventoryForCompletion,
@@ -299,6 +301,50 @@ describe("buildCompleteProductionPlan", () => {
     expect(result.error).toMatch(/missing inventory valuation/i);
   });
 
+  it("rejects a zero inventory unit cost", () => {
+    const result = buildCompleteProductionPlan(
+      [
+        {
+          line_id: "line-1",
+          recipe_id: "recipe-1",
+          product_name: "Chicken Crepe",
+          actual_produced_quantity: 10,
+        },
+      ],
+      new Map([
+        [
+          "recipe-1",
+          bom({
+            ingredients: [
+              {
+                ingredient_id: "flour",
+                quantity_per_yield: 2,
+                unit: "kg",
+                cost_per_unit: 1.5,
+                name: "Flour",
+                current_stock: 100,
+              },
+              {
+                ingredient_id: "parsley",
+                quantity_per_yield: 0.01,
+                unit: "kg",
+                cost_per_unit: 0,
+                name: "Parsley",
+                current_stock: 1,
+              },
+            ],
+          }),
+        ],
+      ]),
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) {
+      return;
+    }
+    expect(result.error).toMatch(/missing inventory valuation for "parsley"/i);
+  });
+
   it("rejects missing ingredients on the recipe BOM", () => {
     const result = buildCompleteProductionPlan(
       [
@@ -397,6 +443,108 @@ describe("logProductionCompleted", () => {
   });
 });
 
+describe("listZeroUnitCostConsumptions", () => {
+  it("lists unique sorted names with missing or zero unit cost and consumed qty", () => {
+    const names = listZeroUnitCostConsumptions(
+      [
+        {
+          line_id: "line-1",
+          recipe_id: "recipe-1",
+          product_name: "Chicken Crepe",
+          actual_produced_quantity: 10,
+        },
+      ],
+      new Map([
+        [
+          "recipe-1",
+          bom({
+            ingredients: [
+              {
+                ingredient_id: "flour",
+                quantity_per_yield: 2,
+                unit: "kg",
+                cost_per_unit: 1.5,
+                name: "Flour",
+                current_stock: 100,
+              },
+              {
+                ingredient_id: "salt",
+                quantity_per_yield: 0.01,
+                unit: "kg",
+                cost_per_unit: 0,
+                name: "Salt",
+                current_stock: 1,
+              },
+              {
+                ingredient_id: "parsley",
+                quantity_per_yield: 0.01,
+                unit: "kg",
+                cost_per_unit: null,
+                name: "Parsley",
+                current_stock: 1,
+              },
+            ],
+          }),
+        ],
+      ]),
+    );
+
+    expect(names).toEqual(["Parsley", "Salt"]);
+    expect(formatZeroCostConsumptionWarning(names)).toBe(
+      "These ingredients have no unit cost: Parsley, Salt. Set Cost per unit in Inventory before finishing.",
+    );
+  });
+
+  it("returns no names when every consumed ingredient has a positive unit cost", () => {
+    expect(
+      listZeroUnitCostConsumptions(
+        [
+          {
+            line_id: "line-1",
+            recipe_id: "recipe-1",
+            product_name: "Chicken Crepe",
+            actual_produced_quantity: 10,
+          },
+        ],
+        new Map([["recipe-1", bom()]]),
+      ),
+    ).toEqual([]);
+    expect(formatZeroCostConsumptionWarning([])).toBeNull();
+  });
+
+  it("omits ingredients whose scaled consumption is zero", () => {
+    const names = listZeroUnitCostConsumptions(
+      [
+        {
+          line_id: "line-1",
+          recipe_id: "recipe-1",
+          product_name: "Chicken Crepe",
+          actual_produced_quantity: 10,
+        },
+      ],
+      new Map([
+        [
+          "recipe-1",
+          bom({
+            ingredients: [
+              {
+                ingredient_id: "garnish",
+                quantity_per_yield: 0,
+                unit: "kg",
+                cost_per_unit: 0,
+                name: "Garnish",
+                current_stock: 1,
+              },
+            ],
+          }),
+        ],
+      ]),
+    );
+
+    expect(names).toEqual([]);
+  });
+});
+
 describe("mapCompleteProductionRpcError", () => {
   it("maps double-complete, status, and missing RPC errors", () => {
     expect(
@@ -416,5 +564,23 @@ describe("mapCompleteProductionRpcError", () => {
         "Could not find the function public.complete_production_session",
       ),
     ).toContain("complete-production database script");
+
+    expect(
+      mapCompleteProductionRpcError(
+        "Cannot finish production. These ingredients have no unit cost: Parsley, Salt. Set Cost per unit in Inventory and try again.",
+      ),
+    ).toContain("Parsley, Salt");
+
+    expect(
+      mapCompleteProductionRpcError(
+        "Cannot finish production. These components were allocated from batches with no unit cost: Chicken sauce. This cannot be fixed in Inventory — produce a new batch of the component with a valid cost, or resolve the existing batch cost separately.",
+      ),
+    ).toContain("Chicken sauce");
+
+    expect(
+      mapCompleteProductionRpcError(
+        "Cannot finish production. These ingredients have no unit cost: Parsley. Set Cost per unit in Inventory and try again. These components were allocated from batches with no unit cost: Chicken sauce. This cannot be fixed in Inventory — produce a new batch of the component with a valid cost, or resolve the existing batch cost separately.",
+      ),
+    ).toMatch(/Parsley.*Chicken sauce/);
   });
 });

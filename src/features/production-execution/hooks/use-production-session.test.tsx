@@ -16,11 +16,13 @@ const {
   completeSessionMock,
   completeSessionAndPostJournalMock,
   getCurrentAccountingContextMock,
+  loadRecipeBomsForCompletionMock,
 } = vi.hoisted(() => ({
   getSessionByIdMock: vi.fn(),
   completeSessionMock: vi.fn(),
   completeSessionAndPostJournalMock: vi.fn(),
   getCurrentAccountingContextMock: vi.fn(),
+  loadRecipeBomsForCompletionMock: vi.fn(),
 }));
 
 vi.mock("../services/production-session-service", () => ({
@@ -29,6 +31,8 @@ vi.mock("../services/production-session-service", () => ({
     completeSession: (...args: unknown[]) => completeSessionMock(...args),
     completeSessionAndPostJournal: (...args: unknown[]) =>
       completeSessionAndPostJournalMock(...args),
+    loadRecipeBomsForCompletion: (...args: unknown[]) =>
+      loadRecipeBomsForCompletionMock(...args),
   },
 }));
 
@@ -107,8 +111,13 @@ describe("useProductionSession.finishProduction (accounting posting wiring)", ()
     completeSessionMock.mockReset();
     completeSessionAndPostJournalMock.mockReset();
     getCurrentAccountingContextMock.mockReset();
+    loadRecipeBomsForCompletionMock.mockReset();
 
     getSessionByIdMock.mockResolvedValue({ data: sessionFixture(), error: null });
+    loadRecipeBomsForCompletionMock.mockResolvedValue({
+      data: new Map(),
+      error: null,
+    });
   });
 
   it("applies the completed session and clears postingError when posting succeeds", async () => {
@@ -229,5 +238,41 @@ describe("useProductionSession.finishProduction (accounting posting wiring)", ()
     expect(result.current.session?.status).toBe("in_progress");
     expect(result.current.actionError).toBe("Insufficient stock for Chicken Crepe.");
     expect(result.current.postingError).toBeNull();
+  });
+
+  it("surfaces a zero-cost warning from loaded BOMs without blocking finish", async () => {
+    loadRecipeBomsForCompletionMock.mockResolvedValue({
+      data: new Map([
+        [
+          "recipe-1",
+          {
+            recipe_id: "recipe-1",
+            recipe_name: "Chicken Crepe",
+            yield_quantity: 10,
+            is_active: true,
+            ingredients: [
+              {
+                ingredient_id: "parsley",
+                quantity_per_yield: 0.01,
+                unit: "kg",
+                cost_per_unit: 0,
+                name: "Parsley",
+                current_stock: 1,
+              },
+            ],
+          },
+        ],
+      ]),
+      error: null,
+    });
+
+    const { result } = renderHook(() => useProductionSession(SESSION_ID));
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    await waitFor(() =>
+      expect(result.current.zeroCostWarning).toMatch(/Parsley/),
+    );
+
+    expect(result.current.canFinish).toBe(true);
   });
 });

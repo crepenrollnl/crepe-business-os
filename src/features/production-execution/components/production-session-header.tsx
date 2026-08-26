@@ -16,6 +16,7 @@ type ProductionSessionHeaderProps = {
   finishing: boolean;
   saving: boolean;
   actionError: string | null;
+  zeroCostWarning?: string | null;
   onNotesChange: (value: string) => void;
   onSaveProgress: () => void;
   onFinish: () => void;
@@ -29,6 +30,7 @@ export function ProductionSessionHeader({
   finishing,
   saving,
   actionError,
+  zeroCostWarning = null,
   onNotesChange,
   onSaveProgress,
   onFinish,
@@ -134,6 +136,15 @@ export function ProductionSessionHeader({
           ) : null}
         </div>
       </div>
+
+      {zeroCostWarning ? (
+        <div
+          role="status"
+          className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800"
+        >
+          {zeroCostWarning}
+        </div>
+      ) : null}
 
       <div className="rounded-xl border border-zinc-200 bg-white p-4 shadow-sm">
         <label

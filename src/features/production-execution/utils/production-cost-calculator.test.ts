@@ -152,6 +152,9 @@ describe("productionCostCalculator (DEV-103)", () => {
     expect(validateInventoryUnitCost("Flour", Number.NaN)).toMatch(
       /missing inventory valuation/i,
     );
+    expect(validateInventoryUnitCost("Parsley", 0)).toMatch(
+      /missing inventory valuation/i,
+    );
 
     const result = calculateBatchCostSummary({
       produced_quantity: 10,
@@ -171,6 +174,34 @@ describe("productionCostCalculator (DEV-103)", () => {
       return;
     }
     expect(result.error).toMatch(/missing inventory valuation/i);
+  });
+
+  it("rejects a zero inventory unit cost even when other lines have cost", () => {
+    const result = calculateBatchCostSummary({
+      produced_quantity: 10,
+      cost_lines: [
+        {
+          ingredient_id: "chicken",
+          ingredient_name: "Chicken",
+          consumed_quantity: 1,
+          unit: "kg",
+          inventory_unit_cost: 8,
+        },
+        {
+          ingredient_id: "parsley",
+          ingredient_name: "Parsley",
+          consumed_quantity: 0.01,
+          unit: "kg",
+          inventory_unit_cost: 0,
+        },
+      ],
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) {
+      return;
+    }
+    expect(result.error).toMatch(/missing inventory valuation for "parsley"/i);
   });
 
   it("rejects missing ingredient identity", () => {
