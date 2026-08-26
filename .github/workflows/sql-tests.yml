@@ -1,0 +1,57 @@
+name: SQL tests
+
+on:
+  pull_request:
+
+jobs:
+  sql-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      PGHOST: 127.0.0.1
+      PGPORT: 5432
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      PGDATABASE: postgres
+      PGCLIENTENCODING: UTF8
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install psql
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+
+      - name: Wait for Postgres
+        run: |
+          for i in $(seq 1 30); do
+            pg_isready -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" && exit 0
+            sleep 2
+          done
+          echo "Postgres did not become ready"
+          exit 1
+
+      - name: Apply curated bootstrap
+        run: |
+          set -euo pipefail
+          grep -E -v '^[[:space:]]*(#|$)' tests/sql/bootstrap/complete_production_session.list \
+            | while IFS= read -r f; do
+                echo "Applying $f"
+                psql -v ON_ERROR_STOP=1 -f "$f"
+              done
+
+      - name: complete_production_session zero-cost guard
+        run: psql -v ON_ERROR_STOP=1 -f tests/sql/complete_production_session_zero_cost.sql
