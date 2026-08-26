@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { accountingContextService } from "@/features/accounting/services/accounting-context-service";
+import { useAsyncEffect } from "@/hooks/use-async-effect";
 import { productionSessionService } from "../services/production-session-service";
 import type { ProductionSessionWithRelations } from "../types/production-session";
 import {
@@ -140,34 +141,25 @@ export function useProductionSession(sessionId: string) {
       ? `${session.id}:${session.lines.map((line) => line.recipe_id).join(",")}`
       : null;
 
-  useEffect(() => {
+  const loadCompletionBoms = useCallback(async () => {
     if (!session || !completionBomKey) {
       setCompletionBoms(null);
       return;
     }
 
-    let cancelled = false;
     const recipeIds = session.lines.map((line) => line.recipe_id);
+    const result =
+      await productionSessionService.loadRecipeBomsForCompletion(recipeIds);
 
-    void productionSessionService
-      .loadRecipeBomsForCompletion(recipeIds)
-      .then((result) => {
-        if (cancelled) {
-          return;
-        }
+    if (result.error || !result.data) {
+      setCompletionBoms(null);
+      return;
+    }
 
-        if (result.error || !result.data) {
-          setCompletionBoms(null);
-          return;
-        }
-
-        setCompletionBoms(result.data);
-      });
-
-    return () => {
-      cancelled = true;
-    };
+    setCompletionBoms(result.data);
   }, [completionBomKey, session]);
+
+  useAsyncEffect(loadCompletionBoms, [loadCompletionBoms]);
 
   const lineInputs = useMemo(() => {
     if (!session) {
