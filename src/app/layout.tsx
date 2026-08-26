@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "@/features/auth/providers/AuthProvider";
@@ -14,8 +14,13 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
+  metadataBase: new URL("https://crepe-business-os.vercel.app"),
   title: "Crepe'n Roll OS",
   description: "Crepe'n Roll Business Operating System",
+};
+
+export const viewport: Viewport = {
+  themeColor: "#9c5221",
 };
 
 export default function RootLayout({
