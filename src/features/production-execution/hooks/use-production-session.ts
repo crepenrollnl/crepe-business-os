@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { accountingContextService } from "@/features/accounting/services/accounting-context-service";
 import { useAsyncEffect } from "@/hooks/use-async-effect";
 import { productionSessionService } from "../services/production-session-service";
@@ -81,6 +81,7 @@ export function useProductionSession(sessionId: string) {
     string,
     CompleteProductionRecipeBom
   > | null>(null);
+  const latestCompletionBomKeyRef = useRef<string | null>(null);
 
   const applySession = useCallback((next: ProductionSessionWithRelations) => {
     setSession(next);
@@ -142,6 +143,9 @@ export function useProductionSession(sessionId: string) {
       : null;
 
   const loadCompletionBoms = useCallback(async () => {
+    const startedWithKey = completionBomKey;
+    latestCompletionBomKeyRef.current = completionBomKey;
+
     if (!session || !completionBomKey) {
       setCompletionBoms(null);
       return;
@@ -150,6 +154,10 @@ export function useProductionSession(sessionId: string) {
     const recipeIds = session.lines.map((line) => line.recipe_id);
     const result =
       await productionSessionService.loadRecipeBomsForCompletion(recipeIds);
+
+    if (startedWithKey !== latestCompletionBomKeyRef.current) {
+      return;
+    }
 
     if (result.error || !result.data) {
       setCompletionBoms(null);
