@@ -143,7 +143,7 @@ export function PosQueuePane({
                     onClick={() => onMarkPaid(order.sale_id)}
                     className="min-h-12 w-full rounded-lg border border-zinc-300 bg-white px-4 py-3 text-base font-semibold text-zinc-800 transition-colors hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    {isPaying ? "Saving..." : "Отметить оплаченным"}
+                    {isPaying ? "Saving..." : "Mark as paid"}
                   </button>
                 )}
                 <button
@@ -152,7 +152,7 @@ export function PosQueuePane({
                   onClick={() => onMarkFulfilled(order.sale_id)}
                   className="min-h-12 w-full rounded-lg bg-amber-500 px-4 py-3 text-base font-semibold text-white transition-colors hover:bg-amber-600 disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  {isFulfilling ? "Saving..." : "Готово"}
+                  {isFulfilling ? "Saving..." : "Done"}
                 </button>
               </div>
             </li>
