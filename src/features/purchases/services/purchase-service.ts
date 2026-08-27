@@ -36,6 +36,8 @@ interface PurchaseRow {
   purchased_at: string;
   transaction_id: string | null;
   production_plan_id?: string | null;
+  tax_country?: string | null;
+  supplier_country?: string | null;
   created_at: string;
   updated_at?: string;
 }
@@ -51,6 +53,7 @@ interface PurchaseItemRow {
   tax_regime?: string | null;
   price_mode?: string | null;
   entered_unit_price?: number | string | null;
+  discount?: number | string | null;
 }
 
 function toNumber(value: number | string): number {
@@ -79,6 +82,13 @@ function toNullableTrimmedString(
   return trimmed.length > 0 ? trimmed : null;
 }
 
+function toNullableIsoCountry(
+  value: string | null | undefined,
+): string | null {
+  const trimmed = toNullableTrimmedString(value);
+  return trimmed ? trimmed.toUpperCase() : null;
+}
+
 function mapPurchase(row: PurchaseRow): Purchase {
   return {
     id: row.id,
@@ -93,6 +103,8 @@ function mapPurchase(row: PurchaseRow): Purchase {
     purchased_at: row.purchased_at,
     transaction_id: row.transaction_id,
     production_plan_id: row.production_plan_id ?? null,
+    tax_country: toNullableTrimmedString(row.tax_country),
+    supplier_country: toNullableTrimmedString(row.supplier_country),
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
@@ -115,6 +127,7 @@ function mapPurchaseItem(row: PurchaseItemRow): PurchaseItem {
         ? priceMode
         : null,
     entered_unit_price: toNullableNumber(row.entered_unit_price),
+    discount: toNullableNumber(row.discount),
   };
 }
 
@@ -187,6 +200,7 @@ interface PurchaseTotals {
     tax_regime: string | null;
     price_mode: "exclusive" | "inclusive" | null;
     entered_unit_price: number | null;
+    discount: number | null;
   }>;
   subtotal: number;
   tax_total: number;
@@ -239,6 +253,7 @@ async function buildTotals(
               ? priceMode
               : null,
           entered_unit_price: toNullableNumber(source?.entered_unit_price),
+          discount: toNullableNumber(source?.discount),
         };
       }),
       subtotal: toNumber(data.subtotal as number | string),
@@ -260,6 +275,8 @@ function toPurchasePayload(
     invoice_number:
       input.invoice_number.trim().length > 0 ? input.invoice_number.trim() : null,
     notes: input.notes.trim().length > 0 ? input.notes.trim() : null,
+    tax_country: toNullableIsoCountry(input.tax_country),
+    supplier_country: toNullableIsoCountry(input.supplier_country),
     subtotal: totals.subtotal,
     tax_total: totals.tax_total,
     total: totals.total,
@@ -346,6 +363,7 @@ async function replacePurchaseItems(
         tax_regime: line.tax_regime,
         price_mode: line.price_mode,
         entered_unit_price: line.entered_unit_price,
+        discount: line.discount,
       })),
     )
     .select("*");

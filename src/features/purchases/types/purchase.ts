@@ -33,6 +33,16 @@ export interface Purchase {
   transaction_id: string | null;
   /** Set when this draft was generated from Production Planning. */
   production_plan_id: string | null;
+  /**
+   * ISO 3166-1 alpha-2 used as calculate_purchase_taxes p_country.
+   * Null on rows saved before sql/108.
+   */
+  tax_country: string | null;
+  /**
+   * ISO 3166-1 alpha-2 as typed on the purchase header.
+   * Null on rows saved before sql/108. Not stored on suppliers.
+   */
+  supplier_country: string | null;
   created_at: string;
   updated_at?: string;
 }
@@ -68,6 +78,11 @@ export interface PurchaseItem {
    * Null on pre-sql/102 rows.
    */
   entered_unit_price: number | null;
+  /**
+   * Absolute line discount in document currency (same units as sql/069/072).
+   * Null on rows saved before sql/108. Not a percent.
+   */
+  discount: number | null;
 }
 
 export interface PurchaseItemWithRelations extends PurchaseItem {
@@ -92,8 +107,11 @@ export interface PurchaseLineInput {
    * On persist: exclusive net unit price for sql/069 (`toNetPurchaseLines`).
    */
   unit_cost: number;
-  /** Absolute discount in document currency (tax preview / calculation). */
-  discount?: number;
+  /**
+   * Absolute discount in document currency (tax preview / calculation).
+   * Null when unrecorded; omitted/undefined is treated the same on persist.
+   */
+  discount?: number | null;
   /** Opaque tax category for Tax Integration (e.g. goods, food). */
   tax_category?: string | null;
   /** Optional regime override hint for Country Pack matching. */
@@ -113,11 +131,16 @@ export interface PurchaseFormValues {
   purchased_at: string;
   notes: string;
   /**
-   * Supplier country for tax calculation (ISO).
-   * Form-level until supplier master stores country.
+   * Supplier country ISO 3166-1 alpha-2 as typed on the header.
+   * New documents default to NL in emptyFormValues. Reopen uses the stored
+   * value; empty string means unrecorded (NULL in the database).
    */
   supplier_country?: string;
-  /** Company/tax pack country (ISO). Defaults to NL when omitted. */
+  /**
+   * Tax pack country ISO 3166-1 alpha-2 (calculate_purchase_taxes p_country).
+   * New documents default to NL in emptyFormValues. Reopen uses the stored
+   * value; empty string means unrecorded (NULL in the database).
+   */
   tax_country?: string;
   lines: PurchaseLineInput[];
 }

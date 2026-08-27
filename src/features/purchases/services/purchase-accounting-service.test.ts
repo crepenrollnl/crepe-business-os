@@ -249,6 +249,8 @@ function purchase(
     purchased_at: "2026-07-26T09:00:00.000Z",
     transaction_id: "txn-1",
     production_plan_id: null,
+    tax_country: null,
+    supplier_country: null,
     created_at: "2026-07-26T09:00:00.000Z",
     supplier: { id: "supplier-1", name: "Dairy Co" },
     items: [
@@ -263,6 +265,7 @@ function purchase(
         tax_regime: null,
         price_mode: null,
         entered_unit_price: null,
+        discount: null,
         ingredient: { id: "ing-1", name: "Milk", unit: "L" },
       },
     ],

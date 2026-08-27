@@ -4,6 +4,7 @@
  * The Unit price field shows what the user typed (`entered_unit_price`)
  * when that memory exists; otherwise the persisted net `unit_cost`.
  * Null tax fields stay null — the form must not substitute goods / standard_vat.
+ * Null country / discount stay empty / null — the form must not substitute NL / 0.
  */
 
 import type {
@@ -19,15 +20,15 @@ export function purchaseToFormValues(
     invoice_number: purchase.invoice_number ?? "",
     purchased_at: purchase.purchased_at.slice(0, 10),
     notes: purchase.notes ?? "",
-    supplier_country: "NL",
-    tax_country: "NL",
+    supplier_country: purchase.supplier_country ?? "",
+    tax_country: purchase.tax_country ?? "",
     lines:
       purchase.items.length > 0
         ? purchase.items.map((item) => ({
             ingredient_id: item.ingredient_id,
             quantity: item.quantity,
             unit_cost: item.entered_unit_price ?? item.unit_cost,
-            discount: 0,
+            discount: item.discount,
             tax_category: item.tax_category,
             tax_regime: item.tax_regime,
             price_mode: item.price_mode,

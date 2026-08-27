@@ -25,6 +25,8 @@ function purchase(): PurchaseWithRelations {
     purchased_at: "2026-07-26T09:00:00.000Z",
     transaction_id: "txn-1",
     production_plan_id: null,
+    tax_country: null,
+    supplier_country: null,
     created_at: "2026-07-26T09:00:00.000Z",
     supplier: { id: "supplier-1", name: "Dairy Co" },
     items: [],
