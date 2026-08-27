@@ -468,6 +468,8 @@ describe("purchaseService.receivePurchase — variant C tax memory", () => {
       subtotal: 100,
       tax_total: 21,
       total: 121,
+      tax_country: null,
+      supplier_country: null,
     });
 
     expect(itemInserts[0]).toEqual([
@@ -480,6 +482,60 @@ describe("purchaseService.receivePurchase — variant C tax memory", () => {
         price_mode: "inclusive",
         tax_category: "goods",
         tax_regime: "standard_vat",
+        discount: null,
+      }),
+    ]);
+  });
+
+  it("persists line discount and header countries when provided", async () => {
+    const { itemInserts, totalsCalls, purchaseInserts } = installMock({});
+
+    const result = await purchaseService.receivePurchase({
+      supplier_id: "supplier-1",
+      invoice_number: "INV-1",
+      purchased_at: "2026-07-30",
+      notes: "",
+      tax_country: "DE",
+      supplier_country: "BE",
+      tax_total: 21,
+      lines: [
+        {
+          ingredient_id: INGREDIENT_A,
+          quantity: 1,
+          unit_cost: 100,
+          discount: 5,
+          entered_unit_price: 121,
+          price_mode: "inclusive",
+          tax_category: "goods",
+          tax_regime: "standard_vat",
+        },
+      ],
+    });
+
+    expect(result.error).toBeNull();
+
+    expect(totalsCalls[0]).toMatchObject({
+      p_lines: [
+        expect.objectContaining({
+          ingredient_id: INGREDIENT_A,
+          quantity: 1,
+          unit_cost: 100,
+          discount: 5,
+        }),
+      ],
+    });
+
+    expect(purchaseInserts[0]).toMatchObject({
+      tax_country: "DE",
+      supplier_country: "BE",
+    });
+
+    expect(itemInserts[0]).toEqual([
+      expect.objectContaining({
+        ingredient_id: INGREDIENT_A,
+        quantity: 1,
+        unit_cost: 100,
+        discount: 5,
       }),
     ]);
   });

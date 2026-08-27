@@ -109,8 +109,8 @@ function valuesToDraft(
 ): FormDraft {
   return {
     ...values,
-    supplier_country: values.supplier_country ?? "NL",
-    tax_country: values.tax_country ?? "NL",
+    supplier_country: values.supplier_country ?? "",
+    tax_country: values.tax_country ?? "",
     lines: values.lines.map((line) => ({
       ingredient_id: line.ingredient_id,
       quantity: options?.emptyNumericDefaults
@@ -121,7 +121,7 @@ function valuesToDraft(
         : formatNumericInput(line.unit_cost),
       discount: options?.emptyNumericDefaults
         ? ""
-        : formatNumericInput(line.discount ?? 0),
+        : formatNumericInput(line.discount),
       line_total: options?.emptyNumericDefaults
         ? ""
         : formatNumericInput(roundMoney(line.quantity * line.unit_cost)),
@@ -148,7 +148,7 @@ export function draftToValues(draft: FormDraft): PurchaseFormValues {
       ingredient_id: line.ingredient_id,
       quantity: coerceNumericField(line.quantity),
       unit_cost: coerceNumericField(line.unit_cost),
-      discount: coerceNumericField(line.discount),
+      discount: parseNumericInput(line.discount),
       tax_category: line.tax_category,
       tax_regime: line.tax_regime,
       price_mode:
@@ -836,18 +836,25 @@ function PurchaseDocumentForm({
             >
               Supplier country
             </label>
-            <input
-              id="supplier_country"
-              type="text"
-              value={formValues.supplier_country}
-              onChange={(event) =>
-                updateHeader("supplier_country", event.target.value.toUpperCase())
-              }
-              disabled={isReadOnly || isSaving}
-              className={inputClassName}
-              placeholder="NL"
-              maxLength={2}
-            />
+            {isReadOnly && !formValues.supplier_country.trim() ? (
+              <p className="text-sm text-zinc-500">Not recorded</p>
+            ) : (
+              <input
+                id="supplier_country"
+                type="text"
+                value={formValues.supplier_country}
+                onChange={(event) =>
+                  updateHeader(
+                    "supplier_country",
+                    event.target.value.toUpperCase(),
+                  )
+                }
+                disabled={isReadOnly || isSaving}
+                className={inputClassName}
+                placeholder="NL"
+                maxLength={2}
+              />
+            )}
           </div>
 
           <div className="space-y-2">
@@ -857,18 +864,22 @@ function PurchaseDocumentForm({
             >
               Tax country
             </label>
-            <input
-              id="tax_country"
-              type="text"
-              value={formValues.tax_country}
-              onChange={(event) =>
-                updateHeader("tax_country", event.target.value.toUpperCase())
-              }
-              disabled={isReadOnly || isSaving}
-              className={inputClassName}
-              placeholder="NL"
-              maxLength={2}
-            />
+            {isReadOnly && !formValues.tax_country.trim() ? (
+              <p className="text-sm text-zinc-500">Not recorded</p>
+            ) : (
+              <input
+                id="tax_country"
+                type="text"
+                value={formValues.tax_country}
+                onChange={(event) =>
+                  updateHeader("tax_country", event.target.value.toUpperCase())
+                }
+                disabled={isReadOnly || isSaving}
+                className={inputClassName}
+                placeholder="NL"
+                maxLength={2}
+              />
+            )}
           </div>
         </div>
 
@@ -922,6 +933,9 @@ function PurchaseDocumentForm({
                     </th>
                     <th className="px-3 py-3 text-right text-sm font-semibold text-zinc-700">
                       Unit price
+                    </th>
+                    <th className="px-3 py-3 text-right text-sm font-semibold text-zinc-700">
+                      Discount
                     </th>
                     <th className="px-3 py-3 text-left text-sm font-semibold text-zinc-700">
                       Price includes tax
@@ -1077,6 +1091,22 @@ function PurchaseDocumentForm({
                             <p className="mt-1 text-xs text-zinc-500">
                               Net {formatUnitCost(netUnitCost)}
                             </p>
+                          )}
+                        </td>
+                        <td className="px-3 py-3 align-top">
+                          {isReadOnly && !line.discount.trim() ? (
+                            <p className="text-sm text-zinc-500">Not recorded</p>
+                          ) : (
+                            <NumericInput
+                              value={line.discount}
+                              onChange={(value) =>
+                                updateLine(index, "discount", value)
+                              }
+                              disabled={isReadOnly || isSaving}
+                              className="text-right"
+                              placeholder="0.00"
+                              aria-label="Discount"
+                            />
                           )}
                         </td>
                         <td className="px-3 py-3 align-top">
