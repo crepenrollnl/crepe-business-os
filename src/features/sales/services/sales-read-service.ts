@@ -2,10 +2,12 @@
  * Sales read service (DEV-029).
  *
  * List/detail reads go through sales_list_view and sale_details_view.
- * The kitchen queue (listQueuedSales) reads sales + sale_lines directly —
- * same pattern as reloadConfirmedSale — so polling does not pull the
- * full details-view join. Does NOT confirm sales, allocate inventory,
- * calculate totals/COGS/FIFO.
+ * Documented base-table exceptions:
+ *   - listQueuedSales reads sales + sale_lines so the kitchen poll does
+ *     not pull the full details-view join.
+ *   - getSoldQuantityByProductId reads sale_lines with an inner sales
+ *     embed, then groups quantity in JS (no ranking RPC / view yet).
+ * Does NOT confirm sales, allocate inventory, calculate totals/COGS/FIFO.
  */
 
 import { toUserError } from "@/lib/service-errors";
@@ -20,6 +22,7 @@ import type {
   SaleStatus,
 } from "../types/sale";
 import { SALE_STATUSES } from "../types/sale";
+import { isCompletedSaleStatus } from "../utils/is-completed-sale-status";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -80,6 +83,12 @@ interface QueueLineRow {
   sale_id: string;
   product_id: string;
   quantity: number | string;
+}
+
+interface SoldQuantityLineRow {
+  product_id: string | null;
+  quantity: number | string | null;
+  sales: { status: string } | { status: string }[] | null;
 }
 
 function toNumber(value: number | string): number {
@@ -200,6 +209,53 @@ function mapQueuedSales(
       lines: linesBySaleId.get(row.id) ?? [],
     };
   });
+}
+
+function embeddedSaleStatus(
+  sales: SoldQuantityLineRow["sales"],
+): string | null {
+  if (!sales) {
+    return null;
+  }
+
+  if (Array.isArray(sales)) {
+    const status = sales[0]?.status;
+    return typeof status === "string" ? status : null;
+  }
+
+  return typeof sales.status === "string" ? sales.status : null;
+}
+
+function mapSoldQuantityByProductId(
+  rows: SoldQuantityLineRow[],
+): Map<string, number> {
+  const qtyByProductId = new Map<string, number>();
+
+  for (const row of rows) {
+    const status = embeddedSaleStatus(row.sales);
+    if (status === null) {
+      throw new Error("Sold quantity response was invalid.");
+    }
+    if (!isCompletedSaleStatus(status)) {
+      continue;
+    }
+
+    if (!row.product_id || row.quantity === null) {
+      throw new Error("Sold quantity response was invalid.");
+    }
+
+    const quantity = toNumber(row.quantity);
+    if (Number.isNaN(quantity)) {
+      throw new Error("Sold quantity response was invalid.");
+    }
+
+    qtyByProductId.set(
+      row.product_id,
+      (qtyByProductId.get(row.product_id) ?? 0) + quantity,
+    );
+  }
+
+  return qtyByProductId;
 }
 
 function mapReadError(error: unknown, fallback: string): string {
@@ -385,6 +441,35 @@ export const salesReadService = {
       }
     } catch (error) {
       return fail(mapReadError(error, "Failed to load the kitchen queue"));
+    }
+  },
+
+  /**
+   * Sum sale_lines.quantity per product_id for confirmed/paid sales.
+   * One select + JS grouping — not a ranking RPC. PostgREST's default
+   * 1000-row cap applies; add a GROUP BY RPC if the ledger grows past that.
+   */
+  async getSoldQuantityByProductId(): Promise<ServiceResult<Map<string, number>>> {
+    try {
+      const { data, error } = await supabase
+        .from("sale_lines")
+        .select("product_id, quantity, sales!inner(status)");
+
+      if (error) {
+        return fail(mapReadError(error, "Failed to load sold quantities"));
+      }
+
+      try {
+        return ok(
+          mapSoldQuantityByProductId(
+            (data as SoldQuantityLineRow[] | null) ?? [],
+          ),
+        );
+      } catch {
+        return fail("Sold quantity response was invalid.");
+      }
+    } catch (error) {
+      return fail(mapReadError(error, "Failed to load sold quantities"));
     }
   },
 };

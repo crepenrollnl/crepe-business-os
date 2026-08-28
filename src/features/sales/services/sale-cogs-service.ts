@@ -17,7 +17,7 @@ import { toUserError } from "@/lib/service-errors";
 import { supabase } from "@/lib/supabase";
 import { fail, ok, type ServiceResult } from "@/types/service";
 import type { SaleCogsBatchLayer, SaleCostSummary } from "../types/sale-cogs";
-import type { SaleStatus } from "../types/sale";
+import { isCompletedSaleStatus } from "../utils/is-completed-sale-status";
 import {
   assertSaleCogsImmutable,
   buildSaleCostSummary,
@@ -26,10 +26,6 @@ import { salesReadService } from "./sales-read-service";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
-function isCompletedSaleStatus(status: SaleStatus): boolean {
-  return status === "confirmed" || status === "paid";
-}
 
 function mapFinishedGoodsLayers(
   rows: NonNullable<

@@ -3,8 +3,13 @@
 import { useCallback, useMemo, useState } from "react";
 import { accountingContextService } from "@/features/accounting/services/accounting-context-service";
 import { recipeService } from "@/features/recipes/services/recipe-service";
+import { salesReadService } from "@/features/sales/services/sales-read-service";
 import { salesService } from "@/features/sales/services/sales-service";
 import type { QuickSaleLineInput } from "@/features/sales/types/sale";
+import {
+  sortByProductName,
+  sortBySoldQuantity,
+} from "@/features/sales/utils/sort-by-sold-quantity";
 import { useAsyncEffect } from "@/hooks/use-async-effect";
 
 /** A tappable Quick Sale tile: an active assembly recipe with a price set. */
@@ -26,13 +31,16 @@ async function fetchPosSaleProducts(): Promise<{
   data: PosSaleProduct[];
   error: string | null;
 }> {
-  const result = await recipeService.getRecipes();
+  const [recipesResult, qtyResult] = await Promise.all([
+    recipeService.getRecipes(),
+    salesReadService.getSoldQuantityByProductId(),
+  ]);
 
-  if (result.error || !result.data) {
-    return { data: [], error: result.error };
+  if (recipesResult.error || !recipesResult.data) {
+    return { data: [], error: recipesResult.error };
   }
 
-  const products = result.data
+  const products = recipesResult.data
     .filter(
       (recipe) =>
         recipe.is_active &&
@@ -44,12 +52,13 @@ async function fetchPosSaleProducts(): Promise<{
       name: recipe.name,
       selling_price: recipe.selling_price as number,
       image_url: recipe.image_url,
-    }))
-    .sort((a, b) =>
-      a.name.localeCompare(b.name, undefined, { sensitivity: "base" }),
-    );
+    }));
 
-  return { data: products, error: null };
+  if (qtyResult.error || !qtyResult.data) {
+    return { data: sortByProductName(products), error: null };
+  }
+
+  return { data: sortBySoldQuantity(products, qtyResult.data), error: null };
 }
 
 export function usePosSale() {
