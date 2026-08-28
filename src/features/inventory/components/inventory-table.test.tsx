@@ -11,11 +11,28 @@
  */
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import type { ReactNode } from "react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
 import { InventoryTable } from "./inventory-table";
 import type { IngredientWithRelations } from "../types/inventory";
 import type { PurchasingReviewRow } from "../types/purchasing-review";
+
+vi.mock("next/link", () => ({
+  default: ({
+    href,
+    children,
+    className,
+  }: {
+    href: string;
+    children: ReactNode;
+    className?: string;
+  }) => (
+    <a href={href} className={className}>
+      {children}
+    </a>
+  ),
+}));
 
 const noop = () => undefined;
 
@@ -198,5 +215,14 @@ describe("InventoryTable compact/expanded columns", () => {
       "title",
       "Stock will run low within the lead time window.",
     );
+  });
+
+  it("links Movement history to the ingredient movements page", () => {
+    const item = ingredient();
+    render(<InventoryTable {...defaultProps} items={[item]} />);
+
+    expect(
+      screen.getByRole("link", { name: "Movement history" }),
+    ).toHaveAttribute("href", `/inventory/ingredients/${item.id}/movements`);
   });
 });

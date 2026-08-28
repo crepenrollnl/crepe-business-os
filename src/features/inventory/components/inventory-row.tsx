@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { formatDate } from "@/lib/date";
 import { formatMoney } from "@/lib/money";
 import type { PurchasingReviewRow } from "../types/purchasing-review";
@@ -333,6 +334,12 @@ export function InventoryRow({
       )}
       <td className="px-4 py-4 text-right">
         <div className="inline-flex items-center gap-2">
+          <Link
+            href={`/inventory/ingredients/${item.id}/movements`}
+            className="rounded-lg px-3 py-1.5 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-900"
+          >
+            Movement history
+          </Link>
           <button
             type="button"
             onClick={() => onEdit(item)}
