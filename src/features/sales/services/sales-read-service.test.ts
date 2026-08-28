@@ -2,8 +2,8 @@
  * Service-level coverage for salesReadService (DEV-029).
  *
  * List/detail reads must go only through sales_list_view / sale_details_view.
- * listQueuedSales is the documented exception: it reads sales + sale_lines
- * (same pattern as reloadConfirmedSale) for the kitchen queue poll.
+ * Documented base-table exceptions: listQueuedSales (kitchen queue) and
+ * getSoldQuantityByProductId (POS/Quick Sale tile ranking).
  * The service must not call RPCs, recalculate totals, compute COGS, or
  * implement FIFO.
  */
@@ -854,5 +854,131 @@ describe("salesReadService.listQueuedSales", () => {
     expect(salesOrderFirst).toHaveBeenCalledWith("confirmed_at", {
       ascending: true,
     });
+  });
+});
+
+describe("salesReadService.getSoldQuantityByProductId", () => {
+  const PRODUCT_ID_2 = "ffffffff-ffff-4fff-8fff-ffffffffffff";
+  const SOLD_SELECT = "product_id, quantity, sales!inner(status)";
+
+  function soldLineRow(overrides?: Record<string, unknown>) {
+    return {
+      product_id: PRODUCT_ID,
+      quantity: "3",
+      sales: { status: "confirmed" },
+      ...overrides,
+    };
+  }
+
+  function mockSoldQtyLines(
+    rows: ReturnType<typeof soldLineRow>[],
+    error: unknown = null,
+  ) {
+    const selectMock = vi.fn().mockResolvedValue({
+      data: error ? null : rows,
+      error,
+    });
+
+    supabaseMock.from.mockImplementation((table: string) => {
+      if (table === "sale_lines") {
+        return {
+          select: selectMock,
+          insert: insertMock,
+          update: updateMock,
+          delete: deleteMock,
+        };
+      }
+
+      throw new Error(`Unexpected table: ${table}`);
+    });
+
+    return { selectMock };
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    insertMock.mockReset();
+    updateMock.mockReset();
+    deleteMock.mockReset();
+  });
+
+  it("reads sale_lines with an inner sales status embed and no RPC", async () => {
+    const { selectMock } = mockSoldQtyLines([soldLineRow()]);
+
+    const result = await salesReadService.getSoldQuantityByProductId();
+
+    expect(result.error).toBeNull();
+    expect(supabaseMock.from).toHaveBeenCalledTimes(1);
+    expect(supabaseMock.from).toHaveBeenCalledWith("sale_lines");
+    expect(selectMock).toHaveBeenCalledWith(SOLD_SELECT);
+    expect(supabaseMock.rpc).not.toHaveBeenCalled();
+    expect(insertMock).not.toHaveBeenCalled();
+    expect(updateMock).not.toHaveBeenCalled();
+    expect(deleteMock).not.toHaveBeenCalled();
+  });
+
+  it("sums quantity for two confirmed lines of the same product", async () => {
+    mockSoldQtyLines([
+      soldLineRow({ quantity: "3" }),
+      soldLineRow({ quantity: "2" }),
+    ]);
+
+    const result = await salesReadService.getSoldQuantityByProductId();
+
+    expect(result.error).toBeNull();
+    expect(result.data?.get(PRODUCT_ID)).toBe(5);
+    expect(result.data?.size).toBe(1);
+  });
+
+  it("includes confirmed and paid, excludes draft and cancelled", async () => {
+    mockSoldQtyLines([
+      soldLineRow({ quantity: "3", sales: { status: "confirmed" } }),
+      soldLineRow({ quantity: "2", sales: { status: "paid" } }),
+      soldLineRow({ quantity: "10", sales: { status: "draft" } }),
+      soldLineRow({
+        quantity: "7",
+        product_id: PRODUCT_ID_2,
+        sales: { status: "cancelled" },
+      }),
+    ]);
+
+    const result = await salesReadService.getSoldQuantityByProductId();
+
+    expect(result.error).toBeNull();
+    expect(result.data?.get(PRODUCT_ID)).toBe(5);
+    expect(result.data?.has(PRODUCT_ID_2)).toBe(false);
+  });
+
+  it("returns an empty map when there are no lines", async () => {
+    mockSoldQtyLines([]);
+
+    const result = await salesReadService.getSoldQuantityByProductId();
+
+    expect(result.error).toBeNull();
+    expect(result.data).toEqual(new Map());
+  });
+
+  it("fails on an invalid row without returning a partial map", async () => {
+    mockSoldQtyLines([
+      soldLineRow(),
+      soldLineRow({ product_id: null, quantity: "4" }),
+    ]);
+
+    const result = await salesReadService.getSoldQuantityByProductId();
+
+    expect(result.data).toBeNull();
+    expect(result.error).toBe("Sold quantity response was invalid.");
+  });
+
+  it("maps supabase errors", async () => {
+    mockSoldQtyLines([], {
+      message: "permission denied for table sale_lines",
+    });
+
+    const result = await salesReadService.getSoldQuantityByProductId();
+
+    expect(result.data).toBeNull();
+    expect(result.error).toBe("permission denied for table sale_lines");
+    expect(supabaseMock.rpc).not.toHaveBeenCalled();
   });
 });

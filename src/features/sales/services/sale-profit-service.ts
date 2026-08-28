@@ -13,7 +13,7 @@ import { toUserError } from "@/lib/service-errors";
 import { supabase } from "@/lib/supabase";
 import { fail, ok, type ServiceResult } from "@/types/service";
 import type { SaleProfitSummary } from "../types/sale-profit";
-import type { SaleStatus } from "../types/sale";
+import { isCompletedSaleStatus } from "../utils/is-completed-sale-status";
 import {
   assertSaleProfitImmutable,
   buildSaleProfitSummary,
@@ -26,10 +26,6 @@ const UUID_RE =
 
 /** In-process guard: profit generated once after completion (DEV-110). */
 const builtSaleProfitIds = new Set<string>();
-
-function isCompletedSaleStatus(status: SaleStatus): boolean {
-  return status === "confirmed" || status === "paid";
-}
 
 /**
  * Independent server-side recomputation of a completed sale's frozen COGS

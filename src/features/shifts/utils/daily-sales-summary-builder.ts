@@ -5,6 +5,7 @@
  * Never recalculates historical stored summaries.
  */
 
+import { isCompletedSaleStatus } from "@/features/sales/utils/is-completed-sale-status";
 import { roundMoney } from "@/lib/money";
 import type { Shift } from "../types/shift";
 import type {
@@ -13,6 +14,8 @@ import type {
   DailySalesSaleFact,
   DailySalesSummary,
 } from "../types/daily-sales-summary";
+
+export { isCompletedSaleStatus };
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -46,12 +49,6 @@ function hasExistingShiftId(
     return existing.includes(shiftId);
   }
   return existing.has(shiftId);
-}
-
-export function isCompletedSaleStatus(
-  status: string,
-): status is DailySalesSaleFact["status"] {
-  return status === "confirmed" || status === "paid";
 }
 
 export function validateDailySalesSaleFact(
