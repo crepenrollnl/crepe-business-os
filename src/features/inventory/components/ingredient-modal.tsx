@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState, type FormEvent } from "react";
 import {
   NumericInput,
@@ -215,6 +216,16 @@ function IngredientModalForm({
             ? "Update ingredient details and stock information."
             : "Create a new ingredient and set its initial stock levels."}
         </p>
+        {item ? (
+          <p className="mt-2">
+            <Link
+              href={`/inventory/ingredients/${item.id}/movements`}
+              className="text-sm font-medium text-zinc-600 transition-colors hover:text-zinc-900"
+            >
+              Movement history
+            </Link>
+          </p>
+        ) : null}
       </div>
 
       {error && (
