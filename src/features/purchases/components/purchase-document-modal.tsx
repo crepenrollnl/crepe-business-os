@@ -30,6 +30,13 @@ import {
   deriveExclusiveUnitCostFromLineTotal,
   LINE_TOTAL_UNIT_PRICE_ERROR,
 } from "../utils/derive-exclusive-unit-cost-from-line-total";
+import {
+  buildLineTotalProbeKey,
+  editableLineTotalValue,
+  shouldInvalidateLineTotalProbeOnPriceModeChange,
+  shouldRunLineTotalProbe,
+  unitCostAfterLineTotalProbe,
+} from "../utils/line-total-probe-apply";
 
 /** Debounce delay before re-requesting the tax preview RPC after an edit. */
 const TAX_PREVIEW_DEBOUNCE_MS = 400;
@@ -348,7 +355,8 @@ function PurchaseDocumentForm({
   const taxPreview = hasTaxPreviewInputs ? taxPreviewState : null;
   const isTaxPreviewLoading = hasTaxPreviewInputs && isTaxPreviewLoadingState;
 
-  // Isolated inclusive-probe: exclusive Line total → net unit_cost via RPC.
+  // Isolated Line-total probe: pinned gross → unit_cost via RPC.
+  // Exclusive writes probe net; inclusive writes pinnedGross/qty (never net).
   // Separate from the document-level tax preview that drives the footer.
   useEffect(() => {
     if (isReadOnly) {
@@ -359,10 +367,7 @@ function PurchaseDocumentForm({
     const timerIds: number[] = [];
 
     formValues.lines.forEach((line, index) => {
-      if (line.price_mode === "inclusive") {
-        return;
-      }
-      if (line.last_edited_field !== "line_total") {
+      if (!shouldRunLineTotalProbe(line.last_edited_field)) {
         return;
       }
 
@@ -372,16 +377,17 @@ function PurchaseDocumentForm({
         return;
       }
 
-      const probeKey = [
+      const probeKey = buildLineTotalProbeKey({
         quantity,
         lineTotal,
-        line.tax_category,
-        line.tax_regime,
-        formValues.purchased_at,
-        formValues.tax_country,
-        formValues.supplier_country,
-        formValues.supplier_id,
-      ].join("|");
+        taxCategory: line.tax_category,
+        taxRegime: line.tax_regime,
+        purchasedAt: formValues.purchased_at,
+        taxCountry: formValues.tax_country,
+        supplierCountry: formValues.supplier_country,
+        supplierId: formValues.supplier_id,
+        priceMode: line.price_mode,
+      });
 
       if (appliedLineTotalProbeKeysRef.current[index] === probeKey) {
         return;
@@ -449,7 +455,15 @@ function PurchaseDocumentForm({
               }
               return {
                 ...currentLine,
-                unit_cost: formatNumericInput(result.data.unitCost),
+                unit_cost: formatNumericInput(
+                  unitCostAfterLineTotalProbe({
+                    priceMode: currentLine.price_mode,
+                    probeNetUnitCost: result.data.unitCost,
+                    pinnedGross: lineTotal,
+                    quantity:
+                      parseNumericInput(currentLine.quantity) ?? quantity,
+                  }),
+                ),
               };
             }),
           }));
@@ -553,6 +567,7 @@ function PurchaseDocumentForm({
   };
 
   const updateLineUnitCost = (index: number, value: string) => {
+    delete appliedLineTotalProbeKeysRef.current[index];
     setFormValues((current) => ({
       ...current,
       lines: current.lines.map((line, lineIndex) => {
@@ -578,6 +593,29 @@ function PurchaseDocumentForm({
       ...current,
       [index]: { loading: false, error: null },
     }));
+  };
+
+  const updateLinePriceMode = (
+    index: number,
+    value: "inclusive" | "exclusive",
+  ) => {
+    setFormValues((current) => {
+      const currentLine = current.lines[index];
+      if (
+        currentLine &&
+        shouldInvalidateLineTotalProbeOnPriceModeChange(
+          currentLine.last_edited_field,
+        )
+      ) {
+        delete appliedLineTotalProbeKeysRef.current[index];
+      }
+      return {
+        ...current,
+        lines: current.lines.map((line, lineIndex) =>
+          lineIndex === index ? { ...line, price_mode: value } : line,
+        ),
+      };
+    });
   };
 
   const updateLineTotal = (index: number, value: string) => {
@@ -1118,9 +1156,8 @@ function PurchaseDocumentForm({
                                 type="checkbox"
                                 checked={line.price_mode === "inclusive"}
                                 onChange={(event) =>
-                                  updateLine(
+                                  updateLinePriceMode(
                                     index,
-                                    "price_mode",
                                     event.target.checked
                                       ? "inclusive"
                                       : "exclusive",
@@ -1212,7 +1249,11 @@ function PurchaseDocumentForm({
                             )
                           ) : (
                             <NumericInput
-                              value={line.line_total}
+                              value={editableLineTotalValue({
+                                lastEditedField: line.last_edited_field,
+                                pinnedLineTotal: line.line_total,
+                                previewGrossAmount: taxLine?.gross_amount,
+                              })}
                               onChange={(value) =>
                                 updateLineTotal(index, value)
                               }
