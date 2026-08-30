@@ -69,7 +69,6 @@ describe("daily-profit-summary-builder (DEV-115)", () => {
           sale_id: SALE_A,
           net_revenue: 0,
           cogs: 0,
-          gross_profit: 0,
         },
       ],
     });
@@ -89,13 +88,11 @@ describe("daily-profit-summary-builder (DEV-115)", () => {
           sale_id: SALE_A,
           net_revenue: 100,
           cogs: 40,
-          gross_profit: 60,
         },
         {
           sale_id: SALE_B,
           net_revenue: 50,
           cogs: 20,
-          gross_profit: 30,
         },
       ],
     });
@@ -119,7 +116,6 @@ describe("daily-profit-summary-builder (DEV-115)", () => {
           sale_id: SALE_A,
           net_revenue: 50,
           cogs: 80,
-          gross_profit: -30,
         },
       ],
     });
@@ -133,6 +129,30 @@ describe("daily-profit-summary-builder (DEV-115)", () => {
       gross_margin_percent: -60,
       is_frozen: true,
     });
+  });
+
+  it("sums raw per-sale COGS and rounds once (not per sale)", () => {
+    const result = buildDailyProfitSummary({
+      shift_id: SHIFT_ID,
+      sale_profits: [
+        {
+          sale_id: SALE_A,
+          net_revenue: 10,
+          cogs: 1.004,
+        },
+        {
+          sale_id: SALE_B,
+          net_revenue: 10,
+          cogs: 1.004,
+        },
+      ],
+    });
+
+    expect(result.error).toBeNull();
+    // roundMoney(1.004) + roundMoney(1.004) === 2.00; sql/092 is 2.01.
+    expect(result.data?.total_cogs).toBe(2.01);
+    expect(result.data?.net_revenue).toBe(20);
+    expect(result.data?.gross_profit).toBe(17.99);
   });
 
   it("rejects duplicate summary generation", () => {
