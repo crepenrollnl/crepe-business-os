@@ -15,4 +15,5 @@ export const navItems: NavItem[] = [
   { label: "Fixed Assets", href: "/fixed-assets" },
   { label: "Reports", href: "/reports" },
   { label: "BTW Report", href: "/reports/btw" },
+  { label: "Sales by Product", href: "/reports/sales-by-product" },
 ];

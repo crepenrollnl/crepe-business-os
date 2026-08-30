@@ -58,3 +58,9 @@ jobs:
 
       - name: allocate_finished_goods_fifo
         run: psql -v ON_ERROR_STOP=1 -f tests/sql/allocate_finished_goods_fifo.sql
+
+      - name: get_sales_by_product
+        run: |
+          set -euo pipefail
+          psql -v ON_ERROR_STOP=1 -f sql/109_get_sales_by_product.sql
+          psql -v ON_ERROR_STOP=1 -f tests/sql/get_sales_by_product.sql
