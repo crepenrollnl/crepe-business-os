@@ -1,8 +1,9 @@
 /**
  * Daily Profit Summary pure builder (DEV-115).
  *
- * Aggregates frozen Sale Profit facts into a shift snapshot.
- * Never recalculates historical stored summaries or invents COGS/revenue.
+ * Aggregates unrounded per-sale ledger facts into a shift snapshot:
+ * sum raw revenue and COGS, then round once (sql/092). Never
+ * recalculates historical stored summaries or invents COGS/revenue.
  */
 
 import { roundMoney } from "@/lib/money";
@@ -63,14 +64,6 @@ export function validateDailyProfitSaleFact(
   if (!Number.isFinite(fact.cogs) || fact.cogs < 0) {
     return "Sale COGS must be a non-negative amount.";
   }
-  if (!Number.isFinite(fact.gross_profit)) {
-    return "Sale gross profit must be a finite amount.";
-  }
-
-  const expected = roundMoney(fact.net_revenue - fact.cogs);
-  if (roundMoney(fact.gross_profit) !== expected) {
-    return "Sale gross profit must equal net revenue minus COGS.";
-  }
 
   return null;
 }
@@ -125,8 +118,10 @@ export function assertDailyProfitSummaryHistoricallyImmutable(input: {
 }
 
 /**
- * Build a frozen daily profit summary from frozen sale-profit facts.
- * Empty / no completed sales → zeros with null margin.
+ * Build a frozen daily profit summary from unrounded per-sale ledger facts.
+ * Sums raw revenue and COGS across the shift, then rounds each total once
+ * (mirrors verify_daily_profit_summary / sql/092). Empty sales → zeros
+ * with null margin.
  */
 export function buildDailyProfitSummary(
   input: BuildDailyProfitSummaryInput,
@@ -151,14 +146,16 @@ export function buildDailyProfitSummary(
     }
   }
 
-  let net_revenue = 0;
-  let total_cogs = 0;
+  let raw_net_revenue = 0;
+  let raw_total_cogs = 0;
 
   for (const fact of input.sale_profits) {
-    net_revenue = roundMoney(net_revenue + fact.net_revenue);
-    total_cogs = roundMoney(total_cogs + fact.cogs);
+    raw_net_revenue += fact.net_revenue;
+    raw_total_cogs += fact.cogs;
   }
 
+  const net_revenue = roundMoney(raw_net_revenue);
+  const total_cogs = roundMoney(raw_total_cogs);
   const gross_profit = roundMoney(net_revenue - total_cogs);
   const gross_margin_percent =
     net_revenue === 0

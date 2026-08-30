@@ -2,9 +2,12 @@
  * Daily Profit Summary service (DEV-115).
  *
  * Generates an immutable profit snapshot once when a Shift closes.
- * Reuses frozen Sale Profit summaries (DEV-110) — never recalculates COGS/VAT.
+ * Per-sale profit (DEV-110) is a completeness gate. Shift totals sum
+ * raw sale.subtotal and raw COGS layers, then round once — the same
+ * order as verify_daily_profit_summary (sql/092).
  */
 
+import { saleCogsService } from "@/features/sales/services/sale-cogs-service";
 import { saleProfitService } from "@/features/sales/services/sale-profit-service";
 import { toUserError } from "@/lib/service-errors";
 import { supabase } from "@/lib/supabase";
@@ -38,6 +41,12 @@ interface SaleHeaderRow {
   id: string;
   status: string;
   confirmed_at: string | null;
+  subtotal: number | string;
+}
+
+interface CompletedShiftSale {
+  id: string;
+  subtotal: number;
 }
 
 const SUMMARY_SELECT =
@@ -160,18 +169,18 @@ function mapSummaryError(error: unknown, fallback: string): string {
 }
 
 /**
- * Completed sales confirmed during the shift window (ids only).
+ * Completed sales confirmed during the shift window (id + raw subtotal).
  */
-async function loadCompletedSaleIdsForShift(
+async function loadCompletedSalesForShift(
   shift: Shift,
-): Promise<ServiceResult<string[]>> {
+): Promise<ServiceResult<CompletedShiftSale[]>> {
   if (!shift.closed_at) {
     return fail("Closed shift is missing closed_at.");
   }
 
   const { data, error } = await supabase
     .from("sales")
-    .select("id, status, confirmed_at")
+    .select("id, status, confirmed_at, subtotal")
     .in("status", ["confirmed", "paid"])
     .not("confirmed_at", "is", null)
     .gte("confirmed_at", shift.opened_at)
@@ -181,20 +190,35 @@ async function loadCompletedSaleIdsForShift(
     return fail(mapSummaryError(error, "Failed to load shift sales"));
   }
 
-  const ids = ((data ?? []) as SaleHeaderRow[]).map((row) => row.id);
-  return ok(ids);
+  const sales: CompletedShiftSale[] = [];
+  for (const row of (data ?? []) as SaleHeaderRow[]) {
+    const subtotal = toNumber(row.subtotal);
+    if (subtotal === null || subtotal < 0) {
+      return fail("Shift sale subtotal is invalid.");
+    }
+    sales.push({ id: row.id, subtotal });
+  }
+  return ok(sales);
+}
+
+function sumRawLayerCogs(
+  layers: readonly { total_cost: number }[],
+): number {
+  return layers.reduce((sum, layer) => sum + layer.total_cost, 0);
 }
 
 /**
- * Load frozen sale-profit facts via DEV-110 service (no Sales module changes).
+ * Gate each sale through DEV-110 profit (completed + COGS layers +
+ * verify_sale_cost_and_profit). Shift facts use raw subtotal and raw
+ * layer COGS — not the already-rounded per-sale profit totals.
  */
 async function loadFrozenSaleProfitFacts(
-  saleIds: string[],
+  sales: readonly CompletedShiftSale[],
 ): Promise<ServiceResult<DailyProfitSaleFact[]>> {
   const facts: DailyProfitSaleFact[] = [];
 
-  for (const saleId of saleIds) {
-    const profitResult = await saleProfitService.getSaleProfitSummary(saleId);
+  for (const sale of sales) {
+    const profitResult = await saleProfitService.getSaleProfitSummary(sale.id);
     if (profitResult.error || !profitResult.data) {
       return fail(
         profitResult.error ??
@@ -202,12 +226,17 @@ async function loadFrozenSaleProfitFacts(
       );
     }
 
-    const profit = profitResult.data;
+    const cogsResult = await saleCogsService.getSaleCostSummary(sale.id);
+    if (cogsResult.error || !cogsResult.data) {
+      return fail(
+        cogsResult.error ?? "Failed to load sale COGS for daily summary",
+      );
+    }
+
     facts.push({
-      sale_id: profit.sale_id,
-      net_revenue: profit.net_revenue,
-      cogs: profit.cogs,
-      gross_profit: profit.gross_profit,
+      sale_id: sale.id,
+      net_revenue: sale.subtotal,
+      cogs: sumRawLayerCogs(cogsResult.data.layers),
     });
   }
 
@@ -283,12 +312,12 @@ export const dailyProfitSummaryService = {
         return fail(duplicateGuard);
       }
 
-      const saleIdsResult = await loadCompletedSaleIdsForShift(shift);
-      if (saleIdsResult.error || !saleIdsResult.data) {
-        return fail(saleIdsResult.error ?? "Failed to load shift sales");
+      const salesResult = await loadCompletedSalesForShift(shift);
+      if (salesResult.error || !salesResult.data) {
+        return fail(salesResult.error ?? "Failed to load shift sales");
       }
 
-      const factsResult = await loadFrozenSaleProfitFacts(saleIdsResult.data);
+      const factsResult = await loadFrozenSaleProfitFacts(salesResult.data);
       if (factsResult.error || !factsResult.data) {
         return fail(
           factsResult.error ?? "Failed to load frozen sale profits",

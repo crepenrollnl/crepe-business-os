@@ -2,7 +2,10 @@
  * Daily Profit Summary contracts (DEV-115).
  *
  * Frozen profit snapshot for a closed Shift.
- * Aggregates frozen Sale Profit summaries (DEV-110). Never recalculated.
+ * Shift totals are ledger-window aggregates (raw layer COGS + sale
+ * subtotals), rounded once — same order as verify_daily_profit_summary
+ * (sql/092). Per-sale profit (DEV-110) is a completeness gate only.
+ * Never recalculated after insert.
  */
 
 export interface DailyProfitSummary {
@@ -21,13 +24,15 @@ export interface DailyProfitSummary {
 }
 
 /**
- * Frozen sale-profit facts used by the pure daily builder.
+ * One completed sale's unrounded contribution to the shift aggregate.
+ * `net_revenue` is sales.subtotal; `cogs` is the raw sum of FG
+ * total_cost + ingredient quantity × unit_cost. The builder rounds
+ * after summing every sale — not per fact.
  */
 export interface DailyProfitSaleFact {
   sale_id: string;
   net_revenue: number;
   cogs: number;
-  gross_profit: number;
 }
 
 export interface BuildDailyProfitSummaryInput {

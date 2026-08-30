@@ -4,7 +4,11 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { supabaseMock, getSaleProfitSummaryMock } = vi.hoisted(() => {
+const {
+  supabaseMock,
+  getSaleProfitSummaryMock,
+  getSaleCostSummaryMock,
+} = vi.hoisted(() => {
   const supabaseMock = {
     from: vi.fn(),
     rpc: vi.fn(),
@@ -13,7 +17,8 @@ const { supabaseMock, getSaleProfitSummaryMock } = vi.hoisted(() => {
     },
   };
   const getSaleProfitSummaryMock = vi.fn();
-  return { supabaseMock, getSaleProfitSummaryMock };
+  const getSaleCostSummaryMock = vi.fn();
+  return { supabaseMock, getSaleProfitSummaryMock, getSaleCostSummaryMock };
 });
 
 vi.mock("@/lib/supabase", () => ({
@@ -23,6 +28,12 @@ vi.mock("@/lib/supabase", () => ({
 vi.mock("@/features/sales/services/sale-profit-service", () => ({
   saleProfitService: {
     getSaleProfitSummary: getSaleProfitSummaryMock,
+  },
+}));
+
+vi.mock("@/features/sales/services/sale-cogs-service", () => ({
+  saleCogsService: {
+    getSaleCostSummary: getSaleCostSummaryMock,
   },
 }));
 
@@ -96,10 +107,34 @@ function mockSalesQuery(rows: Record<string, unknown>[]) {
   return { select, statusIn, not, gte, lte };
 }
 
+function cogsSummary(saleId: string, rawLayerCosts: readonly number[]) {
+  return {
+    sale_id: saleId,
+    total_cogs: rawLayerCosts.reduce((sum, cost) => sum + cost, 0),
+    consumed_quantity: rawLayerCosts.length,
+    layers: rawLayerCosts.map((total_cost, index) => ({
+      consumption_id: `${saleId}-layer-${index}`,
+      sale_line_id: `${saleId}-line`,
+      production_batch_id: null,
+      batch_number: null,
+      quantity: 1,
+      unit_cost: total_cost,
+      total_cost,
+      produced_at: null,
+      source: "ingredient" as const,
+      ingredient_id: null,
+      ingredient_name: null,
+    })),
+    line_summaries: [],
+    is_frozen: true as const,
+  };
+}
+
 describe("dailyProfitSummaryService (DEV-115)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     getSaleProfitSummaryMock.mockReset();
+    getSaleCostSummaryMock.mockReset();
     supabaseMock.rpc.mockResolvedValue({ data: true, error: null });
   });
 
@@ -136,6 +171,7 @@ describe("dailyProfitSummaryService (DEV-115)", () => {
       expect(result.error).toBeNull();
       expect(result.data).toEqual({ summary: mappedSummary() });
       expect(getSaleProfitSummaryMock).not.toHaveBeenCalled();
+      expect(getSaleCostSummaryMock).not.toHaveBeenCalled();
       expect(insert).toHaveBeenCalledWith(
         expect.objectContaining({
           shift_id: SHIFT_ID,
@@ -154,11 +190,13 @@ describe("dailyProfitSummaryService (DEV-115)", () => {
           id: SALE_A,
           status: "confirmed",
           confirmed_at: "2026-07-26T10:00:00.000Z",
+          subtotal: 100,
         },
         {
           id: SALE_B,
           status: "paid",
           confirmed_at: "2026-07-26T12:00:00.000Z",
+          subtotal: 50,
         },
       ]);
       getSaleProfitSummaryMock
@@ -182,6 +220,15 @@ describe("dailyProfitSummaryService (DEV-115)", () => {
             gross_margin_percent: 60,
             is_frozen: true,
           },
+          error: null,
+        });
+      getSaleCostSummaryMock
+        .mockResolvedValueOnce({
+          data: cogsSummary(SALE_A, [40]),
+          error: null,
+        })
+        .mockResolvedValueOnce({
+          data: cogsSummary(SALE_B, [20]),
           error: null,
         });
 
@@ -228,6 +275,100 @@ describe("dailyProfitSummaryService (DEV-115)", () => {
       expect(getSaleProfitSummaryMock).toHaveBeenCalledTimes(2);
       expect(getSaleProfitSummaryMock).toHaveBeenNthCalledWith(1, SALE_A);
       expect(getSaleProfitSummaryMock).toHaveBeenNthCalledWith(2, SALE_B);
+      expect(getSaleCostSummaryMock).toHaveBeenCalledTimes(2);
+    });
+
+    it("sums raw layer COGS and rounds once, ignoring per-sale rounded COGS", async () => {
+      const existing = mockExistingSummary(null);
+      const sales = mockSalesQuery([
+        {
+          id: SALE_A,
+          status: "confirmed",
+          confirmed_at: "2026-07-26T10:00:00.000Z",
+          subtotal: 10,
+        },
+        {
+          id: SALE_B,
+          status: "paid",
+          confirmed_at: "2026-07-26T12:00:00.000Z",
+          subtotal: 10,
+        },
+      ]);
+      getSaleProfitSummaryMock
+        .mockResolvedValueOnce({
+          data: {
+            sale_id: SALE_A,
+            net_revenue: 10,
+            cogs: 1,
+            gross_profit: 9,
+            gross_margin_percent: 90,
+            is_frozen: true,
+          },
+          error: null,
+        })
+        .mockResolvedValueOnce({
+          data: {
+            sale_id: SALE_B,
+            net_revenue: 10,
+            cogs: 1,
+            gross_profit: 9,
+            gross_margin_percent: 90,
+            is_frozen: true,
+          },
+          error: null,
+        });
+      getSaleCostSummaryMock
+        .mockResolvedValueOnce({
+          data: cogsSummary(SALE_A, [1.004]),
+          error: null,
+        })
+        .mockResolvedValueOnce({
+          data: cogsSummary(SALE_B, [1.004]),
+          error: null,
+        });
+
+      const inserted = summaryRow({
+        net_revenue: 20,
+        total_cogs: 2.01,
+        gross_profit: 17.99,
+        gross_margin_percent: 89.95,
+      });
+      const insert = vi.fn().mockReturnValue({
+        select: vi.fn().mockReturnValue({
+          single: vi.fn().mockResolvedValue({ data: inserted, error: null }),
+        }),
+      });
+
+      let call = 0;
+      supabaseMock.from.mockImplementation((table: string) => {
+        call += 1;
+        if (call === 1) {
+          expect(table).toBe("shift_daily_profit_summaries");
+          return { select: existing.select };
+        }
+        if (call === 2) {
+          expect(table).toBe("sales");
+          return { select: sales.select };
+        }
+        expect(table).toBe("shift_daily_profit_summaries");
+        return { insert };
+      });
+
+      const result = await dailyProfitSummaryService.generateForClosedShift(
+        closedShift(),
+      );
+
+      expect(result.error).toBeNull();
+      expect(insert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          shift_id: SHIFT_ID,
+          net_revenue: 20,
+          total_cogs: 2.01,
+          gross_profit: 17.99,
+          gross_margin_percent: 89.95,
+        }),
+      );
+      expect(result.data?.summary.total_cogs).toBe(2.01);
     });
 
     it("supports negative profit from frozen sale profits", async () => {
@@ -237,6 +378,7 @@ describe("dailyProfitSummaryService (DEV-115)", () => {
           id: SALE_A,
           status: "confirmed",
           confirmed_at: "2026-07-26T10:00:00.000Z",
+          subtotal: 40,
         },
       ]);
       getSaleProfitSummaryMock.mockResolvedValue({
@@ -248,6 +390,10 @@ describe("dailyProfitSummaryService (DEV-115)", () => {
           gross_margin_percent: -75,
           is_frozen: true,
         },
+        error: null,
+      });
+      getSaleCostSummaryMock.mockResolvedValue({
+        data: cogsSummary(SALE_A, [70]),
         error: null,
       });
 
@@ -307,6 +453,7 @@ describe("dailyProfitSummaryService (DEV-115)", () => {
         "This shift already has a daily profit summary.",
       );
       expect(getSaleProfitSummaryMock).not.toHaveBeenCalled();
+      expect(getSaleCostSummaryMock).not.toHaveBeenCalled();
     });
 
     it("maps unique-constraint duplicate errors", async () => {
@@ -353,6 +500,7 @@ describe("dailyProfitSummaryService (DEV-115)", () => {
           id: SALE_A,
           status: "confirmed",
           confirmed_at: "2026-07-26T11:00:00.000Z",
+          subtotal: 80,
         },
       ]);
       getSaleProfitSummaryMock.mockResolvedValue({
@@ -364,6 +512,10 @@ describe("dailyProfitSummaryService (DEV-115)", () => {
           gross_margin_percent: 60,
           is_frozen: true,
         },
+        error: null,
+      });
+      getSaleCostSummaryMock.mockResolvedValue({
+        data: cogsSummary(SALE_A, [32]),
         error: null,
       });
       const inserted = summaryRow({
