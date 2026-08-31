@@ -16,6 +16,8 @@ sql/006_create_production_sessions.sql
 sql/007_complete_production.sql
 sql/010_finished_goods_batch_consumptions.sql
 sql/013_create_sales.sql
+sql/016_create_draft_sale.sql
+sql/018_create_customers.sql
 sql/104_sales_fulfilled_at.sql
 sql/107_sales_kitchen_flags.sql
 sql/060_create_shifts.sql
