@@ -69,5 +69,7 @@ jobs:
         run: |
           set -euo pipefail
           psql -v ON_ERROR_STOP=1 -f sql/094_sale_vat_9_percent.sql
+          psql -v ON_ERROR_STOP=1 -f sql/104_sales_fulfilled_at.sql
+          psql -v ON_ERROR_STOP=1 -f sql/107_sales_kitchen_flags.sql
           psql -v ON_ERROR_STOP=1 -f sql/110_sale_header_discount.sql
           psql -v ON_ERROR_STOP=1 -f tests/sql/sale_header_discount.sql

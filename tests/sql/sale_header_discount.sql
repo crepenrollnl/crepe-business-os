@@ -4,7 +4,8 @@
 -- Do not run against crepe-business-V1.
 --
 -- Bootstrap: tests/sql/bootstrap/complete_production_session.list
--- then sql/094, sql/109, sql/110 (CI applies those before this file).
+-- then sql/094, sql/104, sql/107, sql/110 (CI applies those before this file).
+-- sql/109 is already applied by the get_sales_by_product step.
 --
 -- PASS: psql -v ON_ERROR_STOP=1 -f tests/sql/sale_header_discount.sql
 
