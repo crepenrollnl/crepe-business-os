@@ -110,6 +110,9 @@ function draftSale(): SaleDetail {
     confirmed_at: null,
     paid_at: null,
     cancelled_at: null,
+    discount_type: null,
+    discount_value: null,
+    discount_amount: null,
     lines: [
       {
         line_id: "line-1",

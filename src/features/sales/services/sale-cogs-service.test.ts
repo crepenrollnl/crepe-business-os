@@ -83,6 +83,9 @@ function sale(status: SaleDetail["status"] = "confirmed"): SaleDetail {
     confirmed_at: status === "draft" ? null : "2026-07-26T12:00:00.000Z",
     paid_at: status === "paid" ? "2026-07-26T13:00:00.000Z" : null,
     cancelled_at: null,
+    discount_type: null,
+    discount_value: null,
+    discount_amount: null,
     lines: [
       {
         line_id: LINE_ID,

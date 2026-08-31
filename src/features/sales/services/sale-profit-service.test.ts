@@ -49,6 +49,9 @@ function sale(
     confirmed_at: "2026-07-26T12:00:00.000Z",
     paid_at: null,
     cancelled_at: null,
+    discount_type: null,
+    discount_value: null,
+    discount_amount: null,
     lines: [],
     ...overrides,
   };

@@ -1,9 +1,9 @@
 import { formatSaleMoney } from "../utils/format-sale";
+import type { SaleDiscountType } from "../types/sale";
 import type { QuickSaleCartLine } from "../hooks/use-quick-sale";
 
-type QuickSaleCartProps = {
+type QuickSaleCartSharedProps = {
   lines: QuickSaleCartLine[];
-  subtotal: number;
   confirming: boolean;
   actionError: string | null;
   postingError: string | null;
@@ -17,21 +17,67 @@ type QuickSaleCartProps = {
   onConfirm: () => void;
 };
 
+/** Quick Sale: Items → Discount → To pay. */
+type QuickSaleCartDiscountProps = QuickSaleCartSharedProps & {
+  itemsTotal: number;
+  discountType: SaleDiscountType;
+  discountInput: string;
+  discountAmount: number;
+  payable: number;
+  discountError: string | null;
+  onDiscountTypeChange: (value: SaleDiscountType) => void;
+  onDiscountInputChange: (value: string) => void;
+  subtotal?: never;
+};
+
+/** POS reuses this cart unchanged: catalog total labeled Subtotal. */
+type QuickSaleCartPosProps = QuickSaleCartSharedProps & {
+  subtotal: number;
+  itemsTotal?: never;
+  discountType?: never;
+  discountInput?: never;
+  discountAmount?: never;
+  payable?: never;
+  discountError?: never;
+  onDiscountTypeChange?: never;
+  onDiscountInputChange?: never;
+};
+
+type QuickSaleCartProps = QuickSaleCartDiscountProps | QuickSaleCartPosProps;
+
+function typeClassName(isActive: boolean): string {
+  return `rounded-lg px-3 py-1.5 text-sm font-semibold transition-colors ${
+    isActive
+      ? "bg-white text-zinc-900 shadow-sm"
+      : "text-zinc-600 hover:text-zinc-900"
+  }`;
+}
+
 export function QuickSaleCart({
   lines,
   subtotal,
+  itemsTotal,
+  discountType,
+  discountInput,
+  discountAmount,
+  payable,
+  discountError,
   confirming,
   actionError,
   postingError,
   lastConfirmedSaleNumber,
   sendToQueue,
   kitchenNote,
+  onDiscountTypeChange,
+  onDiscountInputChange,
   onSendToQueueChange,
   onKitchenNoteChange,
   onIncrement,
   onDecrement,
   onConfirm,
 }: QuickSaleCartProps) {
+  const showDiscount = onDiscountTypeChange !== undefined;
+
   return (
     <div className="flex h-fit flex-col gap-4 rounded-xl border border-zinc-200 bg-white p-4 shadow-sm">
       <h2 className="text-base font-semibold text-zinc-900">Cart</h2>
@@ -92,12 +138,82 @@ export function QuickSaleCart({
         </ul>
       )}
 
-      <div className="flex items-center justify-between border-t border-zinc-200 pt-3">
-        <span className="text-sm font-medium text-zinc-700">Subtotal</span>
-        <span className="text-lg font-semibold text-zinc-900">
-          {formatSaleMoney(subtotal)}
-        </span>
-      </div>
+      {showDiscount &&
+      itemsTotal !== undefined &&
+      discountType !== undefined &&
+      discountInput !== undefined &&
+      discountAmount !== undefined &&
+      payable !== undefined &&
+      onDiscountInputChange !== undefined ? (
+        <div className="space-y-2 border-t border-zinc-200 pt-3">
+          <div className="flex items-center justify-between">
+            <span className="text-sm font-medium text-zinc-700">Items</span>
+            <span className="text-sm font-medium text-zinc-900">
+              {formatSaleMoney(itemsTotal)}
+            </span>
+          </div>
+
+          <div className="space-y-2">
+            <span className="text-sm font-medium text-zinc-700">Discount</span>
+            <div className="inline-flex items-center gap-1 rounded-xl bg-zinc-100 p-1">
+              <button
+                type="button"
+                className={typeClassName(discountType === "percent")}
+                disabled={confirming}
+                onClick={() => onDiscountTypeChange("percent")}
+              >
+                %
+              </button>
+              <button
+                type="button"
+                className={typeClassName(discountType === "amount")}
+                disabled={confirming}
+                onClick={() => onDiscountTypeChange("amount")}
+              >
+                €
+              </button>
+            </div>
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              inputMode="decimal"
+              value={discountInput}
+              disabled={confirming || lines.length === 0}
+              placeholder={discountType === "percent" ? "0" : "0.00"}
+              onChange={(event) => onDiscountInputChange(event.target.value)}
+              className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-900 focus:border-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-500/30 disabled:cursor-not-allowed disabled:bg-zinc-50"
+            />
+          </div>
+
+          {discountAmount > 0 ? (
+            <div className="flex items-center justify-between text-sm text-zinc-600">
+              <span>Discount</span>
+              <span>−{formatSaleMoney(discountAmount)}</span>
+            </div>
+          ) : null}
+
+          <div className="flex items-center justify-between">
+            <span className="text-sm font-medium text-zinc-700">To pay</span>
+            <span className="text-lg font-semibold text-zinc-900">
+              {formatSaleMoney(payable)}
+            </span>
+          </div>
+        </div>
+      ) : (
+        <div className="flex items-center justify-between border-t border-zinc-200 pt-3">
+          <span className="text-sm font-medium text-zinc-700">Subtotal</span>
+          <span className="text-lg font-semibold text-zinc-900">
+            {formatSaleMoney(subtotal ?? 0)}
+          </span>
+        </div>
+      )}
+
+      {discountError ? (
+        <p className="text-sm text-red-600" role="alert">
+          {discountError}
+        </p>
+      ) : null}
 
       {actionError ? (
         <p className="text-sm text-red-600" role="alert">
@@ -131,7 +247,11 @@ export function QuickSaleCart({
       <button
         type="button"
         onClick={onConfirm}
-        disabled={lines.length === 0 || confirming}
+        disabled={
+          lines.length === 0 ||
+          confirming ||
+          (showDiscount && discountError != null)
+        }
         className="min-h-12 w-full rounded-lg bg-amber-500 px-4 py-3 text-base font-semibold text-white transition-colors hover:bg-amber-600 disabled:cursor-not-allowed disabled:opacity-50"
       >
         {confirming ? "Confirming..." : "Confirm"}

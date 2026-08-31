@@ -19,6 +19,10 @@ export const SALE_STATUSES = [
 
 export type SaleStatus = (typeof SALE_STATUSES)[number];
 
+export const SALE_DISCOUNT_TYPES = ["percent", "amount"] as const;
+
+export type SaleDiscountType = (typeof SALE_DISCOUNT_TYPES)[number];
+
 export interface Sale {
   id: string;
   sale_number: string;
@@ -127,6 +131,8 @@ export interface QuickSaleLineInput {
 export interface CreateAndConfirmSaleInput {
   customer_id?: string | null;
   kitchen_note?: string | null;
+  discount_type?: SaleDiscountType | null;
+  discount_value?: number | null;
   lines: QuickSaleLineInput[];
 }
 
@@ -175,6 +181,9 @@ export interface SaleDetail {
   confirmed_at: string | null;
   paid_at: string | null;
   cancelled_at: string | null;
+  discount_type: SaleDiscountType | null;
+  discount_value: number | null;
+  discount_amount: number | null;
   lines: SaleDetailLine[];
 }
 

@@ -9,7 +9,7 @@ import { formatUnitCost } from "@/lib/money";
 import type { SaleAccountingPostingStatus } from "../types/sale-accounting";
 import type { SaleCostSummary } from "../types/sale-cogs";
 import type { SaleProfitSummary } from "../types/sale-profit";
-import type { SaleDetail } from "../types/sale";
+import type { SaleDetail, SaleDiscountType } from "../types/sale";
 import {
   formatSaleDateTime,
   formatSaleMoney,
@@ -40,6 +40,50 @@ function formatPostingStatus(
 
 function formatQuantity(value: number): string {
   return Number.isInteger(value) ? String(value) : value.toFixed(3);
+}
+
+function formatTypedDiscount(
+  type: SaleDiscountType,
+  value: number,
+): string {
+  if (type === "percent") {
+    return Number.isInteger(value) ? `${value}%` : `${value.toFixed(2)}%`;
+  }
+  return formatSaleMoney(value);
+}
+
+function SaleReviewDiscountFields({ sale }: { sale: SaleDetail }) {
+  if (
+    sale.discount_type === null ||
+    sale.discount_value === null ||
+    sale.discount_amount === null
+  ) {
+    return null;
+  }
+
+  return (
+    <>
+      <div>
+        <dt className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+          Discount
+        </dt>
+        <dd className="mt-0.5 text-zinc-800" data-testid="review-discount">
+          {formatTypedDiscount(sale.discount_type, sale.discount_value)}
+        </dd>
+      </div>
+      <div>
+        <dt className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+          Discount amount
+        </dt>
+        <dd
+          className="mt-0.5 text-zinc-800"
+          data-testid="review-discount-amount"
+        >
+          −{formatSaleMoney(sale.discount_amount)}
+        </dd>
+      </div>
+    </>
+  );
 }
 
 export function SaleReviewSection({
@@ -83,6 +127,7 @@ export function SaleReviewSection({
               {formatSaleMoney(sale.total)}
             </dd>
           </div>
+          <SaleReviewDiscountFields sale={sale} />
           <div>
             <dt className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
               Net Revenue
@@ -142,6 +187,7 @@ export function SaleReviewSection({
                 {formatSaleMoney(saleTotal)}
               </dd>
             </div>
+            <SaleReviewDiscountFields sale={sale} />
             <div>
               <dt className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
                 Net Revenue

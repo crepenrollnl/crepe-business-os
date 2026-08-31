@@ -4,9 +4,14 @@ import { useCallback, useMemo, useState } from "react";
 import { accountingContextService } from "@/features/accounting/services/accounting-context-service";
 import { recipeService } from "@/features/recipes/services/recipe-service";
 import { useAsyncEffect } from "@/hooks/use-async-effect";
+import { calculateMoneyLineTotal, roundMoney } from "@/lib/money";
 import { salesReadService } from "../services/sales-read-service";
 import { salesService } from "../services/sales-service";
-import type { QuickSaleLineInput } from "../types/sale";
+import type { QuickSaleLineInput, SaleDiscountType } from "../types/sale";
+import {
+  parseDiscountInput,
+  resolveSaleHeaderDiscount,
+} from "../utils/quick-sale-discount";
 import {
   sortByProductName,
   sortBySoldQuantity,
@@ -77,6 +82,9 @@ export function useQuickSale() {
   >(null);
   const [sendToQueue, setSendToQueue] = useState(false);
   const [kitchenNote, setKitchenNote] = useState("");
+  const [discountType, setDiscountType] =
+    useState<SaleDiscountType>("percent");
+  const [discountInput, setDiscountInput] = useState("");
 
   const loadProducts = useCallback(async () => {
     setLoading(true);
@@ -156,14 +164,40 @@ export function useQuickSale() {
     [cart],
   );
 
-  const subtotal = useMemo(
+  const itemsTotal = useMemo(
     () =>
-      cartLines.reduce((sum, line) => sum + line.unit_price * line.quantity, 0),
+      roundMoney(
+        cartLines.reduce(
+          (sum, line) =>
+            sum + calculateMoneyLineTotal(line.quantity, line.unit_price),
+          0,
+        ),
+      ),
     [cartLines],
+  );
+
+  const discountValue = useMemo(
+    () => parseDiscountInput(discountInput),
+    [discountInput],
+  );
+
+  const discountPreview = useMemo(
+    () =>
+      resolveSaleHeaderDiscount({
+        catalogGross: itemsTotal,
+        type: discountType,
+        value: discountValue,
+      }),
+    [itemsTotal, discountType, discountValue],
   );
 
   const confirm = useCallback(async () => {
     if (cartLines.length === 0) {
+      return false;
+    }
+
+    if (discountPreview.error) {
+      setActionError(discountPreview.error);
       return false;
     }
 
@@ -186,6 +220,8 @@ export function useQuickSale() {
       const fallback = await salesService.createAndConfirmSale({
         lines,
         kitchen_note: kitchenNote,
+        discount_type: discountValue === null ? null : discountType,
+        discount_value: discountValue,
       });
 
       if (fallback.error || !fallback.data) {
@@ -207,7 +243,12 @@ export function useQuickSale() {
       }
     } else {
       const posted = await salesService.createAndConfirmSaleAndPostJournals(
-        { lines, kitchen_note: kitchenNote },
+        {
+          lines,
+          kitchen_note: kitchenNote,
+          discount_type: discountValue === null ? null : discountType,
+          discount_value: discountValue,
+        },
         contextResult.data,
       );
 
@@ -231,16 +272,32 @@ export function useQuickSale() {
     setCart({});
     setSendToQueue(false);
     setKitchenNote("");
+    setDiscountType("percent");
+    setDiscountInput("");
     setConfirming(false);
     return true;
-  }, [cartLines, sendToQueue, kitchenNote]);
+  }, [
+    cartLines,
+    sendToQueue,
+    kitchenNote,
+    discountPreview.error,
+    discountType,
+    discountValue,
+  ]);
 
   return {
     products,
     loading,
     error,
     cartLines,
-    subtotal,
+    itemsTotal,
+    discountType,
+    setDiscountType,
+    discountInput,
+    setDiscountInput,
+    discountAmount: discountPreview.discountAmount,
+    payable: discountPreview.payable,
+    discountError: discountPreview.error,
     confirming,
     actionError,
     postingError,

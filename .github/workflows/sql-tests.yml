@@ -64,3 +64,10 @@ jobs:
           set -euo pipefail
           psql -v ON_ERROR_STOP=1 -f sql/109_get_sales_by_product.sql
           psql -v ON_ERROR_STOP=1 -f tests/sql/get_sales_by_product.sql
+
+      - name: sale_header_discount
+        run: |
+          set -euo pipefail
+          psql -v ON_ERROR_STOP=1 -f sql/094_sale_vat_9_percent.sql
+          psql -v ON_ERROR_STOP=1 -f sql/110_sale_header_discount.sql
+          psql -v ON_ERROR_STOP=1 -f tests/sql/sale_header_discount.sql

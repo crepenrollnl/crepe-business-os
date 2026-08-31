@@ -18,9 +18,11 @@ import type {
   QueuedSaleLine,
   SaleDetail,
   SaleDetailLine,
+  SaleDiscountType,
   SaleListItem,
   SaleStatus,
 } from "../types/sale";
+import { SALE_DISCOUNT_TYPES } from "../types/sale";
 import { SALE_STATUSES } from "../types/sale";
 import { isCompletedSaleStatus } from "../utils/is-completed-sale-status";
 
@@ -34,7 +36,7 @@ const LIST_SELECT =
   "sale_id, sale_number, status, sale_date, customer_id, subtotal, tax_total, total, confirmed_at, paid_at, cancelled_at";
 
 const DETAILS_SELECT =
-  "sale_id, sale_number, status, sale_date, customer_id, subtotal, tax_total, total, confirmed_at, paid_at, cancelled_at, line_id, product_id, quantity, unit_price, line_total";
+  "sale_id, sale_number, status, sale_date, customer_id, subtotal, tax_total, total, confirmed_at, paid_at, cancelled_at, line_id, product_id, quantity, unit_price, line_total, discount_type, discount_value, discount_amount";
 
 interface SaleListRow {
   sale_id: string;
@@ -67,6 +69,9 @@ interface SaleDetailsRow {
   quantity: number | string | null;
   unit_price: number | string | null;
   line_total: number | string | null;
+  discount_type: SaleDiscountType | null;
+  discount_value: number | string | null;
+  discount_amount: number | string | null;
 }
 
 interface QueueSaleRow {
@@ -97,6 +102,27 @@ function toNumber(value: number | string): number {
 
 function isSaleStatus(value: string): value is SaleStatus {
   return (SALE_STATUSES as readonly string[]).includes(value);
+}
+
+function toOptionalNumber(
+  value: number | string | null | undefined,
+): number | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  const parsed = toNumber(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function toDiscountType(
+  value: SaleDiscountType | string | null | undefined,
+): SaleDiscountType | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  return (SALE_DISCOUNT_TYPES as readonly string[]).includes(value)
+    ? (value as SaleDiscountType)
+    : null;
 }
 
 function mapListRow(row: SaleListRow): SaleListItem {
@@ -169,6 +195,9 @@ function mapDetail(rows: SaleDetailsRow[]): SaleDetail {
     confirmed_at: first.confirmed_at,
     paid_at: first.paid_at,
     cancelled_at: first.cancelled_at,
+    discount_type: toDiscountType(first.discount_type),
+    discount_value: toOptionalNumber(first.discount_value),
+    discount_amount: toOptionalNumber(first.discount_amount),
     lines,
   };
 }
