@@ -40,8 +40,11 @@ const deleteMock = vi.fn();
 const LIST_SELECT =
   "sale_id, sale_number, status, sale_date, customer_id, subtotal, tax_total, total, confirmed_at, paid_at, cancelled_at";
 
-const DETAILS_SELECT =
+const DETAILS_SELECT_WITHOUT_DISCOUNT =
   "sale_id, sale_number, status, sale_date, customer_id, subtotal, tax_total, total, confirmed_at, paid_at, cancelled_at, line_id, product_id, quantity, unit_price, line_total";
+
+const DETAILS_SELECT =
+  `${DETAILS_SELECT_WITHOUT_DISCOUNT}, discount_type, discount_value, discount_amount`;
 
 function listRow(overrides?: Record<string, unknown>) {
   return {
@@ -590,6 +593,9 @@ describe("salesReadService.getSale (DEV-029)", () => {
       confirmed_at: "2026-07-22T16:00:00.000Z",
       paid_at: null,
       cancelled_at: null,
+      discount_type: null,
+      discount_value: null,
+      discount_amount: null,
       lines: [
         {
           line_id: LINE_ID,
@@ -607,6 +613,88 @@ describe("salesReadService.getSale (DEV-029)", () => {
         },
       ],
     });
+  });
+
+  it("maps header discount columns from sale_details_view", async () => {
+    mockDetailsView([
+      detailsRow({
+        discount_type: "amount",
+        discount_value: "1.00",
+        discount_amount: "1.00",
+        subtotal: "14.08",
+        tax_total: "1.27",
+        total: "15.35",
+        line_total: "10.23",
+        unit_price: "10.90",
+        quantity: "1",
+      }),
+    ]);
+
+    const result = await salesReadService.getSale(SALE_ID);
+
+    expect(result.error).toBeNull();
+    expect(result.data?.discount_type).toBe("amount");
+    expect(result.data?.discount_value).toBe(1);
+    expect(result.data?.discount_amount).toBe(1);
+    expect(result.data?.total).toBe(15.35);
+  });
+
+  it("retries without discount columns when the view has not been migrated", async () => {
+    const orderWithDiscount = vi.fn().mockResolvedValue({
+      data: null,
+      error: {
+        message: "column sale_details_view.discount_type does not exist",
+        code: "42703",
+      },
+    });
+    const orderWithoutDiscount = vi.fn().mockResolvedValue({
+      data: [detailsRow()],
+      error: null,
+    });
+    const eqWithDiscount = vi.fn().mockReturnValue({
+      order: orderWithDiscount,
+    });
+    const eqWithoutDiscount = vi.fn().mockReturnValue({
+      order: orderWithoutDiscount,
+    });
+    const selectMock = vi.fn((columns: string) => {
+      if (columns === DETAILS_SELECT) {
+        return { eq: eqWithDiscount };
+      }
+      if (columns === DETAILS_SELECT_WITHOUT_DISCOUNT) {
+        return { eq: eqWithoutDiscount };
+      }
+      throw new Error(`Unexpected select: ${columns}`);
+    });
+
+    supabaseMock.from.mockImplementation((table: string) => {
+      forbidBaseTables(table);
+      if (table === "sale_details_view") {
+        return {
+          select: selectMock,
+          insert: insertMock,
+          update: updateMock,
+          delete: deleteMock,
+        };
+      }
+      throw new Error(`Unexpected table: ${table}`);
+    });
+
+    const result = await salesReadService.getSale(SALE_ID);
+
+    expect(result.error).toBeNull();
+    expect(result.data?.sale_id).toBe(SALE_ID);
+    expect(result.data?.discount_type).toBeNull();
+    expect(result.data?.discount_value).toBeNull();
+    expect(result.data?.discount_amount).toBeNull();
+    expect(selectMock).toHaveBeenNthCalledWith(1, DETAILS_SELECT);
+    expect(selectMock).toHaveBeenNthCalledWith(
+      2,
+      DETAILS_SELECT_WITHOUT_DISCOUNT,
+    );
+    expect(supabaseMock.from).toHaveBeenCalledTimes(2);
+    expect(supabaseMock.from).toHaveBeenNthCalledWith(1, "sale_details_view");
+    expect(supabaseMock.from).toHaveBeenNthCalledWith(2, "sale_details_view");
   });
 
   it("empty draft returns lines: []", async () => {

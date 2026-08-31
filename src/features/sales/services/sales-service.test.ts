@@ -773,6 +773,9 @@ describe("salesService sale line mutations (DEV-035)", () => {
       confirmed_at: null,
       paid_at: null,
       cancelled_at: null,
+      discount_type: null,
+      discount_value: null,
+      discount_amount: null,
       lines: [
         {
           line_id: LINE_ID,
@@ -1254,5 +1257,105 @@ describe("salesService.markSalePaid", () => {
     expect(result.data).toBeNull();
     expect(result.error).toBe("Sale was not found.");
     expect(supabaseMock.from).not.toHaveBeenCalled();
+  });
+});
+
+describe("salesService.createAndConfirmSale (sql/110 discount args)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    insertMock.mockReset();
+    updateMock.mockReset();
+    deleteMock.mockReset();
+    supabaseMock.auth.getUser.mockResolvedValue({
+      data: { user: { id: USER_ID } },
+      error: null,
+    });
+  });
+
+  it("always sends optional discount args and passes a typed discount through", async () => {
+    mockSaleReload();
+    supabaseMock.rpc.mockResolvedValue({
+      data: rpcConfirmPayload(),
+      error: null,
+    });
+
+    const result = await salesService.createAndConfirmSale({
+      lines: [
+        {
+          product_id: PRODUCT_ID,
+          quantity: 1,
+          unit_price: 10.9,
+        },
+      ],
+      discount_type: "amount",
+      discount_value: 1,
+    });
+
+    expect(result.error).toBeNull();
+    expect(supabaseMock.rpc).toHaveBeenCalledTimes(1);
+    expect(supabaseMock.rpc).toHaveBeenCalledWith("create_and_confirm_sale", {
+      p_customer_id: null,
+      p_lines: [
+        {
+          product_id: PRODUCT_ID,
+          quantity: 1,
+          unit_price: 10.9,
+        },
+      ],
+      p_kitchen_note: null,
+      p_discount_type: "amount",
+      p_discount_value: 1,
+    });
+  });
+
+  it("sends null discount args when the cart has no discount (POS path)", async () => {
+    mockSaleReload();
+    supabaseMock.rpc.mockResolvedValue({
+      data: rpcConfirmPayload(),
+      error: null,
+    });
+
+    const result = await salesService.createAndConfirmSale({
+      lines: [
+        {
+          product_id: PRODUCT_ID,
+          quantity: 1,
+          unit_price: 10.9,
+        },
+      ],
+    });
+
+    expect(result.error).toBeNull();
+    expect(supabaseMock.rpc).toHaveBeenCalledWith("create_and_confirm_sale", {
+      p_customer_id: null,
+      p_lines: [
+        {
+          product_id: PRODUCT_ID,
+          quantity: 1,
+          unit_price: 10.9,
+        },
+      ],
+      p_kitchen_note: null,
+      p_discount_type: null,
+      p_discount_value: null,
+    });
+  });
+
+  it("rejects a discount type without a value before calling the RPC", async () => {
+    const result = await salesService.createAndConfirmSale({
+      lines: [
+        {
+          product_id: PRODUCT_ID,
+          quantity: 1,
+          unit_price: 10.9,
+        },
+      ],
+      discount_type: "percent",
+      discount_value: null,
+    });
+
+    expect(result.data).toBeNull();
+    expect(result.error).toBe("Discount type and value are required together.");
+    expect(supabaseMock.rpc).not.toHaveBeenCalled();
   });
 });

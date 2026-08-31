@@ -26,6 +26,9 @@ function sale(overrides?: Partial<SaleDetail>): SaleDetail {
     confirmed_at: "2026-07-26T14:30:00.000Z",
     paid_at: null,
     cancelled_at: null,
+    discount_type: null,
+    discount_value: null,
+    discount_amount: null,
     lines: [],
     ...overrides,
   };
@@ -275,5 +278,60 @@ describe("SaleReviewSection (DEV-111)", () => {
     expect(screen.getByTestId("review-accounting-status")).toHaveTextContent(
       "✓ Posted",
     );
+  });
+
+  it("shows typed discount and resolved amount on a completed sale", () => {
+    render(
+      <SaleReviewSection
+        sale={sale({
+          discount_type: "percent",
+          discount_value: 10,
+          discount_amount: 2.18,
+          subtotal: 18,
+          tax_total: 1.62,
+          total: 19.62,
+        })}
+        cogsSummary={cogsSummary()}
+        profitSummary={profitSummary({ net_revenue: 18 })}
+        accountingPostingStatus="posted"
+      />,
+    );
+
+    expect(screen.getByTestId("review-discount")).toHaveTextContent("10%");
+    expect(screen.getByTestId("review-discount-amount")).toHaveTextContent(
+      "−€2.18",
+    );
+    expect(screen.getByTestId("review-sale-total")).toHaveTextContent(
+      "€19.62",
+    );
+  });
+
+  it("shows an amount discount on a draft sale and hides it when absent", () => {
+    const { rerender } = render(
+      <SaleReviewSection
+        sale={sale({
+          status: "draft",
+          confirmed_at: null,
+          discount_type: "amount",
+          discount_value: 1,
+          discount_amount: 1,
+          subtotal: 14.08,
+          tax_total: 1.27,
+          total: 15.35,
+        })}
+      />,
+    );
+
+    expect(screen.getByTestId("review-discount")).toHaveTextContent("€1.00");
+    expect(screen.getByTestId("review-discount-amount")).toHaveTextContent(
+      "−€1.00",
+    );
+
+    rerender(<SaleReviewSection sale={sale({ status: "draft", confirmed_at: null })} />);
+
+    expect(screen.queryByTestId("review-discount")).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("review-discount-amount"),
+    ).not.toBeInTheDocument();
   });
 });

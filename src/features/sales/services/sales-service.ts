@@ -410,6 +410,9 @@ function mapSaleDocumentRpcResult(data: unknown): SaleDetail | null {
     confirmed_at: confirmedAt,
     paid_at: paidAt,
     cancelled_at: cancelledAt,
+    discount_type: null,
+    discount_value: null,
+    discount_amount: null,
     lines,
   };
 }
@@ -944,10 +947,23 @@ export const salesService = {
         ? input.kitchen_note.trim()
         : null;
 
+      const discountType = input.discount_type ?? null;
+      const discountValue =
+        input.discount_value === undefined ? null : input.discount_value;
+
+      if (
+        (discountType === null && discountValue !== null) ||
+        (discountType !== null && discountValue === null)
+      ) {
+        return fail("Discount type and value are required together.");
+      }
+
       const { data, error } = await supabase.rpc("create_and_confirm_sale", {
         p_customer_id: customerId.length > 0 ? customerId : null,
         p_lines: input.lines,
         p_kitchen_note: kitchenNote,
+        p_discount_type: discountType,
+        p_discount_value: discountValue,
       });
 
       if (error) {
