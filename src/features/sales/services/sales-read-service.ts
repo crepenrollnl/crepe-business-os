@@ -35,8 +35,29 @@ const SALE_DETAILS_VIEW = "sale_details_view";
 const LIST_SELECT =
   "sale_id, sale_number, status, sale_date, customer_id, subtotal, tax_total, total, confirmed_at, paid_at, cancelled_at";
 
+const DETAILS_SELECT_WITHOUT_DISCOUNT =
+  "sale_id, sale_number, status, sale_date, customer_id, subtotal, tax_total, total, confirmed_at, paid_at, cancelled_at, line_id, product_id, quantity, unit_price, line_total";
+
 const DETAILS_SELECT =
-  "sale_id, sale_number, status, sale_date, customer_id, subtotal, tax_total, total, confirmed_at, paid_at, cancelled_at, line_id, product_id, quantity, unit_price, line_total, discount_type, discount_value, discount_amount";
+  `${DETAILS_SELECT_WITHOUT_DISCOUNT}, discount_type, discount_value, discount_amount`;
+
+function isMissingSaleDiscountColumnError(error: {
+  message?: string;
+} | null): boolean {
+  const message = error?.message?.toLowerCase() ?? "";
+  if (!message) {
+    return false;
+  }
+  const mentionsDiscount =
+    message.includes("discount_type") ||
+    message.includes("discount_value") ||
+    message.includes("discount_amount");
+  const missing =
+    message.includes("does not exist") ||
+    message.includes("schema cache") ||
+    message.includes("could not find");
+  return mentionsDiscount && missing;
+}
 
 interface SaleListRow {
   sale_id: string;
@@ -69,9 +90,9 @@ interface SaleDetailsRow {
   quantity: number | string | null;
   unit_price: number | string | null;
   line_total: number | string | null;
-  discount_type: SaleDiscountType | null;
-  discount_value: number | string | null;
-  discount_amount: number | string | null;
+  discount_type?: SaleDiscountType | null;
+  discount_value?: number | string | null;
+  discount_amount?: number | string | null;
 }
 
 interface QueueSaleRow {
@@ -391,6 +412,8 @@ export const salesReadService = {
 
   /**
    * Load one sale header + lines from sale_details_view.
+   * Retries without discount columns when sql/110 has not been applied yet
+   * (PostgREST 42703 / schema cache) so the draft Sales page still loads.
    */
   async getSale(id: string): Promise<ServiceResult<SaleDetail>> {
     try {
@@ -399,11 +422,17 @@ export const salesReadService = {
         return fail("Sale id is required.");
       }
 
-      const { data, error } = await supabase
-        .from(SALE_DETAILS_VIEW)
-        .select(DETAILS_SELECT)
-        .eq("sale_id", trimmed)
-        .order("line_id", { ascending: true });
+      const queryDetails = (select: string) =>
+        supabase
+          .from(SALE_DETAILS_VIEW)
+          .select(select)
+          .eq("sale_id", trimmed)
+          .order("line_id", { ascending: true });
+
+      let { data, error } = await queryDetails(DETAILS_SELECT);
+      if (error && isMissingSaleDiscountColumnError(error)) {
+        ({ data, error } = await queryDetails(DETAILS_SELECT_WITHOUT_DISCOUNT));
+      }
 
       if (error) {
         return fail(mapReadError(error, "Failed to load sale"));
