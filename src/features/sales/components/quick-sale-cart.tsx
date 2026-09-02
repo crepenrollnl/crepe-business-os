@@ -30,7 +30,7 @@ type QuickSaleCartDiscountProps = QuickSaleCartSharedProps & {
   subtotal?: never;
 };
 
-/** POS reuses this cart unchanged: catalog total labeled Subtotal. */
+/** Cart without header discount: catalog total labeled Subtotal. */
 type QuickSaleCartPosProps = QuickSaleCartSharedProps & {
   subtotal: number;
   itemsTotal?: never;

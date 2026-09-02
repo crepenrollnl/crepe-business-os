@@ -10,7 +10,14 @@ export function PosSalePane() {
     loading,
     error,
     cartLines,
-    subtotal,
+    itemsTotal,
+    discountType,
+    setDiscountType,
+    discountInput,
+    setDiscountInput,
+    discountAmount,
+    payable,
+    discountError,
     confirming,
     actionError,
     postingError,
@@ -36,13 +43,20 @@ export function PosSalePane() {
 
       <QuickSaleCart
         lines={cartLines}
-        subtotal={subtotal}
+        itemsTotal={itemsTotal}
+        discountType={discountType}
+        discountInput={discountInput}
+        discountAmount={discountAmount}
+        payable={payable}
+        discountError={discountError}
         confirming={confirming}
         actionError={actionError}
         postingError={postingError}
         lastConfirmedSaleNumber={lastConfirmedSaleNumber}
         sendToQueue={sendToQueue}
         kitchenNote={kitchenNote}
+        onDiscountTypeChange={setDiscountType}
+        onDiscountInputChange={setDiscountInput}
         onSendToQueueChange={setSendToQueue}
         onKitchenNoteChange={setKitchenNote}
         onIncrement={incrementLine}
