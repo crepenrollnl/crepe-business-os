@@ -58,7 +58,7 @@ Inventory is the reference implementation for quality and structure.
 
 ## Planned vs live modules
 
-**[`src/constants/modules.ts`](../src/constants/modules.ts) is the canonical machine-readable source of truth for module status.** This table is a human-readable summary and must not diverge from it — if you change one, change the other. (Last reconciled 11.08.2026 — see `Plan_Deystviy_V1.txt` for the audit that found `sales` and `accounting` stale here.)
+**[`src/constants/modules.ts`](../src/constants/modules.ts) is the canonical machine-readable source of truth for module status.** This table is a human-readable summary and must not diverge from it — if you change one, change the other. (Last reconciled 02.09.2026 — Finished Goods was still “Planned UI” here after `modules.ts` marked it live.)
 
 | Module id | Folder | Status |
 |---|---|---|
@@ -72,16 +72,16 @@ Inventory is the reference implementation for quality and structure.
 | `products` | `src/features/products` | Planned |
 | `suppliers` | `src/features/suppliers` | Planned (service + `create_supplier` RPC exist; no UI at all) |
 | `production-execution` | `src/features/production-execution` | Live (sessions + atomic completion) |
-| `finished-goods` | `src/features/finished-goods` | Planned UI — backend services implemented and tested (`finished-goods-*-service.ts`), consumed by Reports and by Sales' FIFO allocation; no dedicated screen |
-| `sales` | `src/features/sales` | Live — draft → lines → confirm (FIFO finished-goods allocation, accounting posting), E2E-covered |
+| `finished-goods` | `src/features/finished-goods` | Live — FIFO / valuation / COGS services; UI is a tab on `/inventory`, not a sidebar item (`/finished-goods` redirects there) |
+| `sales` | `src/features/sales` | Live — draft → lines → confirm (FIFO finished-goods allocation, accounting posting), E2E-covered. Quick Sale at `/sales/quick` (header discount via sql/110). Tablet POS at `/pos` (`src/features/pos`, direct URL, not a registry module) reuses the Quick Sale cart and discount. |
 | `customers` | `src/features/customers` | Planned (service layer + `create_customer` RPC exist; no UI) |
 | `events` | `src/features/events` | Planned (types only) |
 | `accounting` | `src/features/accounting` | Live core — chart of accounts, journals, ledger, posting engine, VAT, business events, wired into Purchases/Production/Sales (see `docs/ACCOUNTING.md`); `/expenses` and `/fixed-assets` are live routed UI; no unified Accounting workspace screen yet |
-| `reports` | `src/features/reporting-workspace` | Live (Reports nav host at `/reports`) |
+| `reports` | `src/features/reporting-workspace` | Live (Reports nav host at `/reports`). Sidebar also links BTW Report (`/reports/btw`, `src/features/btw-report`) and Sales by Product (`/reports/sales-by-product`, `src/features/sales-product-report`) — supporting packages, not separate `modules.ts` ids. |
 | `ai` | `src/features/ai` | Planned |
-| `users` | `src/features/users` | Planned — service layer exists (CRUD + role-assignment RPCs), no UI, not connected to Supabase Auth (`auth.users`) |
+| `users` | `src/features/users` | Planned — service layer exists (CRUD + role-assignment RPCs), no Users UI. Live role checks use `profiles` (sql/097), not this package’s unused `users` table. |
 
-Scaffolds for planned modules may contain types stubs and empty folders only. **No business logic** until the roadmap reaches that module. (Exceptions already on the books above — `finished-goods`, `suppliers`, `customers`, `users` — have real, tested service/RPC layers ahead of their UI; treat "Planned" here as "no nav module / no UI screen," not "no code exists.")
+Scaffolds for planned modules may contain types stubs and empty folders only. **No business logic** until the roadmap reaches that module. (Exceptions already on the books above — `suppliers`, `customers`, `users` — have real, tested service/RPC layers ahead of their UI; treat "Planned" here as "no nav module / no UI screen," not "no code exists.")
 
 ### Reporting packages
 
@@ -92,6 +92,8 @@ Reports is a layered read-only stack. The registered nav module host is `reporti
 | Reporting Workspace | `src/features/reporting-workspace` | Live `/reports` host; `get_reporting_workspace`; also owns the presentational composition / widgets absorbed from the retired Reporting Dashboard package (feature-sprawl consolidation, 08.08.2026) |
 | Reporting API | `src/features/reporting-api` | Shared `ReportingOverview`/`ReportingSectionCatalogItem`/`ReportingSectionName` DTO types only — its `get_reporting_overview` / `get_reporting_section` service was dead code (zero consumers) and was removed 08.08.2026 |
 | Reports (summary views) | `src/features/reports` | Legacy `report_*_summary` view reads (DEV-041) |
+| BTW Report | `src/features/btw-report` | Live `/reports/btw` — Netherlands VAT declaration (`get_btw_report`, sql/095); nav item, not a `modules.ts` id |
+| Sales by Product | `src/features/sales-product-report` | Live `/reports/sales-by-product` (`get_sales_by_product`, sql/109); nav item, not a `modules.ts` id |
 
 Retired 08.08.2026 (feature-sprawl consolidation — see Plan_Deystviy_V1.txt): **Reporting Dashboard** (`src/features/reporting-dashboard`, presentational composition/widgets, merged into Reporting Workspace) and **Reporting Home** (`src/features/reporting-home`, `get_reporting_home`, dead code with zero consumers anywhere). The 8 per-section satellite dashboard packages (`alerts-dashboard`, `audit-dashboard`, `company-dashboard`, `executive-dashboard`, `inventory-dashboard`, `kpi-dashboard`, `production-dashboard`, `user-activity-dashboard`) also lost their dead `services/` layer the same day — only their `types/` remain, still consumed by Reporting API's DTO union and by Reporting Workspace's per-section widgets.
 

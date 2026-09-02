@@ -33,7 +33,7 @@ It is a long-term operating system for food businesses, covering operations, inv
 
 ## Current Platform Status
 
-**Actual module status is tracked in [`src/constants/modules.ts`](src/constants/modules.ts) — the machine-readable source of truth.** The table below is a human-readable description for context; where it conflicts with `modules.ts`, `modules.ts` wins. (Last reconciled 11.08.2026 — see `Plan_Deystviy_V1.txt` for the audit that found this table stale.)
+**Actual module status is tracked in [`src/constants/modules.ts`](src/constants/modules.ts) — the machine-readable source of truth.** The table below is a human-readable description for context; where it conflicts with `modules.ts`, `modules.ts` wins. (Last reconciled 02.09.2026 — Finished Goods UI, Sales surfaces, and Reports sub-pages were stale here.)
 
 | Area | Status |
 |---|---|
@@ -46,13 +46,13 @@ It is a long-term operating system for food businesses, covering operations, inv
 | Suppliers (module UI) | Planned (service + `create_supplier` RPC exist; no UI at all) |
 | Purchases | Live |
 | Production (Planning + Execution) | Live — full plan → confirm → execute cycle, E2E-covered |
-| Finished Goods | Planned UI — backend services implemented and tested (`finished-goods-*-service.ts`), used by Reports and by Sales' FIFO allocation; no dedicated screen |
-| Sales | Live — draft → lines → confirm (FIFO finished-goods allocation, accounting posting), E2E-covered |
+| Finished Goods | Live — domain services + read-only tab on `/inventory` (not a sidebar item); `/finished-goods` redirects there. Matches `modules.ts` (`status: "live"`). |
+| Sales | Live — draft → lines → confirm (FIFO finished-goods allocation, accounting posting), E2E-covered. Also live: Quick Sale (`/sales/quick`) with header discount (percent or amount, sql/110); tablet POS (`/pos`, direct URL only, not in sidebar) reuses the same cart and discount. |
 | Customers | Planned (service layer + `create_customer` RPC exist; no UI) |
 | Events | Planned (types only) |
 | Accounting | Live core — chart of accounts, journals, ledger, posting engine, VAT, business events, wired into Purchases/Production/Sales; `/expenses` and `/fixed-assets` are live routed UI; no unified Accounting workspace screen yet |
-| Users / Roles | Planned — service layer exists (`src/features/users`), no UI, not connected to Supabase Auth (`auth.users`) |
-| Reports | Live (`/reports`, `reporting-workspace`) |
+| Users / Roles | Planned — service layer exists (`src/features/users`), no Users UI. Runtime roles are `profiles` (sql/097: owner / partner / seller) linked to Supabase Auth; the unused `users` / `user_roles` tables are not that path. |
+| Reports | Live (`/reports` workspace). Also live in the sidebar: BTW Report (`/reports/btw`, Netherlands VAT declaration) and Sales by Product (`/reports/sales-by-product`). |
 | AI Assistant | Planned |
 
 ### Live database tables
@@ -151,12 +151,12 @@ The platform contains only these modules (see `src/constants/modules.ts`):
 6. Purchases
 7. Production Planning (`src/features/production`)
 8. Production Execution (`src/features/production-execution`)
-9. Finished Goods (`src/features/finished-goods`) — planned
-10. Sales
+9. Finished Goods (`src/features/finished-goods`) — live (Inventory tab, not a nav module)
+10. Sales — includes Quick Sale (`/sales/quick`, header discount) and tablet POS (`/pos`, direct URL)
 11. Customers
 12. Events
 13. Accounting
-14. Reports
+14. Reports — includes BTW Report (`/reports/btw`) and Sales by Product (`/reports/sales-by-product`)
 15. AI
 16. Users & Roles (`src/features/users`) — planned
 
@@ -304,7 +304,7 @@ Accounting is the sole financial module. It will become the home for:
 7. Reports are projections over accounting and operational data, not isolated spreadsheets.
 8. There is no separate Finance or Taxes feature module.
 
-Accounting UI, SQL migrations, and posting engines are future work. Architecture and contracts are locked by DEV-086.
+Accounting UI is partial (Expenses and Fixed Assets routes; no unified Accounting workspace). SQL posting RPCs and the TypeScript posting engine are live and wired into Purchases, Production, and Sales. Architecture and contracts remain locked by DEV-086 / `docs/ACCOUNTING.md`.
 
 ---
 
@@ -398,13 +398,15 @@ Do not redesign working screens unless explicitly requested.
 - Dashboard layout
 - Inventory list + CRUD
 - Recipes, Purchases, Production Planning, Production Execution, Sales — full workflows, E2E-covered critical path
-- Reports (`/reports` workspace)
+- Finished Goods — live as an Inventory tab (`modules.ts` `status: "live"`)
+- Sales surfaces beyond the document workflow: Quick Sale (`/sales/quick`) with header discount; tablet POS (`/pos`)
+- Reports (`/reports` workspace), BTW Report (`/reports/btw`), Sales by Product (`/reports/sales-by-product`)
 - Accounting core (chart of accounts, journals, ledger, posting engine, VAT, business events) wired into Purchases/Production/Sales, plus live `/expenses` and `/fixed-assets`
 
 ### Current focus
 
-- Products, Customers, Events, Suppliers UI, Finished Goods UI — service layers/backends exist for some of these already; UI does not
-- Connecting Users/Roles (`src/features/users`) to Supabase Auth (`auth.users`)
+- Products, Customers, Events, Suppliers UI — service layers/backends exist for some of these already; UI does not
+- Users UI (`src/features/users`) — planned; live role checks already go through `profiles` (sql/097), not a Users screen
 
 ### Explicitly out of scope right now
 
