@@ -63,7 +63,7 @@ Inventory is the reference implementation for quality and structure.
 | Module id | Folder | Status |
 |---|---|---|
 | `dashboard` | `src/features/dashboard` | Live |
-| `inventory` | `src/features/inventory` | Live |
+| `inventory` | `src/features/inventory` | Live. Per-ingredient stock movement history is `/inventory/ingredients/{id}/movements` (`src/features/inventory-movement-history`) — not a registry module. |
 | `auth` | `src/features/auth` | Live (access domain) |
 | `recipes` | `src/features/recipes` | Live |
 | `purchases` | `src/features/purchases` | Live |
@@ -74,9 +74,10 @@ Inventory is the reference implementation for quality and structure.
 | `production-execution` | `src/features/production-execution` | Live (sessions + atomic completion) |
 | `finished-goods` | `src/features/finished-goods` | Live — FIFO / valuation / COGS services; UI is a tab on `/inventory`, not a sidebar item (`/finished-goods` redirects there) |
 | `sales` | `src/features/sales` | Live — draft → lines → confirm (FIFO finished-goods allocation, accounting posting), E2E-covered. Quick Sale at `/sales/quick` (header discount via sql/110). Tablet POS at `/pos` (`src/features/pos`, direct URL, not a registry module) reuses the Quick Sale cart and discount. |
+| `shifts` | `src/features/shifts` | Live — open/close and cash reconciliation on Dashboard; Shift tab on `/pos`. No dedicated `/shifts` route. |
 | `customers` | `src/features/customers` | Planned (service layer + `create_customer` RPC exist; no UI) |
 | `events` | `src/features/events` | Planned (types only) |
-| `accounting` | `src/features/accounting` | Live core — chart of accounts, journals, ledger, posting engine, VAT, business events, wired into Purchases/Production/Sales (see `docs/ACCOUNTING.md`); `/expenses` and `/fixed-assets` are live routed UI; no unified Accounting workspace screen yet |
+| `accounting` | `src/features/accounting` | Live core — chart of accounts, journals, ledger, posting engine, VAT, business events, wired into Purchases/Production/Sales (see `docs/ACCOUNTING.md`); `/expenses` and `/fixed-assets` are live routed UI; no unified Accounting workspace screen yet. Singleton company settings (`company_settings`, sql/028, `src/features/company-settings`) are not a registry module. |
 | `reports` | `src/features/reporting-workspace` | Live (Reports nav host at `/reports`). Sidebar also links BTW Report (`/reports/btw`, `src/features/btw-report`) and Sales by Product (`/reports/sales-by-product`, `src/features/sales-product-report`) — supporting packages, not separate `modules.ts` ids. |
 | `ai` | `src/features/ai` | Planned |
 | `users` | `src/features/users` | Planned — service layer exists (CRUD + role-assignment RPCs), no Users UI. Live role checks use `profiles` (sql/097), not this package’s unused `users` table. |

@@ -28,11 +28,12 @@ Do not reorder phases without explicit product decision.
 6. Purchases
 7. Production
 8. Sales
-9. Customers
-10. Events
-11. Accounting
-12. Reports
-13. AI
+9. Shifts
+10. Customers
+11. Events
+12. Accounting
+13. Reports
+14. AI
 
 Accounting is the sole financial module. There is no separate Finance or Taxes module.
 
@@ -278,7 +279,7 @@ These run alongside feature sprints when needed:
 
 ## Near-Term Execution Plan
 
-**Stale as a literal "what's next" list — see [`src/constants/modules.ts`](src/constants/modules.ts) for current status.** Recipes, Purchases, Production Planning, Production Execution, Sales, Finished Goods, and Reports are live; Accounting's core (chart of accounts, journals, ledger, posting engine, VAT) is live and wired into those modules, alongside live `/expenses` and `/fixed-assets` routes. Sales also has Quick Sale (`/sales/quick`, header discount) and tablet POS (`/pos`, direct URL). Reports also has BTW (`/reports/btw`) and Sales by Product (`/reports/sales-by-product`). Phase/sprint labels below are retained for history until this section is rewritten.
+**Stale as a literal "what's next" list — see [`src/constants/modules.ts`](src/constants/modules.ts) for current status.** Recipes, Purchases, Production Planning, Production Execution, Sales, Shifts, Finished Goods, and Reports are live; Accounting's core (chart of accounts, journals, ledger, posting engine, VAT) is live and wired into those modules, alongside live `/expenses` and `/fixed-assets` routes. Sales also has Quick Sale (`/sales/quick`, header discount) and tablet POS (`/pos`, direct URL). Shifts UI lives on Dashboard and as a `/pos` tab (no `/shifts` route). Reports also has BTW (`/reports/btw`) and Sales by Product (`/reports/sales-by-product`). Phase/sprint labels below are retained for history until this section is rewritten.
 
 ### Now
 Wire remaining UI-less modules: Products, Customers, Events, a dedicated Suppliers UI, and a Users UI (`src/features/users`). Finished Goods is already live as an Inventory tab — do not treat it as an unbuilt screen. Live role checks already use `profiles` (sql/097); connecting a Users admin UI to Auth is still planned.

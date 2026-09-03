@@ -39,7 +39,7 @@ It is a long-term operating system for food businesses, covering operations, inv
 |---|---|
 | Authentication | Live |
 | Dashboard | Live |
-| Inventory CRUD | Live (reference module) |
+| Inventory CRUD | Live (reference module). Per-ingredient movement history is a drill-down at `/inventory/ingredients/{id}/movements` (`src/features/inventory-movement-history`) — not a separate registry module. |
 | Supabase integration | Live |
 | Products | Planned |
 | Recipes | Live |
@@ -48,9 +48,10 @@ It is a long-term operating system for food businesses, covering operations, inv
 | Production (Planning + Execution) | Live — full plan → confirm → execute cycle, E2E-covered |
 | Finished Goods | Live — domain services + read-only tab on `/inventory` (not a sidebar item); `/finished-goods` redirects there. Matches `modules.ts` (`status: "live"`). |
 | Sales | Live — draft → lines → confirm (FIFO finished-goods allocation, accounting posting), E2E-covered. Also live: Quick Sale (`/sales/quick`) with header discount (percent or amount, sql/110); tablet POS (`/pos`, direct URL only, not in sidebar) reuses the same cart and discount. |
+| Shifts | Live — open/close and cash reconciliation on Dashboard; Shift tab on `/pos`. No dedicated `/shifts` route. |
 | Customers | Planned (service layer + `create_customer` RPC exist; no UI) |
 | Events | Planned (types only) |
-| Accounting | Live core — chart of accounts, journals, ledger, posting engine, VAT, business events, wired into Purchases/Production/Sales; `/expenses` and `/fixed-assets` are live routed UI; no unified Accounting workspace screen yet |
+| Accounting | Live core — chart of accounts, journals, ledger, posting engine, VAT, business events, wired into Purchases/Production/Sales; `/expenses` and `/fixed-assets` are live routed UI; no unified Accounting workspace screen yet. Singleton company settings (`company_settings`, sql/028, `src/features/company-settings`) hold name/currency/timezone for this install — not a registry module and not a nav screen. |
 | Users / Roles | Planned — service layer exists (`src/features/users`), no Users UI. Runtime roles are `profiles` (sql/097: owner / partner / seller) linked to Supabase Auth; the unused `users` / `user_roles` tables are not that path. |
 | Reports | Live (`/reports` workspace). Also live in the sidebar: BTW Report (`/reports/btw`, Netherlands VAT declaration) and Sales by Product (`/reports/sales-by-product`). |
 | AI Assistant | Planned |
@@ -153,12 +154,13 @@ The platform contains only these modules (see `src/constants/modules.ts`):
 8. Production Execution (`src/features/production-execution`)
 9. Finished Goods (`src/features/finished-goods`) — live (Inventory tab, not a nav module)
 10. Sales — includes Quick Sale (`/sales/quick`, header discount) and tablet POS (`/pos`, direct URL)
-11. Customers
-12. Events
-13. Accounting
-14. Reports — includes BTW Report (`/reports/btw`) and Sales by Product (`/reports/sales-by-product`)
-15. AI
-16. Users & Roles (`src/features/users`) — planned
+11. Shifts (`src/features/shifts`) — live (Dashboard + `/pos` tab; no `/shifts` route)
+12. Customers
+13. Events
+14. Accounting
+15. Reports — includes BTW Report (`/reports/btw`) and Sales by Product (`/reports/sales-by-product`)
+16. AI
+17. Users & Roles (`src/features/users`) — planned
 
 ---
 
@@ -322,6 +324,7 @@ Accounting UI is partial (Expenses and Fixed Assets routes; no unified Accountin
 | **Production** | Convert ingredients into finished goods via recipes (Planning + Execution; Execution creates Production Batches) |
 | **Finished Goods** | Read-only aggregated view of sellable availability from Produced − Consumed (specs: `docs/FINISHED_GOODS.md`, `docs/BATCH_CONSUMPTION.md`) — never stores inventory |
 | **Sales** | Sale documents, append-only Sale Batch Consumption (FIFO), COGS/profit from consumption layers, revenue transactions (specs: `docs/SALES.md`, `docs/BATCH_CONSUMPTION.md`) — never mutates Inventory, never updates Production Batches, never creates Finished Goods |
+| **Shifts** | Shift open/close, cash reconciliation, daily sales/profit summaries — UI on Dashboard and the `/pos` Shift tab; no `/shifts` route |
 | **Customers** | Customer master, sales history, receivables readiness |
 | **Events** | Event-based operations and fulfillment context |
 | **Accounting** | Sole financial module: VAT, taxes, bank accounts, chart of accounts, journal posting, GL, Balance Sheet, P&L, Cash Flow, fixed assets, payroll integration, financial reports |
@@ -399,6 +402,7 @@ Do not redesign working screens unless explicitly requested.
 - Inventory list + CRUD
 - Recipes, Purchases, Production Planning, Production Execution, Sales — full workflows, E2E-covered critical path
 - Finished Goods — live as an Inventory tab (`modules.ts` `status: "live"`)
+- Shifts — live on Dashboard and as a `/pos` tab (`modules.ts` `status: "live"`)
 - Sales surfaces beyond the document workflow: Quick Sale (`/sales/quick`) with header discount; tablet POS (`/pos`)
 - Reports (`/reports` workspace), BTW Report (`/reports/btw`), Sales by Product (`/reports/sales-by-product`)
 - Accounting core (chart of accounts, journals, ledger, posting engine, VAT, business events) wired into Purchases/Production/Sales, plus live `/expenses` and `/fixed-assets`
