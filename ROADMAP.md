@@ -12,7 +12,7 @@ This roadmap is sequenced for a commercial ERP build:
 
 Do not reorder phases without explicit product decision.
 
-**Actual module status is tracked in [`src/constants/modules.ts`](src/constants/modules.ts) — the machine-readable source of truth.** This roadmap describes sequencing and scope; where its phase/sprint status labels conflict with `modules.ts`, `modules.ts` wins. (Last reconciled 11.08.2026 — see `Plan_Deystviy_V1.txt` for the audit that found several phase labels stale.)
+**Actual module status is tracked in [`src/constants/modules.ts`](src/constants/modules.ts) — the machine-readable source of truth.** This roadmap describes sequencing and scope; where its phase/sprint status labels conflict with `modules.ts`, `modules.ts` wins. (Last reconciled 02.09.2026 — Finished Goods, Sales POS/Quick Sale/header discount, BTW Report, and Sales by Product were live in code but missing or stale in the near-term status notes.)
 
 **Architecture Freeze v1.0** is the official ERP Core baseline. All implementation in this roadmap must respect [`docs/ARCHITECTURE_FREEZE_V1.md`](docs/ARCHITECTURE_FREEZE_V1.md). Core architecture redesign requires an ADR — do not redefine architecture through implementation alone.
 
@@ -28,11 +28,12 @@ Do not reorder phases without explicit product decision.
 6. Purchases
 7. Production
 8. Sales
-9. Customers
-10. Events
-11. Accounting
-12. Reports
-13. AI
+9. Shifts
+10. Customers
+11. Events
+12. Accounting
+13. Reports
+14. AI
 
 Accounting is the sole financial module. There is no separate Finance or Taxes module.
 
@@ -278,10 +279,10 @@ These run alongside feature sprints when needed:
 
 ## Near-Term Execution Plan
 
-**Stale as a literal "what's next" list — see [`src/constants/modules.ts`](src/constants/modules.ts) for current status.** Recipes, Purchases, Production Planning, Production Execution, Sales, and Reports are live and E2E-covered; Accounting's core (chart of accounts, journals, ledger, posting engine, VAT) is live and wired into those modules, alongside live `/expenses` and `/fixed-assets` routes. None of that is reflected below — retained for history until this section is rewritten.
+**Stale as a literal "what's next" list — see [`src/constants/modules.ts`](src/constants/modules.ts) for current status.** Recipes, Purchases, Production Planning, Production Execution, Sales, Shifts, Finished Goods, and Reports are live; Accounting's core (chart of accounts, journals, ledger, posting engine, VAT) is live and wired into those modules, alongside live `/expenses` and `/fixed-assets` routes. Sales also has Quick Sale (`/sales/quick`, header discount) and tablet POS (`/pos`, direct URL). Shifts UI lives on Dashboard and as a `/pos` tab (no `/shifts` route). Reports also has BTW (`/reports/btw`) and Sales by Product (`/reports/sales-by-product`). Phase/sprint labels below are retained for history until this section is rewritten.
 
 ### Now
-Wire remaining UI-less modules: Products, Customers, Events, a dedicated Suppliers UI, a Finished Goods read-only screen, and connect Users/Roles (`src/features/users`) to Supabase Auth (`auth.users`).
+Wire remaining UI-less modules: Products, Customers, Events, a dedicated Suppliers UI, and a Users UI (`src/features/users`). Finished Goods is already live as an Inventory tab — do not treat it as an unbuilt screen. Live role checks already use `profiles` (sql/097); connecting a Users admin UI to Auth is still planned.
 
 ### Do not start yet
 - AI OCR
@@ -293,9 +294,9 @@ Wire remaining UI-less modules: Products, Customers, Events, a dedicated Supplie
 
 - Products before deep Sales catalog work
 - Recipes before Production consumption logic
-- Production Execution before Finished Goods implementation
-- Finished Goods before Sales relies on batch-derived availability UX
-- Sales architecture is specified in [`docs/SALES.md`](docs/SALES.md) and [`docs/BATCH_CONSUMPTION.md`](docs/BATCH_CONSUMPTION.md); full stock-consuming Sales requires Production Batches (and Finished Goods readiness)
+- Production Execution before Finished Goods implementation — both are live (`modules.ts`)
+- Finished Goods before Sales relies on batch-derived availability UX — both are live; FG UI is the Inventory tab
+- Sales architecture is specified in [`docs/SALES.md`](docs/SALES.md) and [`docs/BATCH_CONSUMPTION.md`](docs/BATCH_CONSUMPTION.md); stock-consuming Sales (including Quick Sale, header discount, and `/pos`) is live and requires Production Batches
 - Sales/Purchases before Accounting payments maturity
 - Accounting foundation before statement trust
 - Accounting before VAT filing
@@ -377,9 +378,9 @@ The Production module consists of two logical stages.
 
 Production Planning is optional. Operators may execute production without a prior plan when the business process allows it.
 
-### Future Finished Goods Module
+### Finished Goods Module (live)
 
-Finished Goods will become a dedicated module between Production and Sales. It presents calculated availability (Produced − Consumed); it does not own a duplicated quantity ledger and never stores inventory.
+Finished Goods is live between Production and Sales (`modules.ts` `status: "live"`). UI is a read-only tab on `/inventory`, not a sidebar item. It presents calculated availability (Produced − Consumed); it does not own a duplicated quantity ledger and never stores inventory.
 
 **Full module specification:** [`docs/FINISHED_GOODS.md`](docs/FINISHED_GOODS.md)  
 **Consumption architecture:** [`docs/BATCH_CONSUMPTION.md`](docs/BATCH_CONSUMPTION.md)
@@ -388,9 +389,9 @@ That Finished Goods document defines display fields, production status rules, qu
 
 **Sales module specification:** [`docs/SALES.md`](docs/SALES.md)
 
-That document defines the sales workflow, sale/line fields, FIFO algorithm, COGS and profit formulas, status transitions, validation, returns architecture, permissions, and integrations. Sales is the only consumer of finished-goods stock and must follow that spec and `docs/BATCH_CONSUMPTION.md` when implemented.
+That document defines the sales workflow, sale/line fields, FIFO algorithm, COGS and profit formulas, status transitions, validation, returns architecture, permissions, and integrations. Sales is the only consumer of finished-goods stock and follows that spec and `docs/BATCH_CONSUMPTION.md`. Live Sales surfaces also include Quick Sale (`/sales/quick`, header discount on the whole ticket) and tablet POS (`/pos`).
 
-Future workflow:
+Live workflow:
 
 ```
 Production Execution
@@ -402,7 +403,7 @@ Finished Goods (aggregated view: Produced − Consumed)
 Sales (append Sale Batch Consumption — FIFO)
 ```
 
-Until those modules are built, design contracts and stock movement models so finished-goods stock remains separable from raw-material Inventory and always calculable from Production Batches minus Sale Batch Consumptions. Do not implement Finished Goods or stock-consuming Sales until the roadmap reaches those capabilities. Implementation must follow `docs/FINISHED_GOODS.md`, `docs/SALES.md`, and `docs/BATCH_CONSUMPTION.md`.
+Finished Goods and stock-consuming Sales are implemented. Keep finished-goods stock separable from raw-material Inventory and always calculable from Production Batches minus Sale Batch Consumptions. Implementation must follow `docs/FINISHED_GOODS.md`, `docs/SALES.md`, and `docs/BATCH_CONSUMPTION.md`.
 
 ---
 
@@ -566,5 +567,5 @@ This architecture must support, without redesign:
 - Expiration dates
 - Production cost analysis
 - Event profitability
-- Finished Goods read-only operational module (`docs/FINISHED_GOODS.md`)
-- Sales FIFO consumption, COGS, and returns architecture (`docs/SALES.md`, `docs/BATCH_CONSUMPTION.md`)
+- Finished Goods read-only operational module (`docs/FINISHED_GOODS.md`) — live as an Inventory tab
+- Sales FIFO consumption, COGS, and returns architecture (`docs/SALES.md`, `docs/BATCH_CONSUMPTION.md`) — live, including Quick Sale header discount and tablet POS

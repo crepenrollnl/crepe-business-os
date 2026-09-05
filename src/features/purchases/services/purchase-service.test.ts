@@ -145,8 +145,6 @@ function installMock(stockRpcErrors: Record<string, { message: string } | null>)
             previous_cost_per_unit: 0,
             new_stock: args.p_quantity,
             new_cost_per_unit: args.p_net_unit_cost,
-            cost_updated: true,
-            warning: null,
           },
           error: null,
         };
@@ -273,49 +271,41 @@ describe("purchaseService.receivePurchase — partial stock increment failure", 
     ]);
   });
 
-  it("still receives the purchase when the RPC warns that cost_per_unit was skipped", async () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+  it("does not receive the purchase when the stock RPC rejects a zero net unit cost", async () => {
+    const updateCalls: Array<{ table: string; payload: unknown }> = [];
 
-    supabaseMock.rpc.mockImplementation(
-      async (fn: string, args: Record<string, unknown>) => {
-        if (fn === "calculate_purchase_totals") {
-          return {
-            data: {
-              lines: [
-                {
-                  ingredient_id: INGREDIENT_A,
-                  quantity: 10,
-                  unit_cost: 0,
-                  line_total: 0,
-                },
-              ],
-              subtotal: 0,
-              tax_total: 0,
-              total: 0,
-            },
-            error: null,
-          };
-        }
+    supabaseMock.rpc.mockImplementation(async (fn: string) => {
+      if (fn === "calculate_purchase_totals") {
+        return {
+          data: {
+            lines: [
+              {
+                ingredient_id: INGREDIENT_A,
+                quantity: 10,
+                unit_cost: 0,
+                line_total: 0,
+              },
+            ],
+            subtotal: 0,
+            tax_total: 0,
+            total: 0,
+          },
+          error: null,
+        };
+      }
 
-        if (fn === "receive_purchase_line_stock_and_cost") {
-          return {
-            data: {
-              ingredient_id: args.p_ingredient_id,
-              previous_stock: 4,
-              previous_cost_per_unit: 9,
-              new_stock: 14,
-              new_cost_per_unit: 9,
-              cost_updated: false,
-              warning:
-                "Purchase line net unit cost is missing or not positive; stock increased without updating cost_per_unit.",
-            },
-            error: null,
-          };
-        }
+      if (fn === "receive_purchase_line_stock_and_cost") {
+        return {
+          data: null,
+          error: {
+            message:
+              "Cannot receive this purchase. This ingredient has no net unit cost (zero or missing): Flour. Enter a positive unit cost on the purchase line and try again.",
+          },
+        };
+      }
 
-        throw new Error(`Unexpected rpc call: ${fn}`);
-      },
-    );
+      throw new Error(`Unexpected rpc call: ${fn}`);
+    });
 
     supabaseMock.from.mockImplementation((table: string) => {
       if (table === "purchases") {
@@ -326,7 +316,10 @@ describe("purchaseService.receivePurchase — partial stock increment failure", 
               error: null,
             }),
           ),
-          update: vi.fn(() => chainable({ data: null, error: null })),
+          update: vi.fn((payload: unknown) => {
+            updateCalls.push({ table, payload });
+            return chainable({ data: null, error: null });
+          }),
           select: vi.fn(() => chainable({ data: [], error: null })),
         };
       }
@@ -371,11 +364,14 @@ describe("purchaseService.receivePurchase — partial stock increment failure", 
       lines: [{ ingredient_id: INGREDIENT_A, quantity: 10, unit_cost: 0 }],
     });
 
-    expect(result.error).toBeNull();
-    expect(result.data?.status).toBe("received");
-    expect(warn).toHaveBeenCalled();
-
-    warn.mockRestore();
+    expect(result.data).toBeNull();
+    expect(result.error).toMatch(/no net unit cost \(zero or missing\): Flour/i);
+    expect(updateCalls).toEqual([
+      {
+        table: "purchases",
+        payload: expect.objectContaining({ status: "draft" }),
+      },
+    ]);
   });
 
   it("surfaces a reversal failure in the returned error instead of discarding it", async () => {

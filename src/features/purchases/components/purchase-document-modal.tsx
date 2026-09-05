@@ -1029,13 +1029,6 @@ function PurchaseDocumentForm({
                       line.price_mode === "inclusive" &&
                       netUnitCost !== undefined &&
                       netUnitCost !== null;
-                    const lineTaxWarning = taxPreview?.data?.warnings.find(
-                      (message) =>
-                        Boolean(line.tax_category) &&
-                        Boolean(line.tax_regime) &&
-                        message.includes(`category '${line.tax_category}'`) &&
-                        message.includes(`regime '${line.tax_regime}'`),
-                    );
                     const taxUnrecorded = isReadOnly && !line.price_mode;
 
                     return (
@@ -1219,14 +1212,6 @@ function PurchaseDocumentForm({
                               ))}
                             </select>
                           )}
-                          {lineTaxWarning && (
-                            <p
-                              className="mt-1 text-xs text-amber-700"
-                              title={lineTaxWarning}
-                            >
-                              ⚠ No matching tax rule for this regime
-                            </p>
-                          )}
                         </td>
                         <td className="px-3 py-3 align-top text-sm text-zinc-700">
                           {taxLine?.tax_code ?? "—"}
@@ -1287,7 +1272,7 @@ function PurchaseDocumentForm({
             <p className="text-sm text-zinc-500">Calculating taxes…</p>
           )}
           {!isTaxPreviewLoading && taxPreview?.error && (
-            <p className="text-sm text-amber-700">{taxPreview.error}</p>
+            <p className="text-sm text-red-600">{taxPreview.error}</p>
           )}
         </div>
 

@@ -384,7 +384,6 @@ async function replacePurchaseItems(
 interface ReceiveLineStockSnapshot {
   previous_stock: number | null;
   previous_cost_per_unit: number | null;
-  warning: string | null;
 }
 
 function isMissingReceiveStockRpcError(error: unknown): boolean {
@@ -434,15 +433,10 @@ function parseReceiveLineStockResult(
   }
 
   const row = data as Record<string, unknown>;
-  const warning =
-    typeof row.warning === "string" && row.warning.trim().length > 0
-      ? row.warning
-      : null;
 
   return {
     previous_stock: asRpcNullableNumber(row.previous_stock),
     previous_cost_per_unit: asRpcNullableNumber(row.previous_cost_per_unit),
-    warning,
   };
 }
 
@@ -452,7 +446,7 @@ function missingReceiveStockRpcError(
 ): ServiceResult<ReceiveLineStockSnapshot> {
   return {
     data: null,
-    error: `Cannot update inventory stock and unit cost for ingredient ${ingredientId} (quantity ${quantity}): the receive_purchase_line_stock_and_cost database function is not installed. Apply sql/105_receive_purchase_line_stock_and_cost.sql and try again.`,
+    error: `Cannot update inventory stock and unit cost for ingredient ${ingredientId} (quantity ${quantity}): the receive_purchase_line_stock_and_cost database function is not installed. Apply sql/105_receive_purchase_line_stock_and_cost.sql and sql/111_reject_zero_cost_purchase_receive.sql and try again.`,
   };
 }
 
@@ -491,12 +485,6 @@ async function applyReceiveLineStockAndCost(
       data: null,
       error: "Failed to update inventory stock and unit cost",
     };
-  }
-
-  if (snapshot.warning) {
-    console.warn(
-      `Receive skipped cost_per_unit for ingredient ${ingredientId}: ${snapshot.warning}`,
-    );
   }
 
   return { data: snapshot, error: null };
