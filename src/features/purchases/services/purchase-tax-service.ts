@@ -89,24 +89,23 @@ function toLineViews(
   });
 }
 
+export const UNMATCHED_PURCHASE_TAX_RULE_ERROR =
+  "Cannot calculate purchase taxes. No tax rule matches one or more lines. Choose a valid tax category and regime for each line and try again.";
+
+function hasUnresolvedTaxLine(
+  lines: CalculatePurchaseTaxesRpcLine[] | undefined,
+): boolean {
+  return (
+    !Array.isArray(lines) ||
+    lines.some((line) => !Array.isArray(line.taxes) || line.taxes.length === 0)
+  );
+}
+
 function toPurchaseTaxResult(
   document: PurchaseTaxDocument,
   mode: "calculate" | "preview" | "validate",
   rpcResult: CalculatePurchaseTaxesRpcResult,
 ): PurchaseTaxResult {
-  const linesById = new Map(
-    document.lines.map((line) => [line.line_id, line]),
-  );
-
-  const warnings = rpcResult.lines
-    .filter((line) => line.taxes.length === 0)
-    .map((line) => linesById.get(line.line_id))
-    .filter((line): line is PurchaseTaxDocument["lines"][number] => Boolean(line))
-    .map(
-      (line) =>
-        `No tax rule found for category '${line.tax_category}' with regime '${line.tax_regime ?? "standard_vat"}'. Tax amount set to 0. Please check the tax regime selection.`,
-    );
-
   return {
     document_id: document.document_id ?? null,
     mode,
@@ -116,7 +115,7 @@ function toPurchaseTaxResult(
     grand_total: rpcResult.grand_total,
     effective_tax_rate: rpcResult.effective_tax_rate,
     lines: toLineViews(rpcResult.lines),
-    warnings,
+    warnings: [],
     tax_result: {
       currency: rpcResult.currency,
       breakdown: {
@@ -156,13 +155,14 @@ async function run(
       return fail(toUserError(error, "Tax calculation failed."));
     }
 
-    return ok(
-      toPurchaseTaxResult(
-        document,
-        mode,
-        data as CalculatePurchaseTaxesRpcResult,
-      ),
-    );
+    const rpcResult = data as CalculatePurchaseTaxesRpcResult;
+    if (hasUnresolvedTaxLine(rpcResult.lines)) {
+      // sql/112 raises before returning taxes: []. Keep a TS fail so an
+      // unmigrated database cannot save/preview a silent 0% again.
+      return fail(UNMATCHED_PURCHASE_TAX_RULE_ERROR);
+    }
+
+    return ok(toPurchaseTaxResult(document, mode, rpcResult));
   } catch (error) {
     return fail(toUserError(error, "Tax calculation failed."));
   }

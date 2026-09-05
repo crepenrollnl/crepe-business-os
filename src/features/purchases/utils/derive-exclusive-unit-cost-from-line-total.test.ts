@@ -11,6 +11,7 @@ import {
   LINE_TOTAL_UNIT_PRICE_ERROR,
   deriveExclusiveUnitCostFromLineTotal,
 } from "./derive-exclusive-unit-cost-from-line-total";
+import { UNMATCHED_PURCHASE_TAX_RULE_ERROR } from "../services/purchase-tax-service";
 
 const { supabaseMock } = vi.hoisted(() => ({
   supabaseMock: {
@@ -155,7 +156,23 @@ describe("deriveExclusiveUnitCostFromLineTotal", () => {
     expect(result.error).toBe(LINE_TOTAL_UNIT_PRICE_ERROR);
   });
 
-  it("treats empty taxes[] / no-rule warning as an error, not 0% VAT", async () => {
+  it("surfaces the RPC unmatched-rule error instead of inventing 0% VAT", async () => {
+    supabaseMock.rpc.mockResolvedValue({
+      data: null,
+      error: {
+        message:
+          "Cannot calculate purchase taxes. No tax rule matches these lines: category 'goods' with regime 'standard_vat'. Choose a valid tax category and regime for each line and try again.",
+      },
+    });
+
+    const result = await deriveExclusiveUnitCostFromLineTotal(probeInput());
+
+    expect(result.data).toBeNull();
+    expect(result.error).toMatch(/no tax rule matches these lines/i);
+    expect(result.data?.unitCost).toBeUndefined();
+  });
+
+  it("treats a successful RPC with empty taxes[] as an error, not 0% VAT", async () => {
     supabaseMock.rpc.mockResolvedValue({
       data: {
         currency: "EUR",
@@ -181,7 +198,7 @@ describe("deriveExclusiveUnitCostFromLineTotal", () => {
     const result = await deriveExclusiveUnitCostFromLineTotal(probeInput());
 
     expect(result.data).toBeNull();
-    expect(result.error).toBe(LINE_TOTAL_UNIT_PRICE_ERROR);
+    expect(result.error).toBe(UNMATCHED_PURCHASE_TAX_RULE_ERROR);
     expect(result.data?.unitCost).toBeUndefined();
   });
 

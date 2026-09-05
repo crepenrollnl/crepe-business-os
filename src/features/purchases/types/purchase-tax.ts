@@ -128,6 +128,7 @@ export interface PurchaseTaxResult {
   grand_total: number;
   effective_tax_rate: number;
   lines: readonly PurchaseTaxLineView[];
+  /** Empty after sql/112; unmatched rules fail the RPC instead of warning. */
   warnings: readonly string[];
   /** Flattened tax breakdown for advanced callers (e.g. Accounting). */
   tax_result: {

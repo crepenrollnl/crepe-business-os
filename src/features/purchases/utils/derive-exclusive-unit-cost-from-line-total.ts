@@ -80,15 +80,11 @@ export function interpretExclusiveLineTotalProbe(
     return fail(result.error ?? LINE_TOTAL_UNIT_PRICE_ERROR);
   }
 
-  const hasNoRuleWarning = result.data.warnings.some((message) =>
-    message.includes("No tax rule found"),
-  );
   const taxLine = result.data.lines.find(
     (line) => line.line_id === LINE_TOTAL_PROBE_LINE_ID,
   );
 
   if (
-    hasNoRuleWarning ||
     !taxLine ||
     taxLine.tax_rate_percent === null ||
     !Number.isFinite(taxLine.net_amount)

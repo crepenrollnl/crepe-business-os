@@ -2,8 +2,9 @@
  * Purchase Tax Service coverage (DEV-099, V1 plan 1.6).
  *
  * Purchases -> calculate_purchase_taxes RPC only. VAT math itself lives in
- * SQL (sql/072_calculate_purchase_taxes.sql) and is not re-tested here —
- * this file covers RPC parameter construction and response mapping.
+ * SQL (sql/072_calculate_purchase_taxes.sql, sql/112 unmatched-rule
+ * reject) and is not re-tested here — this file covers RPC parameter
+ * construction, response mapping, and unmatched-rule error surfacing.
  */
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -21,7 +22,10 @@ vi.mock("@/lib/supabase", () => ({
   supabase: supabaseMock,
 }));
 
-import { purchaseTaxService } from "./purchase-tax-service";
+import {
+  purchaseTaxService,
+  UNMATCHED_PURCHASE_TAX_RULE_ERROR,
+} from "./purchase-tax-service";
 
 function document(
   overrides?: Partial<PurchaseTaxDocument>,
@@ -337,7 +341,59 @@ describe("purchaseTaxService (DEV-099, RPC-based)", () => {
       ).toEqual(["NL-VAT-STD-21", "NL-VAT-RED-9"]);
     });
 
-    it("returns null tax_code/tax_rate_percent for a line with no resolved tax", async () => {
+    it("fails when the RPC rejects an unmatched tax rule", async () => {
+      supabaseMock.rpc.mockResolvedValue({
+        data: null,
+        error: {
+          message:
+            "Cannot calculate purchase taxes. No tax rule matches these lines: category 'goods' with regime 'standard_vat'. Choose a valid tax category and regime for each line and try again.",
+        },
+      });
+
+      const result = await purchaseTaxService.calculatePurchaseTaxes(document());
+
+      expect(result.data).toBeNull();
+      expect(result.error).toMatch(
+        /no tax rule matches these lines: category 'goods' with regime 'standard_vat'/i,
+      );
+    });
+
+    it("fails the whole document when the RPC lists several unmatched lines", async () => {
+      supabaseMock.rpc.mockResolvedValue({
+        data: null,
+        error: {
+          message:
+            "Cannot calculate purchase taxes. No tax rule matches these lines: category 'goods' with regime 'exempt'; category 'food' with regime 'standard_vat'. Choose a valid tax category and regime for each line and try again.",
+        },
+      });
+
+      const result = await purchaseTaxService.calculatePurchaseTaxes(
+        document({
+          lines: [
+            {
+              line_id: "line-1",
+              quantity: 1,
+              unit_price: 100,
+              tax_category: "goods",
+              tax_regime: "exempt",
+            },
+            {
+              line_id: "line-2",
+              quantity: 1,
+              unit_price: 100,
+              tax_category: "food",
+              tax_regime: "standard_vat",
+            },
+          ],
+        }),
+      );
+
+      expect(result.data).toBeNull();
+      expect(result.error).toMatch(/category 'goods' with regime 'exempt'/i);
+      expect(result.error).toMatch(/category 'food' with regime 'standard_vat'/i);
+    });
+
+    it("treats a successful RPC with empty taxes[] as an unmatched-rule failure", async () => {
       supabaseMock.rpc.mockResolvedValue(
         rpcResult({
           tax_total: 0,
@@ -359,68 +415,8 @@ describe("purchaseTaxService (DEV-099, RPC-based)", () => {
 
       const result = await purchaseTaxService.calculatePurchaseTaxes(document());
 
-      expect(result.data?.lines[0]).toMatchObject({
-        tax_code: null,
-        tax_rate_percent: null,
-        tax_amount: 0,
-      });
-      expect(result.data?.tax_result.breakdown.lines).toHaveLength(0);
-      expect(result.data?.warnings).toEqual([
-        "No tax rule found for category 'goods' with regime 'standard_vat'. Tax amount set to 0. Please check the tax regime selection.",
-      ]);
-    });
-
-    it("only warns for the unresolved line when one of several lines has no matching rule", async () => {
-      supabaseMock.rpc.mockResolvedValue(
-        rpcResult({
-          subtotal: 200,
-          tax_total: 21,
-          grand_total: 221,
-          lines: [
-            {
-              line_id: "line-1",
-              taxable_amount: 100,
-              tax_amount: 21,
-              net_amount: 100,
-              gross_amount: 121,
-              taxes: [rpcTaxLine()],
-            },
-            {
-              line_id: "line-2",
-              taxable_amount: 100,
-              tax_amount: 0,
-              net_amount: 100,
-              gross_amount: 100,
-              taxes: [],
-            },
-          ],
-        }),
-      );
-
-      const result = await purchaseTaxService.calculatePurchaseTaxes(
-        document({
-          lines: [
-            {
-              line_id: "line-1",
-              quantity: 1,
-              unit_price: 100,
-              tax_category: "goods",
-              tax_regime: "standard_vat",
-            },
-            {
-              line_id: "line-2",
-              quantity: 1,
-              unit_price: 100,
-              tax_category: "food",
-              tax_regime: "standard_vat",
-            },
-          ],
-        }),
-      );
-
-      expect(result.data?.warnings).toEqual([
-        "No tax rule found for category 'food' with regime 'standard_vat'. Tax amount set to 0. Please check the tax regime selection.",
-      ]);
+      expect(result.data).toBeNull();
+      expect(result.error).toBe(UNMATCHED_PURCHASE_TAX_RULE_ERROR);
     });
 
     it("tags mode=preview for previewPurchaseTaxes without changing the call", async () => {
