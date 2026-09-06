@@ -87,9 +87,9 @@ function emptyFormValues(): PurchaseFormValues {
         quantity: 1,
         unit_cost: 0,
         discount: 0,
-        tax_category: "goods",
-        tax_regime: "standard_vat",
-        price_mode: "exclusive",
+        tax_category: "food",
+        tax_regime: "reduced_vat",
+        price_mode: "inclusive",
       },
     ],
   };

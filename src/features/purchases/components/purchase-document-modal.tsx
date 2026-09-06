@@ -684,9 +684,9 @@ function PurchaseDocumentForm({
           line_total: "",
           last_edited_field: null,
           discount: "",
-          tax_category: "goods",
-          tax_regime: "standard_vat",
-          price_mode: "exclusive",
+          tax_category: "food",
+          tax_regime: "reduced_vat",
+          price_mode: "inclusive",
         },
       ],
     }));
