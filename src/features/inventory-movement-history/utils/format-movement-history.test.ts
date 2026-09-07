@@ -14,6 +14,7 @@ describe("formatMovementType", () => {
     expect(formatMovementType("purchase_in")).toBe("Received");
     expect(formatMovementType("production_out")).toBe("Used in production");
     expect(formatMovementType("sale_out")).toBe("Sold with product");
+    expect(formatMovementType("waste_out")).toBe("Written off");
   });
 
   it("returns the raw code for an unknown movement type", () => {
@@ -28,6 +29,7 @@ describe("formatMovementQuantity", () => {
       "−29.75 kg",
     );
     expect(formatMovementQuantity(0.5, "kg", "sale_out")).toBe("−0.5 kg");
+    expect(formatMovementQuantity(2, "kg", "waste_out")).toBe("−2 kg");
   });
 
   it("does not invent a sign for an unknown movement type", () => {
@@ -54,6 +56,13 @@ describe("movementDocumentLink", () => {
     expect(movementDocumentLink("sale", SALE_LINE_ID)).toEqual({
       label: "Sale",
       href: null,
+    });
+  });
+
+  it("links a write-off to the Inventory Write-offs tab", () => {
+    expect(movementDocumentLink("write_off", "wo-1")).toEqual({
+      label: "Write-off",
+      href: "/inventory?tab=write-offs",
     });
   });
 });

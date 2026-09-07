@@ -53,6 +53,7 @@ describe("InventoryWorkspacePage", () => {
       <InventoryWorkspacePage
         activeTab="raw-materials"
         finishedGoods={<div data-testid="finished-goods">embedded</div>}
+        writeOffs={<div data-testid="write-offs">embedded</div>}
       />,
     );
 
@@ -62,6 +63,7 @@ describe("InventoryWorkspacePage", () => {
     );
     expect(screen.getByTestId("raw-materials")).toHaveTextContent("embedded");
     expect(screen.queryByTestId("finished-goods")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("write-offs")).not.toBeInTheDocument();
     expect(
       screen.getByRole("link", { name: "Raw Materials" }),
     ).toHaveAttribute("aria-current", "page");
@@ -72,13 +74,33 @@ describe("InventoryWorkspacePage", () => {
       <InventoryWorkspacePage
         activeTab="finished-goods"
         finishedGoods={<div data-testid="finished-goods">embedded</div>}
+        writeOffs={<div data-testid="write-offs">embedded</div>}
       />,
     );
 
     expect(screen.getByTestId("finished-goods")).toHaveTextContent("embedded");
     expect(screen.queryByTestId("raw-materials")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("write-offs")).not.toBeInTheDocument();
     expect(
       screen.getByRole("link", { name: "Finished Goods" }),
     ).toHaveAttribute("aria-current", "page");
+  });
+
+  it("shows the Write-offs slot when that tab is active", () => {
+    render(
+      <InventoryWorkspacePage
+        activeTab="write-offs"
+        finishedGoods={<div data-testid="finished-goods">embedded</div>}
+        writeOffs={<div data-testid="write-offs">embedded</div>}
+      />,
+    );
+
+    expect(screen.getByTestId("write-offs")).toHaveTextContent("embedded");
+    expect(screen.queryByTestId("raw-materials")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("finished-goods")).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Write-offs" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
   });
 });

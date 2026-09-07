@@ -35,9 +35,10 @@ export function resolveDefaultPostingRules(
       return [createProductionCompletedPostingRule()];
     case "production_adjusted":
       return [createProductionAdjustedPostingRule()];
+    // waste_recognized is resolved explicitly in
+    // write-off-accounting-service (credit account depends on item_type).
     // Future:
     // case "inventory_adjusted":
-    // case "waste_recognized":
     default:
       return [];
   }

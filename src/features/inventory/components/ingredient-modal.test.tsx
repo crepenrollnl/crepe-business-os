@@ -60,6 +60,10 @@ describe("IngredientModal Movement history link", () => {
     expect(
       screen.getByRole("link", { name: "Movement history" }),
     ).toHaveAttribute("href", `/inventory/ingredients/${item.id}/movements`);
+    expect(screen.getByRole("link", { name: "Write off" })).toHaveAttribute(
+      "href",
+      `/inventory?tab=write-offs&itemType=ingredient&id=${item.id}`,
+    );
   });
 
   it("does not show Movement history when adding an ingredient", () => {
@@ -67,6 +71,9 @@ describe("IngredientModal Movement history link", () => {
 
     expect(
       screen.queryByRole("link", { name: "Movement history" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("link", { name: "Write off" }),
     ).not.toBeInTheDocument();
   });
 });

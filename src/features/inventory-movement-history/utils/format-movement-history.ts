@@ -24,7 +24,11 @@ function movementQuantitySign(movementType: string): "+" | "−" | "" {
     return "+";
   }
 
-  if (movementType === "production_out" || movementType === "sale_out") {
+  if (
+    movementType === "production_out" ||
+    movementType === "sale_out" ||
+    movementType === "waste_out"
+  ) {
     return "−";
   }
 
@@ -39,6 +43,8 @@ export function formatMovementType(movementType: string): string {
       return "Used in production";
     case "sale_out":
       return "Sold with product";
+    case "waste_out":
+      return "Written off";
     default:
       return movementType;
   }
@@ -75,6 +81,13 @@ export function movementDocumentLink(
 
   if (sourceType === "sale") {
     return { label: "Sale", href: null };
+  }
+
+  if (sourceType === "write_off") {
+    return {
+      label: "Write-off",
+      href: sourceId ? `/inventory?tab=write-offs` : null,
+    };
   }
 
   if (!sourceId) {

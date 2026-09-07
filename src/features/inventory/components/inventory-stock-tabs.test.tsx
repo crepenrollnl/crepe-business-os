@@ -32,11 +32,14 @@ describe("InventoryStockTabs", () => {
 
     const raw = screen.getByRole("link", { name: "Raw Materials" });
     const finished = screen.getByRole("link", { name: "Finished Goods" });
+    const writeOffs = screen.getByRole("link", { name: "Write-offs" });
 
     expect(raw).toHaveAttribute("href", "/inventory");
     expect(raw).toHaveAttribute("aria-current", "page");
     expect(finished).toHaveAttribute("href", "/inventory?tab=finished-goods");
     expect(finished).not.toHaveAttribute("aria-current");
+    expect(writeOffs).toHaveAttribute("href", "/inventory?tab=write-offs");
+    expect(writeOffs).not.toHaveAttribute("aria-current");
   });
 
   it("marks Finished Goods current for the tab query", () => {
@@ -45,6 +48,18 @@ describe("InventoryStockTabs", () => {
     expect(
       screen.getByRole("link", { name: "Finished Goods" }),
     ).toHaveAttribute("aria-current", "page");
+    expect(
+      screen.getByRole("link", { name: "Raw Materials" }),
+    ).not.toHaveAttribute("aria-current");
+  });
+
+  it("marks Write-offs current for the tab query", () => {
+    render(<InventoryStockTabs activeTab="write-offs" />);
+
+    expect(screen.getByRole("link", { name: "Write-offs" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
     expect(
       screen.getByRole("link", { name: "Raw Materials" }),
     ).not.toHaveAttribute("aria-current");
