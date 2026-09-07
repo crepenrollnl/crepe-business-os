@@ -3,6 +3,7 @@
 import { formatDateTime } from "@/lib/date";
 import { formatMoney } from "@/lib/money";
 import type { PosQueueOrder } from "../hooks/use-pos-queue";
+import { PosQueueWaitTimer } from "./pos-queue-wait-timer";
 
 type PosQueuePaneProps = {
   items: PosQueueOrder[];
@@ -95,6 +96,9 @@ export function PosQueuePane({
                   <p className="truncate text-base font-semibold text-zinc-900">
                     {order.sale_number}
                   </p>
+                  {order.confirmed_at ? (
+                    <PosQueueWaitTimer startedAt={order.confirmed_at} />
+                  ) : null}
                   <p className="mt-0.5 text-sm text-zinc-500">
                     {formatDateTime(order.confirmed_at)}
                   </p>
