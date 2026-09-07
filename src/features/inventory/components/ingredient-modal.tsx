@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useState, type FormEvent } from "react";
+import { writeOffPrefillHref } from "@/features/write-offs/utils/write-off-href";
 import {
   NumericInput,
   formatNumericInput,
@@ -217,12 +218,18 @@ function IngredientModalForm({
             : "Create a new ingredient and set its initial stock levels."}
         </p>
         {item ? (
-          <p className="mt-2">
+          <p className="mt-2 inline-flex flex-wrap gap-x-4 gap-y-1">
             <Link
               href={`/inventory/ingredients/${item.id}/movements`}
               className="text-sm font-medium text-zinc-600 transition-colors hover:text-zinc-900"
             >
               Movement history
+            </Link>
+            <Link
+              href={writeOffPrefillHref("ingredient", item.id)}
+              className="text-sm font-medium text-zinc-600 transition-colors hover:text-zinc-900"
+            >
+              Write off
             </Link>
           </p>
         ) : null}

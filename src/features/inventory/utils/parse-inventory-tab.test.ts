@@ -21,6 +21,13 @@ describe("parseInventoryStockTab", () => {
     expect(INVENTORY_STOCK_TAB_HREF["raw-materials"]).toBe("/inventory");
   });
 
+  it("opens Write-offs only for ?tab=write-offs", () => {
+    expect(parseInventoryStockTab("write-offs")).toBe("write-offs");
+    expect(INVENTORY_STOCK_TAB_HREF["write-offs"]).toBe(
+      "/inventory?tab=write-offs",
+    );
+  });
+
   it("reads the first tab value from Next.js searchParams", () => {
     expect(inventoryTabSearchParam(undefined)).toBeNull();
     expect(inventoryTabSearchParam("finished-goods")).toBe("finished-goods");

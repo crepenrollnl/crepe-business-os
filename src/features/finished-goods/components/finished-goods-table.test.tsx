@@ -1,6 +1,23 @@
 import { cleanup, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import type { ReactNode } from "react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
+
+vi.mock("next/link", () => ({
+  default: ({
+    href,
+    children,
+    className,
+  }: {
+    href: string;
+    children: ReactNode;
+    className?: string;
+  }) => (
+    <a href={href} className={className}>
+      {children}
+    </a>
+  ),
+}));
 import { FinishedGoodsTable } from "./finished-goods-table";
 import type { FinishedGoodsListRow } from "../types/finished-good";
 
@@ -48,6 +65,10 @@ describe("FinishedGoodsTable", () => {
     expect(screen.getByText("€4.5000")).toBeInTheDocument();
     expect(screen.getByText("€31.50")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /add/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Write off" })).toHaveAttribute(
+      "href",
+      `/inventory?tab=write-offs&itemType=finished_good&id=${row.product_id}`,
+    );
   });
 
   it("shows a read-only empty state without create actions", () => {

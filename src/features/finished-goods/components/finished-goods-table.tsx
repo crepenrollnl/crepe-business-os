@@ -1,3 +1,5 @@
+import Link from "next/link";
+import { writeOffPrefillHref } from "@/features/write-offs/utils/write-off-href";
 import { formatDate } from "@/lib/date";
 import { formatMoney, formatUnitCost } from "@/lib/money";
 import type { FinishedGoodsListRow } from "../types/finished-good";
@@ -8,7 +10,7 @@ import type {
 import { formatFinishedGoodsAvailable } from "../utils/format-finished-goods";
 import { FinishedGoodsPagination } from "./finished-goods-pagination";
 
-const COLUMN_COUNT = 5;
+const COLUMN_COUNT = 6;
 
 type FinishedGoodsTableProps = {
   items: FinishedGoodsListRow[];
@@ -194,6 +196,9 @@ export function FinishedGoodsTable({
                 sortDirection={sortDirection}
                 onSort={onSort}
               />
+              <th className="px-4 py-3 text-right text-sm font-semibold text-zinc-700">
+                Actions
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -230,6 +235,14 @@ export function FinishedGoodsTable({
                   </td>
                   <td className="px-4 py-4 text-zinc-700">
                     {formatDate(item.newest_batch_at)}
+                  </td>
+                  <td className="px-4 py-4 text-right">
+                    <Link
+                      href={writeOffPrefillHref("finished_good", item.product_id)}
+                      className="rounded-lg px-3 py-1.5 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-900"
+                    >
+                      Write off
+                    </Link>
                   </td>
                 </tr>
               ))

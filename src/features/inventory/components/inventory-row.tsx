@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { writeOffPrefillHref } from "@/features/write-offs/utils/write-off-href";
 import { formatDate } from "@/lib/date";
 import { formatMoney } from "@/lib/money";
 import type { PurchasingReviewRow } from "../types/purchasing-review";
@@ -339,6 +340,12 @@ export function InventoryRow({
             className="rounded-lg px-3 py-1.5 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-900"
           >
             Movement history
+          </Link>
+          <Link
+            href={writeOffPrefillHref("ingredient", item.id)}
+            className="rounded-lg px-3 py-1.5 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-900"
+          >
+            Write off
           </Link>
           <button
             type="button"

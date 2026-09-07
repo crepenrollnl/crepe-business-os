@@ -224,5 +224,9 @@ describe("InventoryTable compact/expanded columns", () => {
     expect(
       screen.getByRole("link", { name: "Movement history" }),
     ).toHaveAttribute("href", `/inventory/ingredients/${item.id}/movements`);
+    expect(screen.getByRole("link", { name: "Write off" })).toHaveAttribute(
+      "href",
+      `/inventory?tab=write-offs&itemType=ingredient&id=${item.id}`,
+    );
   });
 });

@@ -7,11 +7,13 @@ import { InventoryPage } from "./inventory-page";
 type InventoryWorkspacePageProps = {
   activeTab: InventoryStockTab;
   finishedGoods: ReactNode;
+  writeOffs: ReactNode;
 };
 
 export function InventoryWorkspacePage({
   activeTab,
   finishedGoods,
+  writeOffs,
 }: InventoryWorkspacePageProps) {
   return (
     <DashboardLayout activePath="/inventory">
@@ -19,6 +21,8 @@ export function InventoryWorkspacePage({
         <InventoryStockTabs activeTab={activeTab} />
         {activeTab === "finished-goods" ? (
           finishedGoods
+        ) : activeTab === "write-offs" ? (
+          writeOffs
         ) : (
           <InventoryPage embedded />
         )}
