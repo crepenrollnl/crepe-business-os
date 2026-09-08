@@ -1,12 +1,21 @@
 /**
- * Purchase Service coverage — multi-line stock increment safety.
+ * Purchase Service coverage — atomic Receive (sql/116).
  *
- * Regression coverage for Plan V1 Phase 1 item 1.3: when a multi-line
- * purchase partially applies receive_purchase_line_stock_and_cost and a
- * later line fails, already-applied lines must be reversed through
- * reverse_receive_purchase_line_stock_and_cost (snapshot restore) —
- * never a no-op stand-in whose result is discarded, which would leave
- * stock and cost_per_unit silently inflated.
+ * Regression coverage for the 2026-09-08 system audit's Data integrity &
+ * money-correctness Finding 1 (Critical): receivePurchase() previously ran
+ * Receive as a client-orchestrated, non-atomic saga — a status check, then
+ * a per-line RPC loop, with manual snapshot-based reversal on a later-line
+ * failure that could itself fail and leave stock/cost inconsistent.
+ *
+ * It now delegates the whole status transition + every line's stock/cost
+ * update to a single atomic RPC (receive_purchase, sql/116): the database
+ * locks the purchase row, re-checks status = draft under that lock, and
+ * either applies every line and flips the status, or raises and rolls back
+ * the entire transaction. This suite checks the TS wrapper calls that RPC
+ * exactly once with the right purchase id, surfaces its error verbatim
+ * without performing any manual status reset of its own (there is nothing
+ * to reverse — a raised RPC error means Postgres already rolled everything
+ * back), and still saves header/line edits as a draft before receiving.
  */
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -55,10 +64,10 @@ function chainable(result: ChainResult) {
   return api;
 }
 
-const purchaseRow = {
+const draftPurchaseRow = {
   id: PURCHASE_ID,
   supplier_id: null,
-  status: "received",
+  status: "draft",
   invoice_number: null,
   notes: null,
   subtotal: 20,
@@ -70,6 +79,15 @@ const purchaseRow = {
   production_plan_id: null,
   created_at: "2026-07-30T12:00:00.000Z",
   updated_at: "2026-07-30T12:00:00.000Z",
+};
+
+// The row purchaseService.getPurchaseById re-fetches once the atomic RPC
+// has flipped status to "received" — separate from the draft row above,
+// since Receive no longer sets "received" on the insert/update payload
+// itself (see the "saves ... as a draft" test below).
+const receivedPurchaseRow = {
+  ...draftPurchaseRow,
+  status: "received",
 };
 
 const purchaseItemRows = [
@@ -91,11 +109,17 @@ const purchaseItemRows = [
   },
 ];
 
-function installMock(stockRpcErrors: Record<string, { message: string } | null>) {
+function installMock(
+  options: {
+    receivePurchaseError?: { message: string } | null;
+  } = {},
+) {
+  const { receivePurchaseError = null } = options;
   const updateCalls: Array<{ table: string; payload: unknown }> = [];
   const itemInserts: unknown[] = [];
   const totalsCalls: unknown[] = [];
   const purchaseInserts: unknown[] = [];
+  const receivePurchaseCalls: unknown[] = [];
 
   supabaseMock.rpc.mockImplementation(
     async (fn: string, args: Record<string, unknown>) => {
@@ -129,32 +153,21 @@ function installMock(stockRpcErrors: Record<string, { message: string } | null>)
         };
       }
 
-      if (fn === "receive_purchase_line_stock_and_cost") {
-        const ingredientId = args.p_ingredient_id as string;
-        const key = `${ingredientId}:forward`;
-        const error = stockRpcErrors[key] ?? null;
+      if (fn === "receive_purchase") {
+        receivePurchaseCalls.push(args);
 
-        if (error) {
-          return { data: null, error };
+        if (receivePurchaseError) {
+          return { data: null, error: receivePurchaseError };
         }
 
         return {
           data: {
-            ingredient_id: ingredientId,
-            previous_stock: 0,
-            previous_cost_per_unit: 0,
-            new_stock: args.p_quantity,
-            new_cost_per_unit: args.p_net_unit_cost,
+            purchase_id: args.p_purchase_id,
+            status: "received",
+            lines_received: purchaseItemRows.length,
+            received_at: "2026-07-30T12:00:00.000Z",
           },
           error: null,
-        };
-      }
-
-      if (fn === "reverse_receive_purchase_line_stock_and_cost") {
-        const ingredientId = args.p_ingredient_id as string;
-        return {
-          data: null,
-          error: stockRpcErrors[`${ingredientId}:reverse`] ?? null,
         };
       }
 
@@ -167,13 +180,15 @@ function installMock(stockRpcErrors: Record<string, { message: string } | null>)
       return {
         insert: vi.fn((payload: unknown) => {
           purchaseInserts.push(payload);
-          return chainable({ data: purchaseRow, error: null });
+          return chainable({ data: draftPurchaseRow, error: null });
         }),
         update: vi.fn((payload: unknown) => {
           updateCalls.push({ table, payload });
           return chainable({ data: null, error: null });
         }),
-        select: vi.fn(() => chainable({ data: [], error: null })),
+        select: vi.fn(() =>
+          chainable({ data: receivedPurchaseRow, error: null }),
+        ),
       };
     }
 
@@ -184,6 +199,7 @@ function installMock(stockRpcErrors: Record<string, { message: string } | null>)
           itemInserts.push(payload);
           return chainable({ data: purchaseItemRows, error: null });
         }),
+        select: vi.fn(() => chainable({ data: purchaseItemRows, error: null })),
       };
     }
 
@@ -198,7 +214,13 @@ function installMock(stockRpcErrors: Record<string, { message: string } | null>)
     throw new Error(`Unexpected table: ${table}`);
   });
 
-  return { updateCalls, itemInserts, totalsCalls, purchaseInserts };
+  return {
+    updateCalls,
+    itemInserts,
+    totalsCalls,
+    purchaseInserts,
+    receivePurchaseCalls,
+  };
 }
 
 function buildInput(): SavePurchaseInput {
@@ -214,209 +236,64 @@ function buildInput(): SavePurchaseInput {
   };
 }
 
-describe("purchaseService.receivePurchase — partial stock increment failure", () => {
+describe("purchaseService.receivePurchase — atomic receive RPC", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it("reverses already-applied lines via the snapshot RPC, not a no-op", async () => {
-    const { updateCalls } = installMock({
-      [`${INGREDIENT_B}:forward`]: { message: "deadlock detected" },
-    });
-
-    const result = await purchaseService.receivePurchase(buildInput());
-
-    expect(result.data).toBeNull();
-    expect(result.error).toBeTruthy();
-
-    const stockCalls = supabaseMock.rpc.mock.calls.filter(
-      ([fn]) =>
-        fn === "receive_purchase_line_stock_and_cost" ||
-        fn === "reverse_receive_purchase_line_stock_and_cost",
-    );
-
-    // Line A applied, line B failed, line A reversed through the snapshot RPC.
-    expect(stockCalls).toEqual([
-      [
-        "receive_purchase_line_stock_and_cost",
-        {
-          p_ingredient_id: INGREDIENT_A,
-          p_quantity: 10,
-          p_net_unit_cost: 1,
-        },
-      ],
-      [
-        "receive_purchase_line_stock_and_cost",
-        {
-          p_ingredient_id: INGREDIENT_B,
-          p_quantity: 10,
-          p_net_unit_cost: 1,
-        },
-      ],
-      [
-        "reverse_receive_purchase_line_stock_and_cost",
-        {
-          p_ingredient_id: INGREDIENT_A,
-          p_previous_stock: 0,
-          p_previous_cost_per_unit: 0,
-        },
-      ],
-    ]);
-
-    expect(updateCalls).toEqual([
-      {
-        table: "purchases",
-        payload: expect.objectContaining({ status: "draft" }),
-      },
-    ]);
-  });
-
-  it("does not receive the purchase when the stock RPC rejects a zero net unit cost", async () => {
-    const updateCalls: Array<{ table: string; payload: unknown }> = [];
-
-    supabaseMock.rpc.mockImplementation(async (fn: string) => {
-      if (fn === "calculate_purchase_totals") {
-        return {
-          data: {
-            lines: [
-              {
-                ingredient_id: INGREDIENT_A,
-                quantity: 10,
-                unit_cost: 0,
-                line_total: 0,
-              },
-            ],
-            subtotal: 0,
-            tax_total: 0,
-            total: 0,
-          },
-          error: null,
-        };
-      }
-
-      if (fn === "receive_purchase_line_stock_and_cost") {
-        return {
-          data: null,
-          error: {
-            message:
-              "Cannot receive this purchase. This ingredient has no net unit cost (zero or missing): Flour. Enter a positive unit cost on the purchase line and try again.",
-          },
-        };
-      }
-
-      throw new Error(`Unexpected rpc call: ${fn}`);
-    });
-
-    supabaseMock.from.mockImplementation((table: string) => {
-      if (table === "purchases") {
-        return {
-          insert: vi.fn(() =>
-            chainable({
-              data: { ...purchaseRow, subtotal: 0, total: 0 },
-              error: null,
-            }),
-          ),
-          update: vi.fn((payload: unknown) => {
-            updateCalls.push({ table, payload });
-            return chainable({ data: null, error: null });
-          }),
-          select: vi.fn(() => chainable({ data: [], error: null })),
-        };
-      }
-
-      if (table === "purchase_items") {
-        return {
-          delete: vi.fn(() => chainable({ data: null, error: null })),
-          insert: vi.fn(() =>
-            chainable({
-              data: [
-                {
-                  id: "item-1",
-                  purchase_id: PURCHASE_ID,
-                  ingredient_id: INGREDIENT_A,
-                  quantity: 10,
-                  unit_cost: 0,
-                  line_total: 0,
-                },
-              ],
-              error: null,
-            }),
-          ),
-        };
-      }
-
-      if (table === "suppliers") {
-        return { select: vi.fn(() => chainable({ data: [], error: null })) };
-      }
-
-      if (table === "ingredients") {
-        return { select: vi.fn(() => chainable({ data: [], error: null })) };
-      }
-
-      throw new Error(`Unexpected table: ${table}`);
-    });
-
-    const result = await purchaseService.receivePurchase({
-      supplier_id: "supplier-1",
-      invoice_number: "INV-1",
-      purchased_at: "2026-07-30",
-      notes: "",
-      lines: [{ ingredient_id: INGREDIENT_A, quantity: 10, unit_cost: 0 }],
-    });
-
-    expect(result.data).toBeNull();
-    expect(result.error).toMatch(/no net unit cost \(zero or missing\): Flour/i);
-    expect(updateCalls).toEqual([
-      {
-        table: "purchases",
-        payload: expect.objectContaining({ status: "draft" }),
-      },
-    ]);
-  });
-
-  it("surfaces a reversal failure in the returned error instead of discarding it", async () => {
-    installMock({
-      [`${INGREDIENT_B}:forward`]: { message: "deadlock detected" },
-      [`${INGREDIENT_A}:reverse`]: { message: "connection reset" },
-    });
-
-    const result = await purchaseService.receivePurchase(buildInput());
-
-    expect(result.error).toContain("deadlock detected");
-    expect(result.error).toContain("connection reset");
-    expect(result.error).toContain(INGREDIENT_A);
-  });
-
-  it("succeeds cleanly when every line's stock increment succeeds", async () => {
-    installMock({});
+  it("saves the purchase as a draft, then calls receive_purchase exactly once", async () => {
+    const { updateCalls, purchaseInserts, receivePurchaseCalls } =
+      installMock();
 
     const result = await purchaseService.receivePurchase(buildInput());
 
     expect(result.error).toBeNull();
     expect(result.data?.status).toBe("received");
 
-    const stockCalls = supabaseMock.rpc.mock.calls.filter(
-      ([fn]) => fn === "receive_purchase_line_stock_and_cost",
+    // Header/lines are still saved first (unchanged behavior) — but as a
+    // draft. "received" only ever comes from the atomic RPC, never from a
+    // client-set status on the insert payload.
+    expect(purchaseInserts[0]).toMatchObject({ status: "draft" });
+
+    expect(receivePurchaseCalls).toEqual([{ p_purchase_id: PURCHASE_ID }]);
+
+    // No manual status reset exists anymore — the DB transaction is
+    // all-or-nothing, so there is nothing left for the TS layer to unwind.
+    expect(updateCalls).toEqual([]);
+  });
+
+  it("surfaces the RPC's zero-cost rejection without touching purchase status manually", async () => {
+    const { updateCalls } = installMock({
+      receivePurchaseError: {
+        message:
+          "Cannot receive this purchase. This ingredient has no net unit cost (zero or missing): Flour. Enter a positive unit cost on the purchase line and try again.",
+      },
+    });
+
+    const result = await purchaseService.receivePurchase(buildInput());
+
+    expect(result.data).toBeNull();
+    expect(result.error).toMatch(
+      /no net unit cost \(zero or missing\): Flour/i,
     );
 
-    expect(stockCalls).toEqual([
-      [
-        "receive_purchase_line_stock_and_cost",
-        {
-          p_ingredient_id: INGREDIENT_A,
-          p_quantity: 10,
-          p_net_unit_cost: 1,
-        },
-      ],
-      [
-        "receive_purchase_line_stock_and_cost",
-        {
-          p_ingredient_id: INGREDIENT_B,
-          p_quantity: 10,
-          p_net_unit_cost: 1,
-        },
-      ],
-    ]);
+    // A raised RPC error means Postgres already rolled back the whole
+    // receive_purchase transaction — no status update should be attempted.
+    expect(updateCalls).toEqual([]);
+  });
+
+  it("surfaces the RPC's already-received rejection the same way", async () => {
+    const { updateCalls } = installMock({
+      receivePurchaseError: {
+        message: "This purchase has already been received.",
+      },
+    });
+
+    const result = await purchaseService.receivePurchase(buildInput());
+
+    expect(result.data).toBeNull();
+    expect(result.error).toMatch(/already been received/i);
+    expect(updateCalls).toEqual([]);
   });
 });
 
@@ -426,7 +303,7 @@ describe("purchaseService.receivePurchase — variant C tax memory", () => {
   });
 
   it("persists net unit_cost/line totals and remembers the typed inclusive price", async () => {
-    const { itemInserts, totalsCalls, purchaseInserts } = installMock({});
+    const { itemInserts, totalsCalls, purchaseInserts } = installMock();
 
     const result = await purchaseService.receivePurchase({
       supplier_id: "supplier-1",
@@ -484,7 +361,7 @@ describe("purchaseService.receivePurchase — variant C tax memory", () => {
   });
 
   it("persists line discount and header countries when provided", async () => {
-    const { itemInserts, totalsCalls, purchaseInserts } = installMock({});
+    const { itemInserts, totalsCalls, purchaseInserts } = installMock();
 
     const result = await purchaseService.receivePurchase({
       supplier_id: "supplier-1",
