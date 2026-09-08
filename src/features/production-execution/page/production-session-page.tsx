@@ -18,6 +18,8 @@ export function ProductionSessionPage({ sessionId }: ProductionSessionPageProps)
     notes,
     drafts,
     rawMaterialScaleDrafts,
+    helperDrafts,
+    firstLevelRawByRecipeId,
     canEdit,
     canFinish,
     saving,
@@ -26,6 +28,8 @@ export function ProductionSessionPage({ sessionId }: ProductionSessionPageProps)
     onNotesChange,
     onProducedChange,
     onRawMaterialScaleChange,
+    onHelperQuantityChange,
+    onHelperIngredientChange,
     saveProgress,
     finishProduction,
     retry,
@@ -80,9 +84,13 @@ export function ProductionSessionPage({ sessionId }: ProductionSessionPageProps)
               lines={session.lines}
               drafts={drafts}
               rawMaterialScaleDrafts={rawMaterialScaleDrafts}
+              helperDrafts={helperDrafts}
+              firstLevelRawByRecipeId={firstLevelRawByRecipeId}
               canEdit={canEdit}
               onProducedChange={onProducedChange}
               onRawMaterialScaleChange={onRawMaterialScaleChange}
+              onHelperQuantityChange={onHelperQuantityChange}
+              onHelperIngredientChange={onHelperIngredientChange}
             />
             {session.status === "completed" ? (
               <>

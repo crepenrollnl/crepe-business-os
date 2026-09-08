@@ -1,4 +1,7 @@
-import type { ProductionSessionStatus } from "../types/production-session";
+import type {
+  FirstLevelRawIngredient,
+  ProductionSessionStatus,
+} from "../types/production-session";
 import { OPEN_PRODUCTION_SESSION_STATUSES } from "../types/production-session";
 
 const SESSION_STATUS_LABELS: Record<ProductionSessionStatus, string> = {
@@ -39,6 +42,18 @@ export function isOpenProductionSessionStatus(
   return (OPEN_PRODUCTION_SESSION_STATUSES as readonly string[]).includes(
     status,
   );
+}
+
+export function formatFirstLevelRawSingleLabel(
+  item: FirstLevelRawIngredient,
+): string {
+  return `${item.name} (recipe: ${formatSessionQuantity(item.quantity)} ${item.unit})`;
+}
+
+export function formatFirstLevelRawOptionLabel(
+  item: FirstLevelRawIngredient,
+): string {
+  return `${item.name} — recipe: ${formatSessionQuantity(item.quantity)} ${item.unit}`;
 }
 
 export function formatDifference(value: number | null): string {

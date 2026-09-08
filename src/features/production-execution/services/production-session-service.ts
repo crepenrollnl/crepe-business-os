@@ -12,6 +12,7 @@ import { supabase } from "@/lib/supabase";
 import { fail, ok, type ServiceResult } from "@/types/service";
 import type {
   CompleteProductionSessionInput,
+  FirstLevelRawIngredient,
   ProductionPlanSessionHistoryItem,
   ProductionPlanSessionLineFact,
   ProductionSession,
@@ -40,6 +41,7 @@ import {
   validateInventoryForCompletion,
   type CompleteProductionRecipeBom,
 } from "../utils/complete-production";
+import { collectFirstLevelRawIngredients } from "../utils/collect-first-level-raw-ingredients";
 import {
   toSessionLineView,
   validateSessionLinesForComplete,
@@ -275,13 +277,21 @@ function validateSaveInput(input: SaveProductionSessionInput): string | null {
   return null;
 }
 
-async function loadRecipeBomsForCompletion(
+export interface RecipeCompletionLookups {
+  boms: Map<string, CompleteProductionRecipeBom>;
+  firstLevelRawByRecipeId: Map<string, FirstLevelRawIngredient[]>;
+}
+
+async function loadRecipeCompletionLookups(
   recipeIds: string[],
-): Promise<ServiceResult<Map<string, CompleteProductionRecipeBom>>> {
+): Promise<ServiceResult<RecipeCompletionLookups>> {
   const uniqueIds = [...new Set(recipeIds)];
 
   if (uniqueIds.length === 0) {
-    return ok(new Map());
+    return ok({
+      boms: new Map(),
+      firstLevelRawByRecipeId: new Map(),
+    });
   }
 
   const graphResult = await loadRecipeBomGraph(uniqueIds);
@@ -308,6 +318,21 @@ async function loadRecipeBomsForCompletion(
       for (const item of exploded.ingredients) {
         ingredientIds.add(item.ingredientId);
       }
+    }
+  }
+
+  for (const item of graph.recipeIngredients) {
+    if (uniqueIds.includes(item.recipeId)) {
+      ingredientIds.add(item.ingredientId);
+    }
+  }
+
+  for (const component of graph.recipeComponents) {
+    if (
+      uniqueIds.includes(component.parentRecipeId) &&
+      component.ingredientId
+    ) {
+      ingredientIds.add(component.ingredientId);
     }
   }
 
@@ -390,7 +415,42 @@ async function loadRecipeBomsForCompletion(
     });
   }
 
-  return ok(boms);
+  const nameLookup = new Map(
+    [...ingredientMap.entries()].map(([id, ingredient]) => [
+      id,
+      { name: ingredient.name },
+    ]),
+  );
+
+  const firstLevelRawByRecipeId = collectFirstLevelRawIngredients(
+    uniqueIds,
+    graph.recipeIngredients.map((item) => ({
+      recipeId: item.recipeId,
+      ingredientId: item.ingredientId,
+      quantity: item.quantityPerYield,
+      unit: item.unit,
+    })),
+    graph.recipeComponents.map((component) => ({
+      parentRecipeId: component.parentRecipeId,
+      ingredientId: component.ingredientId,
+      quantity: component.quantityPerYield,
+      unit: component.unit,
+    })),
+    nameLookup,
+  );
+
+  return ok({ boms, firstLevelRawByRecipeId });
+}
+
+async function loadRecipeBomsForCompletion(
+  recipeIds: string[],
+): Promise<ServiceResult<Map<string, CompleteProductionRecipeBom>>> {
+  const lookups = await loadRecipeCompletionLookups(recipeIds);
+  if (lookups.error || !lookups.data) {
+    return fail(lookups.error ?? "Failed to load recipes");
+  }
+
+  return ok(lookups.data.boms);
 }
 
 function mapRpcResult(data: unknown): CompleteProductionSessionResult | null {
@@ -617,6 +677,13 @@ export const productionSessionService = {
    * Same loader completeSession uses before the RPC.
    */
   loadRecipeBomsForCompletion,
+
+  /**
+   * Same graph load as loadRecipeBomsForCompletion, plus first-level
+   * recipe_items / raw component add-ins for the session helper field.
+   * Exploded BOM ingredients are unchanged.
+   */
+  loadRecipeCompletionLookups,
 
   async getOpenSessionForPlan(
     productionPlanId: string,

@@ -4,7 +4,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { accountingContextService } from "@/features/accounting/services/accounting-context-service";
 import { useAsyncEffect } from "@/hooks/use-async-effect";
 import { productionSessionService } from "../services/production-session-service";
-import type { ProductionSessionWithRelations } from "../types/production-session";
+import type {
+  FirstLevelRawIngredient,
+  ProductionSessionWithRelations,
+} from "../types/production-session";
 import {
   formatZeroCostConsumptionWarning,
   listZeroUnitCostConsumptions,
@@ -17,6 +20,7 @@ import {
   parseRawMaterialScaleInput,
 } from "../utils/production-session";
 import { isOpenProductionSessionStatus } from "../utils/format-production-session";
+import { computeRawMaterialScaleFromActual } from "../utils/raw-material-scale-from-actual";
 
 interface LineDraft {
   raw: string;
@@ -43,6 +47,18 @@ function buildDrafts(
   return drafts;
 }
 
+interface HelperDraft {
+  raw: string;
+  selectedIngredientId: string | null;
+  error: string | null;
+}
+
+type ScaleLastEditedField = "helper" | "scale";
+
+function emptyFirstLevelMap(): Map<string, FirstLevelRawIngredient[]> {
+  return new Map();
+}
+
 function buildRawMaterialScaleDrafts(
   session: ProductionSessionWithRelations,
 ): Record<string, LineDraft> {
@@ -62,6 +78,22 @@ function buildRawMaterialScaleDrafts(
   return drafts;
 }
 
+function buildScaleLastEditedByLineId(
+  scaleDrafts: Record<string, LineDraft>,
+): Record<string, ScaleLastEditedField> {
+  const lastEdited: Record<string, ScaleLastEditedField> = {};
+
+  for (const [lineId, draft] of Object.entries(scaleDrafts)) {
+    if (draft.raw.trim().length === 0) {
+      continue;
+    }
+
+    lastEdited[lineId] = "scale";
+  }
+
+  return lastEdited;
+}
+
 export function useProductionSession(sessionId: string) {
   const [session, setSession] = useState<ProductionSessionWithRelations | null>(
     null,
@@ -73,6 +105,15 @@ export function useProductionSession(sessionId: string) {
   const [rawMaterialScaleDrafts, setRawMaterialScaleDrafts] = useState<
     Record<string, LineDraft>
   >({});
+  const [helperDrafts, setHelperDrafts] = useState<Record<string, HelperDraft>>(
+    {},
+  );
+  const [scaleLastEditedByLineId, setScaleLastEditedByLineId] = useState<
+    Record<string, ScaleLastEditedField>
+  >({});
+  const [firstLevelRawByRecipeId, setFirstLevelRawByRecipeId] = useState<
+    Map<string, FirstLevelRawIngredient[]>
+  >(() => emptyFirstLevelMap());
   const [saving, setSaving] = useState(false);
   const [finishing, setFinishing] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -87,7 +128,9 @@ export function useProductionSession(sessionId: string) {
     setSession(next);
     setNotes(next.notes ?? "");
     setDrafts(buildDrafts(next));
-    setRawMaterialScaleDrafts(buildRawMaterialScaleDrafts(next));
+    const scaleDrafts = buildRawMaterialScaleDrafts(next);
+    setRawMaterialScaleDrafts(scaleDrafts);
+    setScaleLastEditedByLineId(buildScaleLastEditedByLineId(scaleDrafts));
   }, []);
 
   const loadSession = useCallback(async () => {
@@ -148,12 +191,13 @@ export function useProductionSession(sessionId: string) {
 
     if (!session || !completionBomKey) {
       setCompletionBoms(null);
+      setFirstLevelRawByRecipeId(emptyFirstLevelMap());
       return;
     }
 
     const recipeIds = session.lines.map((line) => line.recipe_id);
     const result =
-      await productionSessionService.loadRecipeBomsForCompletion(recipeIds);
+      await productionSessionService.loadRecipeCompletionLookups(recipeIds);
 
     if (startedWithKey !== latestCompletionBomKeyRef.current) {
       return;
@@ -161,10 +205,32 @@ export function useProductionSession(sessionId: string) {
 
     if (result.error || !result.data) {
       setCompletionBoms(null);
+      setFirstLevelRawByRecipeId(emptyFirstLevelMap());
       return;
     }
 
-    setCompletionBoms(result.data);
+    setCompletionBoms(result.data.boms);
+    setFirstLevelRawByRecipeId(result.data.firstLevelRawByRecipeId);
+    setHelperDrafts((current) => {
+      const next = { ...current };
+
+      for (const line of session.lines) {
+        if (next[line.id]) {
+          continue;
+        }
+
+        const rawLines =
+          result.data.firstLevelRawByRecipeId.get(line.recipe_id) ?? [];
+        next[line.id] = {
+          raw: "",
+          selectedIngredientId:
+            rawLines.length === 1 ? rawLines[0].ingredient_id : null,
+          error: null,
+        };
+      }
+
+      return next;
+    });
   }, [completionBomKey, session]);
 
   useAsyncEffect(loadCompletionBoms, [loadCompletionBoms]);
@@ -239,19 +305,143 @@ export function useProductionSession(sessionId: string) {
     setActionError(null);
   }, []);
 
-  const onRawMaterialScaleChange = useCallback((lineId: string, raw: string) => {
-    const parsed = parseRawMaterialScaleInput(raw);
+  const applyScaleDraft = useCallback(
+    (
+      lineId: string,
+      raw: string,
+      lastEdited: ScaleLastEditedField | null,
+    ) => {
+      const parsed = parseRawMaterialScaleInput(raw);
 
-    setRawMaterialScaleDrafts((current) => ({
-      ...current,
-      [lineId]: {
-        raw,
-        value: parsed.ok ? parsed.value : null,
-        error: parsed.ok ? null : parsed.error,
-      },
-    }));
-    setActionError(null);
-  }, []);
+      setRawMaterialScaleDrafts((current) => ({
+        ...current,
+        [lineId]: {
+          raw,
+          value: parsed.ok ? parsed.value : null,
+          error: parsed.ok ? null : parsed.error,
+        },
+      }));
+      setScaleLastEditedByLineId((current) => {
+        if (lastEdited === null) {
+          if (!(lineId in current)) {
+            return current;
+          }
+
+          const next = { ...current };
+          delete next[lineId];
+          return next;
+        }
+
+        return {
+          ...current,
+          [lineId]: lastEdited,
+        };
+      });
+      setActionError(null);
+    },
+    [],
+  );
+
+  const onRawMaterialScaleChange = useCallback((lineId: string, raw: string) => {
+    applyScaleDraft(
+      lineId,
+      raw,
+      raw.trim().length === 0 ? null : "scale",
+    );
+  }, [applyScaleDraft]);
+
+  const applyHelperToScale = useCallback(
+    (lineId: string, recipeId: string, helperRaw: string, ingredientId: string | null) => {
+      const rawLines = firstLevelRawByRecipeId.get(recipeId) ?? [];
+      const selected =
+        rawLines.find((item) => item.ingredient_id === ingredientId) ??
+        (rawLines.length === 1 ? rawLines[0] : undefined);
+
+      if (!selected) {
+        setHelperDrafts((current) => ({
+          ...current,
+          [lineId]: {
+            raw: helperRaw,
+            selectedIngredientId: ingredientId,
+            error: null,
+          },
+        }));
+        return;
+      }
+
+      const computed = computeRawMaterialScaleFromActual(
+        helperRaw,
+        selected.quantity,
+      );
+
+      if (computed.ok && computed.kind === "empty") {
+        setHelperDrafts((current) => ({
+          ...current,
+          [lineId]: {
+            raw: helperRaw,
+            selectedIngredientId: ingredientId,
+            error: null,
+          },
+        }));
+        return;
+      }
+
+      if (!computed.ok) {
+        setHelperDrafts((current) => ({
+          ...current,
+          [lineId]: {
+            raw: helperRaw,
+            selectedIngredientId: ingredientId,
+            error: computed.error,
+          },
+        }));
+        return;
+      }
+
+      setHelperDrafts((current) => ({
+        ...current,
+        [lineId]: {
+          raw: helperRaw,
+          selectedIngredientId: ingredientId,
+          error: null,
+        },
+      }));
+
+      if (scaleLastEditedByLineId[lineId] === "scale") {
+        return;
+      }
+
+      applyScaleDraft(lineId, String(computed.scale), "helper");
+    },
+    [applyScaleDraft, firstLevelRawByRecipeId, scaleLastEditedByLineId],
+  );
+
+  const onHelperQuantityChange = useCallback(
+    (lineId: string, recipeId: string, raw: string) => {
+      const current = helperDrafts[lineId];
+      const selectedId =
+        current?.selectedIngredientId ??
+        (firstLevelRawByRecipeId.get(recipeId)?.length === 1
+          ? firstLevelRawByRecipeId.get(recipeId)?.[0]?.ingredient_id ?? null
+          : null);
+
+      applyHelperToScale(lineId, recipeId, raw, selectedId);
+    },
+    [applyHelperToScale, firstLevelRawByRecipeId, helperDrafts],
+  );
+
+  const onHelperIngredientChange = useCallback(
+    (lineId: string, recipeId: string, ingredientId: string) => {
+      const helperRaw = helperDrafts[lineId]?.raw ?? "";
+      applyHelperToScale(
+        lineId,
+        recipeId,
+        helperRaw,
+        ingredientId.length > 0 ? ingredientId : null,
+      );
+    },
+    [applyHelperToScale, helperDrafts],
+  );
 
   const onNotesChange = useCallback((value: string) => {
     setNotes(value);
@@ -380,6 +570,8 @@ export function useProductionSession(sessionId: string) {
     notes,
     drafts,
     rawMaterialScaleDrafts,
+    helperDrafts,
+    firstLevelRawByRecipeId,
     canEdit,
     canFinish,
     saving,
@@ -390,6 +582,8 @@ export function useProductionSession(sessionId: string) {
     onNotesChange,
     onProducedChange,
     onRawMaterialScaleChange,
+    onHelperQuantityChange,
+    onHelperIngredientChange,
     saveProgress,
     finishProduction,
     retry,
