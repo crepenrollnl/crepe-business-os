@@ -381,198 +381,6 @@ async function replacePurchaseItems(
   };
 }
 
-interface ReceiveLineStockSnapshot {
-  previous_stock: number | null;
-  previous_cost_per_unit: number | null;
-}
-
-function isMissingReceiveStockRpcError(error: unknown): boolean {
-  if (typeof error !== "object" || error === null) {
-    return false;
-  }
-
-  const code =
-    "code" in error && typeof (error as { code: unknown }).code === "string"
-      ? (error as { code: string }).code
-      : "";
-  const message =
-    "message" in error &&
-    typeof (error as { message: unknown }).message === "string"
-      ? (error as { message: string }).message.toLowerCase()
-      : "";
-
-  return (
-    code === "42883" ||
-    message.includes("receive_purchase_line_stock_and_cost") ||
-    message.includes("could not find the function")
-  );
-}
-
-function asRpcNullableNumber(value: unknown): number | null {
-  if (value === null || value === undefined) {
-    return null;
-  }
-
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return value;
-  }
-
-  if (typeof value === "string" && value.trim() !== "") {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : null;
-  }
-
-  return null;
-}
-
-function parseReceiveLineStockResult(
-  data: unknown,
-): ReceiveLineStockSnapshot | null {
-  if (typeof data !== "object" || data === null) {
-    return null;
-  }
-
-  const row = data as Record<string, unknown>;
-
-  return {
-    previous_stock: asRpcNullableNumber(row.previous_stock),
-    previous_cost_per_unit: asRpcNullableNumber(row.previous_cost_per_unit),
-  };
-}
-
-function missingReceiveStockRpcError(
-  ingredientId: string,
-  quantity: number,
-): ServiceResult<ReceiveLineStockSnapshot> {
-  return {
-    data: null,
-    error: `Cannot update inventory stock and unit cost for ingredient ${ingredientId} (quantity ${quantity}): the receive_purchase_line_stock_and_cost database function is not installed. Apply sql/105_receive_purchase_line_stock_and_cost.sql and sql/111_reject_zero_cost_purchase_receive.sql and try again.`,
-  };
-}
-
-async function applyReceiveLineStockAndCost(
-  ingredientId: string,
-  quantity: number,
-  netUnitCost: number,
-): Promise<ServiceResult<ReceiveLineStockSnapshot>> {
-  const { data, error } = await supabase.rpc(
-    "receive_purchase_line_stock_and_cost",
-    {
-      p_ingredient_id: ingredientId,
-      p_quantity: quantity,
-      p_net_unit_cost: netUnitCost,
-    },
-  );
-
-  if (error) {
-    if (isMissingReceiveStockRpcError(error)) {
-      return missingReceiveStockRpcError(ingredientId, quantity);
-    }
-
-    return {
-      data: null,
-      error: toUserError(
-        error,
-        "Failed to update inventory stock and unit cost",
-      ),
-    };
-  }
-
-  const snapshot = parseReceiveLineStockResult(data);
-
-  if (!snapshot) {
-    return {
-      data: null,
-      error: "Failed to update inventory stock and unit cost",
-    };
-  }
-
-  return { data: snapshot, error: null };
-}
-
-async function reverseReceiveLineStockAndCost(
-  ingredientId: string,
-  snapshot: ReceiveLineStockSnapshot,
-): Promise<ServiceResult<null>> {
-  const { error } = await supabase.rpc(
-    "reverse_receive_purchase_line_stock_and_cost",
-    {
-      p_ingredient_id: ingredientId,
-      p_previous_stock: snapshot.previous_stock,
-      p_previous_cost_per_unit: snapshot.previous_cost_per_unit,
-    },
-  );
-
-  if (error) {
-    return {
-      data: null,
-      error: toUserError(
-        error,
-        "Failed to reverse inventory stock and unit cost",
-      ),
-    };
-  }
-
-  return { data: null, error: null };
-}
-
-async function increaseIngredientStock(
-  lines: Array<{
-    ingredient_id: string;
-    quantity: number;
-    net_unit_cost: number;
-  }>,
-): Promise<ServiceResult<null>> {
-  const applied: Array<{
-    ingredient_id: string;
-    snapshot: ReceiveLineStockSnapshot;
-  }> = [];
-
-  for (const line of lines) {
-    const result = await applyReceiveLineStockAndCost(
-      line.ingredient_id,
-      line.quantity,
-      line.net_unit_cost,
-    );
-
-    if (result.error || !result.data) {
-      const reversalFailures: string[] = [];
-
-      for (const previous of applied.reverse()) {
-        const reversal = await reverseReceiveLineStockAndCost(
-          previous.ingredient_id,
-          previous.snapshot,
-        );
-
-        if (reversal.error) {
-          reversalFailures.push(
-            `ingredient ${previous.ingredient_id}: ${reversal.error}`,
-          );
-        }
-      }
-
-      if (reversalFailures.length > 0) {
-        return {
-          data: null,
-          error: `${result.error} Additionally, failed to reverse already-applied stock increments — stock and unit cost may now be inconsistent: ${reversalFailures.join("; ")}`,
-        };
-      }
-
-      return {
-        data: null,
-        error: result.error ?? "Failed to update inventory stock and unit cost",
-      };
-    }
-
-    applied.push({
-      ingredient_id: line.ingredient_id,
-      snapshot: result.data,
-    });
-  }
-
-  return { data: null, error: null };
-}
-
 async function getPurchaseStatus(
   id: string,
 ): Promise<ServiceResult<PurchaseStatus>> {
@@ -1014,36 +822,30 @@ export const purchaseService = {
         }
       }
 
-      const result = await persistPurchase(input, "received");
+      // Save header/line edits as a draft first (unchanged from before).
+      // The actual receive — status transition + every line's stock/cost
+      // update — happens atomically in one RPC (sql/116): it locks the
+      // purchase row, re-checks status = draft under that lock, and either
+      // applies every line and flips the status, or raises and rolls back
+      // the whole thing. No manual per-line reversal is needed here.
+      const saved = await persistPurchase(input, "draft");
 
-      if (result.error || !result.data) {
-        return result;
+      if (saved.error || !saved.data) {
+        return saved;
       }
 
-      const stockResult = await increaseIngredientStock(
-        result.data.items.map((item) => ({
-          ingredient_id: item.ingredient_id,
-          quantity: item.quantity,
-          net_unit_cost: item.unit_cost,
-        })),
-      );
+      const { error: receiveError } = await supabase.rpc("receive_purchase", {
+        p_purchase_id: saved.data.id,
+      });
 
-      if (stockResult.error) {
-        await supabase
-          .from("purchases")
-          .update({
-            status: "draft",
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", result.data.id);
-
+      if (receiveError) {
         return {
           data: null,
-          error: stockResult.error,
+          error: toUserError(receiveError, "Failed to receive purchase"),
         };
       }
 
-      return result;
+      return await purchaseService.getPurchaseById(saved.data.id);
     } catch (error) {
       return {
         data: null,
