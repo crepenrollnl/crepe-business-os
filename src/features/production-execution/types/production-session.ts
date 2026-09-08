@@ -118,6 +118,17 @@ export interface ProductionSessionLineInput {
   raw_material_scale: number | null;
 }
 
+/**
+ * First-level declared raw line on a recipe (recipe_items, plus
+ * recipe_components.ingredient_id add-ins). Not exploded nested leaves.
+ */
+export interface FirstLevelRawIngredient {
+  ingredient_id: string;
+  name: string;
+  quantity: number;
+  unit: string;
+}
+
 export interface SaveProductionSessionInput {
   notes: string | null;
   lines: ProductionSessionLineInput[];

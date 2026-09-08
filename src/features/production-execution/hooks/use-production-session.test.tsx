@@ -17,12 +17,14 @@ const {
   completeSessionAndPostJournalMock,
   getCurrentAccountingContextMock,
   loadRecipeBomsForCompletionMock,
+  loadRecipeCompletionLookupsMock,
 } = vi.hoisted(() => ({
   getSessionByIdMock: vi.fn(),
   completeSessionMock: vi.fn(),
   completeSessionAndPostJournalMock: vi.fn(),
   getCurrentAccountingContextMock: vi.fn(),
   loadRecipeBomsForCompletionMock: vi.fn(),
+  loadRecipeCompletionLookupsMock: vi.fn(),
 }));
 
 vi.mock("../services/production-session-service", () => ({
@@ -33,6 +35,8 @@ vi.mock("../services/production-session-service", () => ({
       completeSessionAndPostJournalMock(...args),
     loadRecipeBomsForCompletion: (...args: unknown[]) =>
       loadRecipeBomsForCompletionMock(...args),
+    loadRecipeCompletionLookups: (...args: unknown[]) =>
+      loadRecipeCompletionLookupsMock(...args),
   },
 }));
 
@@ -112,10 +116,18 @@ describe("useProductionSession.finishProduction (accounting posting wiring)", ()
     completeSessionAndPostJournalMock.mockReset();
     getCurrentAccountingContextMock.mockReset();
     loadRecipeBomsForCompletionMock.mockReset();
+    loadRecipeCompletionLookupsMock.mockReset();
 
     getSessionByIdMock.mockResolvedValue({ data: sessionFixture(), error: null });
     loadRecipeBomsForCompletionMock.mockResolvedValue({
       data: new Map(),
+      error: null,
+    });
+    loadRecipeCompletionLookupsMock.mockResolvedValue({
+      data: {
+        boms: new Map(),
+        firstLevelRawByRecipeId: new Map(),
+      },
       error: null,
     });
   });
@@ -241,28 +253,32 @@ describe("useProductionSession.finishProduction (accounting posting wiring)", ()
   });
 
   it("surfaces a zero-cost warning from loaded BOMs without blocking finish", async () => {
-    loadRecipeBomsForCompletionMock.mockResolvedValue({
-      data: new Map([
-        [
-          "recipe-1",
-          {
-            recipe_id: "recipe-1",
-            recipe_name: "Chicken Crepe",
-            yield_quantity: 10,
-            is_active: true,
-            ingredients: [
-              {
-                ingredient_id: "parsley",
-                quantity_per_yield: 0.01,
-                unit: "kg",
-                cost_per_unit: 0,
-                name: "Parsley",
-                current_stock: 1,
-              },
-            ],
-          },
-        ],
-      ]),
+    const boms = new Map([
+      [
+        "recipe-1",
+        {
+          recipe_id: "recipe-1",
+          recipe_name: "Chicken Crepe",
+          yield_quantity: 10,
+          is_active: true,
+          ingredients: [
+            {
+              ingredient_id: "parsley",
+              quantity_per_yield: 0.01,
+              unit: "kg",
+              cost_per_unit: 0,
+              name: "Parsley",
+              current_stock: 1,
+            },
+          ],
+        },
+      ],
+    ]);
+    loadRecipeCompletionLookupsMock.mockResolvedValue({
+      data: {
+        boms,
+        firstLevelRawByRecipeId: new Map(),
+      },
       error: null,
     });
 
@@ -274,5 +290,159 @@ describe("useProductionSession.finishProduction (accounting posting wiring)", ()
     );
 
     expect(result.current.canFinish).toBe(true);
+  });
+});
+
+describe("useProductionSession raw-scale helper", () => {
+  beforeEach(() => {
+    getSessionByIdMock.mockReset();
+    loadRecipeCompletionLookupsMock.mockReset();
+    getSessionByIdMock.mockResolvedValue({ data: sessionFixture(), error: null });
+    loadRecipeCompletionLookupsMock.mockResolvedValue({
+      data: {
+        boms: new Map(),
+        firstLevelRawByRecipeId: new Map([
+          [
+            "recipe-1",
+            [
+              {
+                ingredient_id: "salmon",
+                name: "Salmon",
+                quantity: 3,
+                unit: "kg",
+              },
+            ],
+          ],
+        ]),
+      },
+      error: null,
+    });
+  });
+
+  it("fills Recipe Batches Used from entered ÷ declared and does not clobber a later manual edit", async () => {
+    const { result } = renderHook(() => useProductionSession(SESSION_ID));
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    await waitFor(() =>
+      expect(result.current.firstLevelRawByRecipeId.get("recipe-1")).toHaveLength(
+        1,
+      ),
+    );
+
+    act(() => {
+      result.current.onHelperQuantityChange("line-1", "recipe-1", "6");
+    });
+
+    expect(result.current.rawMaterialScaleDrafts["line-1"]?.value).toBe(2);
+    expect(result.current.helperDrafts["line-1"]?.raw).toBe("6");
+
+    act(() => {
+      result.current.onRawMaterialScaleChange("line-1", "1.5");
+    });
+
+    expect(result.current.rawMaterialScaleDrafts["line-1"]?.value).toBe(1.5);
+
+    act(() => {
+      result.current.onProducedChange("line-1", "12");
+    });
+
+    expect(result.current.rawMaterialScaleDrafts["line-1"]?.value).toBe(1.5);
+    expect(result.current.helperDrafts["line-1"]?.raw).toBe("6");
+  });
+
+  it("does not clear Recipe Batches Used when the helper input is emptied", async () => {
+    const { result } = renderHook(() => useProductionSession(SESSION_ID));
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    await waitFor(() =>
+      expect(result.current.firstLevelRawByRecipeId.get("recipe-1")).toHaveLength(
+        1,
+      ),
+    );
+
+    act(() => {
+      result.current.onHelperQuantityChange("line-1", "recipe-1", "6");
+    });
+    act(() => {
+      result.current.onHelperQuantityChange("line-1", "recipe-1", "");
+    });
+
+    expect(result.current.rawMaterialScaleDrafts["line-1"]?.value).toBe(2);
+    expect(result.current.helperDrafts["line-1"]?.raw).toBe("");
+  });
+
+  it("keeps a manual Recipe Batches Used override until the field is cleared", async () => {
+    const { result } = renderHook(() => useProductionSession(SESSION_ID));
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    await waitFor(() =>
+      expect(result.current.firstLevelRawByRecipeId.get("recipe-1")).toHaveLength(
+        1,
+      ),
+    );
+
+    act(() => {
+      result.current.onRawMaterialScaleChange("line-1", "1.5");
+    });
+
+    expect(result.current.rawMaterialScaleDrafts["line-1"]?.value).toBe(1.5);
+
+    act(() => {
+      result.current.onHelperQuantityChange("line-1", "recipe-1", "6");
+    });
+
+    expect(result.current.rawMaterialScaleDrafts["line-1"]?.value).toBe(1.5);
+    expect(result.current.helperDrafts["line-1"]?.raw).toBe("6");
+
+    act(() => {
+      result.current.onRawMaterialScaleChange("line-1", "");
+    });
+    act(() => {
+      result.current.onHelperQuantityChange("line-1", "recipe-1", "9");
+    });
+
+    expect(result.current.rawMaterialScaleDrafts["line-1"]?.value).toBe(3);
+    expect(result.current.helperDrafts["line-1"]?.raw).toBe("9");
+  });
+
+  it("does not overwrite a previously saved Recipe Batches Used value on helper input", async () => {
+    getSessionByIdMock.mockResolvedValue({
+      data: sessionFixture({
+        lines: [
+          {
+            id: "line-1",
+            production_session_id: SESSION_ID,
+            production_plan_product_id: "plan-product-1",
+            recipe_id: "recipe-1",
+            product_name: "Chicken Crepe",
+            planned_quantity: 10,
+            actual_produced_quantity: 10,
+            raw_material_scale: 1.5,
+            yield_unit: "pcs",
+            sort_order: 1,
+            difference: 0,
+          },
+        ],
+      }),
+      error: null,
+    });
+
+    const { result } = renderHook(() => useProductionSession(SESSION_ID));
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    await waitFor(() =>
+      expect(result.current.firstLevelRawByRecipeId.get("recipe-1")).toHaveLength(
+        1,
+      ),
+    );
+
+    expect(result.current.rawMaterialScaleDrafts["line-1"]?.value).toBe(1.5);
+
+    act(() => {
+      result.current.onHelperQuantityChange("line-1", "recipe-1", "6");
+    });
+
+    expect(result.current.rawMaterialScaleDrafts["line-1"]?.value).toBe(1.5);
+    expect(result.current.helperDrafts["line-1"]?.raw).toBe("6");
   });
 });
