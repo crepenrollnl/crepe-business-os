@@ -489,13 +489,13 @@ export function useProductionSession(sessionId: string) {
       setActionError(
         "Enter an actual produced quantity for every product before finishing.",
       );
-      return;
+      return false;
     }
 
     const payload = buildPayload();
     if (!payload) {
       setActionError("Fix invalid produced quantities before finishing.");
-      return;
+      return false;
     }
 
     setFinishing(true);
@@ -518,7 +518,7 @@ export function useProductionSession(sessionId: string) {
       if (fallback.error || !fallback.data) {
         setActionError(fallback.error ?? "Failed to finish production session");
         setFinishing(false);
-        return;
+        return false;
       }
 
       applySession(fallback.data);
@@ -526,7 +526,7 @@ export function useProductionSession(sessionId: string) {
         contextResult.error ?? "Accounting posting was skipped.",
       );
       setFinishing(false);
-      return;
+      return true;
     }
 
     const result = await productionSessionService.completeSessionAndPostJournal(
@@ -538,7 +538,7 @@ export function useProductionSession(sessionId: string) {
     if (result.error || !result.data) {
       setActionError(result.error ?? "Failed to finish production session");
       setFinishing(false);
-      return;
+      return false;
     }
 
     // Reload: the session snapshot inside result.data is taken before
@@ -555,6 +555,7 @@ export function useProductionSession(sessionId: string) {
     );
     setPostingError(result.data.postingError);
     setFinishing(false);
+    return true;
   }, [applySession, buildPayload, canFinish, sessionId]);
 
   const retry = useCallback(() => {
