@@ -23,9 +23,9 @@ import type {
   PurchaseTaxLineInput,
 } from "../types/purchase-tax";
 
-const DEFAULT_TAX_COUNTRY = "NL";
+export const DEFAULT_TAX_COUNTRY = "NL";
 const DEFAULT_CURRENCY = "EUR";
-const DEFAULT_COMPANY_ID = "company-local";
+export const DEFAULT_COMPANY_ID = "company-local";
 
 function isCompleteTaxLine(
   line: PurchaseFormValues["lines"][number],

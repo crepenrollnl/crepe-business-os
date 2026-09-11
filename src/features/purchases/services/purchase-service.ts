@@ -20,8 +20,14 @@ import type {
   PurchaseAccountingContext,
   PurchaseJournalProposal,
 } from "../types/purchase-accounting";
-import type { PurchaseTaxResult } from "../types/purchase-tax";
+import type { PurchaseTaxDocument, PurchaseTaxResult } from "../types/purchase-tax";
+import {
+  DEFAULT_COMPANY_ID,
+  DEFAULT_TAX_COUNTRY,
+} from "../utils/build-purchase-tax-document";
+import { toNetPurchaseLines } from "../utils/to-net-purchase-lines";
 import { purchaseAccountingService } from "./purchase-accounting-service";
+import { purchaseTaxService } from "./purchase-tax-service";
 
 interface PurchaseRow {
   id: string;
@@ -703,10 +709,18 @@ export const purchaseService = {
         };
       }
 
+      // Same flat default addLine() seeds on every manually-added purchase
+      // line (purchase-document-modal.tsx) — not ingredient-specific, just a
+      // reasonable starting category so the line isn't left fully blank.
+      // unit_cost stays 0 here deliberately: real cost is only known at
+      // Receive time, same as before this fix.
       const formLines: PurchaseLineInput[] = input.lines.map((line) => ({
         ingredient_id: line.ingredient_id,
         quantity: line.quantity,
         unit_cost: 0,
+        tax_category: "food",
+        tax_regime: "reduced_vat",
+        price_mode: "inclusive",
       }));
 
       const lineValidation = validateLines(formLines);
@@ -715,7 +729,64 @@ export const purchaseService = {
         return { data: null, error: lineValidation };
       }
 
-      const totalsResult = await buildTotals(formLines);
+      // Resolve real tax via calculate_purchase_taxes, same as saveDraft
+      // (use-purchases.ts resolvePurchaseTax) does for a manually-edited
+      // draft — a plan-generated draft must not silently persist with
+      // tax_total hardcoded to 0 the way buildTotals's default would.
+      const purchasedAt = new Date().toISOString();
+      const taxDocument: PurchaseTaxDocument = {
+        document_id: null,
+        company: {
+          company_id: DEFAULT_COMPANY_ID,
+          base_currency: DEFAULT_CURRENCY,
+        },
+        country: DEFAULT_TAX_COUNTRY,
+        transaction_date: purchasedAt,
+        currency: DEFAULT_CURRENCY,
+        // No supplier yet at generation time (assigned later in Purchases).
+        // country_code still needs a value for calculate_purchase_taxes to
+        // resolve a rule, so it falls back to the tax country here, same as
+        // buildPurchaseTaxDocument does for an unassigned supplier.
+        supplier: {
+          supplier_id: null,
+          name: null,
+          country_code: DEFAULT_TAX_COUNTRY,
+        },
+        lines: formLines.map((line, index) => ({
+          line_id: `line-${index + 1}`,
+          quantity: line.quantity,
+          unit_price: line.unit_cost,
+          discount: line.discount ?? 0,
+          price_mode: line.price_mode === "inclusive" ? "inclusive" : "exclusive",
+          tax_category: line.tax_category ?? "",
+          tax_regime: line.tax_regime ?? null,
+        })),
+      };
+
+      const taxResult = await purchaseTaxService.calculatePurchaseTaxes(taxDocument);
+
+      if (taxResult.error || !taxResult.data) {
+        return {
+          data: null,
+          error: taxResult.error ?? "Failed to calculate purchase taxes.",
+        };
+      }
+
+      const netLinesResult = toNetPurchaseLines(formLines, taxResult.data);
+
+      if (netLinesResult.error || !netLinesResult.data) {
+        return {
+          data: null,
+          error:
+            netLinesResult.error ??
+            "Failed to convert inclusive prices to net unit cost.",
+        };
+      }
+
+      const totalsResult = await buildTotals(
+        netLinesResult.data,
+        taxResult.data.tax_total,
+      );
 
       if (totalsResult.error || !totalsResult.data) {
         return {
@@ -737,9 +808,9 @@ export const purchaseService = {
           tax_total: totals.tax_total,
           total: totals.total,
           currency: DEFAULT_CURRENCY,
-          purchased_at: new Date().toISOString(),
+          purchased_at: purchasedAt,
           production_plan_id: input.production_plan_id,
-          updated_at: new Date().toISOString(),
+          updated_at: purchasedAt,
         })
         .select("*")
         .single();

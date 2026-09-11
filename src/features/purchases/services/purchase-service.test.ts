@@ -413,3 +413,267 @@ describe("purchaseService.receivePurchase — variant C tax memory", () => {
     ]);
   });
 });
+
+describe("purchaseService.createDraftFromProductionPlan — tax defaults", () => {
+  const PLAN_ID = "plan-1";
+  const PLAN_PURCHASE_ID = "22222222-2222-4222-8222-222222222222";
+
+  function zeroCostTaxRpcResult() {
+    return {
+      data: {
+        currency: "EUR",
+        subtotal: 0,
+        tax_total: 0,
+        grand_total: 0,
+        effective_tax_rate: 0,
+        is_valid: true,
+        lines: [
+          {
+            line_id: "line-1",
+            taxable_amount: 0,
+            tax_amount: 0,
+            net_amount: 0,
+            gross_amount: 0,
+            taxes: [
+              {
+                tax_code: "NL-VAT-REDUCED-9",
+                direction: "input",
+                application_method: "percentage_of_base",
+                taxable_base: 0,
+                rate_value: 0.09,
+                tax_amount: 0,
+                net_amount: 0,
+                gross_amount: 0,
+              },
+            ],
+          },
+        ],
+      },
+      error: null,
+    };
+  }
+
+  function nonZeroTaxRpcResult() {
+    return {
+      data: {
+        currency: "EUR",
+        subtotal: 100,
+        tax_total: 21,
+        grand_total: 121,
+        effective_tax_rate: 21,
+        is_valid: true,
+        lines: [
+          {
+            line_id: "line-1",
+            taxable_amount: 100,
+            tax_amount: 21,
+            net_amount: 100,
+            gross_amount: 121,
+            taxes: [
+              {
+                tax_code: "NL-VAT-STD-21",
+                direction: "input",
+                application_method: "percentage_of_base",
+                taxable_base: 100,
+                rate_value: 0.21,
+                tax_amount: 21,
+                net_amount: 100,
+                gross_amount: 121,
+              },
+            ],
+          },
+        ],
+      },
+      error: null,
+    };
+  }
+
+  function installPlanningDraftMock(
+    options: {
+      taxRpcResult?: { data: unknown; error: unknown };
+    } = {},
+  ) {
+    const taxRpcResult = options.taxRpcResult ?? zeroCostTaxRpcResult();
+    const rpcCalls: Array<{ fn: string; args: unknown }> = [];
+    const purchaseInserts: unknown[] = [];
+    const itemInserts: unknown[] = [];
+
+    supabaseMock.rpc.mockImplementation(
+      async (fn: string, args: Record<string, unknown>) => {
+        rpcCalls.push({ fn, args });
+
+        if (fn === "calculate_purchase_taxes") {
+          return taxRpcResult;
+        }
+
+        if (fn === "calculate_purchase_totals") {
+          const lines = args.p_lines as Array<{
+            ingredient_id: string;
+            quantity: number;
+            unit_cost: number;
+          }>;
+          const preparedLines = lines.map((line) => ({
+            ingredient_id: line.ingredient_id,
+            quantity: line.quantity,
+            unit_cost: line.unit_cost,
+            line_total: line.quantity * line.unit_cost,
+          }));
+          const subtotal = preparedLines.reduce(
+            (sum, line) => sum + line.line_total,
+            0,
+          );
+          const taxTotal = Number(args.p_tax_total ?? 0);
+
+          return {
+            data: {
+              lines: preparedLines,
+              subtotal,
+              tax_total: taxTotal,
+              total: subtotal + taxTotal,
+            },
+            error: null,
+          };
+        }
+
+        throw new Error(`Unexpected rpc call: ${fn}`);
+      },
+    );
+
+    supabaseMock.from.mockImplementation((table: string) => {
+      if (table === "purchases") {
+        return {
+          select: vi.fn(() => chainable({ data: null, error: null })),
+          insert: vi.fn((payload: unknown) => {
+            purchaseInserts.push(payload);
+            return chainable({
+              data: {
+                id: PLAN_PURCHASE_ID,
+                supplier_id: null,
+                status: "draft",
+                invoice_number: null,
+                notes: null,
+                subtotal: 0,
+                tax_total: 0,
+                total: 0,
+                currency: "EUR",
+                purchased_at: "2026-09-11T00:00:00.000Z",
+                transaction_id: null,
+                production_plan_id: PLAN_ID,
+                created_at: "2026-09-11T00:00:00.000Z",
+                updated_at: "2026-09-11T00:00:00.000Z",
+              },
+              error: null,
+            });
+          }),
+        };
+      }
+
+      if (table === "purchase_items") {
+        return {
+          delete: vi.fn(() => chainable({ data: null, error: null })),
+          insert: vi.fn((payload: unknown) => {
+            itemInserts.push(payload);
+            return chainable({
+              data: (payload as Array<Record<string, unknown>>).map(
+                (row, index) => ({
+                  id: `item-${index + 1}`,
+                  purchase_id: PLAN_PURCHASE_ID,
+                  ...row,
+                }),
+              ),
+              error: null,
+            });
+          }),
+        };
+      }
+
+      if (table === "suppliers" || table === "ingredients") {
+        return { select: vi.fn(() => chainable({ data: [], error: null })) };
+      }
+
+      throw new Error(`Unexpected table: ${table}`);
+    });
+
+    return { rpcCalls, purchaseInserts, itemInserts };
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("seeds the flat food/reduced_vat/inclusive default on every generated line (today's real zero-cost case)", async () => {
+    const { rpcCalls, purchaseInserts, itemInserts } =
+      installPlanningDraftMock();
+
+    const result = await purchaseService.createDraftFromProductionPlan({
+      production_plan_id: PLAN_ID,
+      notes: "Generated from Production Plan #7",
+      lines: [{ ingredient_id: INGREDIENT_A, quantity: 5 }],
+    });
+
+    expect(result.error).toBeNull();
+
+    const taxCall = rpcCalls.find(
+      (call) => call.fn === "calculate_purchase_taxes",
+    );
+    expect(taxCall).toBeTruthy();
+    expect(taxCall?.args).toMatchObject({
+      p_lines: [
+        expect.objectContaining({
+          line_id: "line-1",
+          tax_category: "food",
+          tax_regime: "reduced_vat",
+          price_mode: "inclusive",
+        }),
+      ],
+    });
+
+    // Real production case today: unit_cost is 0 at generation time, so the
+    // resolved tax_total is genuinely 0 too — that part is correct, not a
+    // bug. What's fixed is that the category/regime are no longer blank.
+    expect(purchaseInserts[0]).toMatchObject({ tax_total: 0 });
+    expect(itemInserts[0]).toEqual([
+      expect.objectContaining({
+        ingredient_id: INGREDIENT_A,
+        tax_category: "food",
+        tax_regime: "reduced_vat",
+        price_mode: "inclusive",
+      }),
+    ]);
+  });
+
+  it("persists a real, non-zero tax_total when the underlying calculation produces one", async () => {
+    const { purchaseInserts } = installPlanningDraftMock({
+      taxRpcResult: nonZeroTaxRpcResult(),
+    });
+
+    const result = await purchaseService.createDraftFromProductionPlan({
+      production_plan_id: PLAN_ID,
+      notes: "Generated from Production Plan #7",
+      lines: [{ ingredient_id: INGREDIENT_A, quantity: 5 }],
+    });
+
+    expect(result.error).toBeNull();
+    // 21 comes from the mocked calculate_purchase_taxes RPC, not a
+    // hardcoded 0 — proves buildTotals is now fed a real tax_total instead
+    // of its implicit default.
+    expect(purchaseInserts[0]).toMatchObject({ tax_total: 21 });
+  });
+
+  it("fails without persisting anything when tax resolution fails", async () => {
+    const { purchaseInserts, itemInserts } = installPlanningDraftMock({
+      taxRpcResult: { data: null, error: { message: "Tax calculation failed." } },
+    });
+
+    const result = await purchaseService.createDraftFromProductionPlan({
+      production_plan_id: PLAN_ID,
+      notes: "Generated from Production Plan #7",
+      lines: [{ ingredient_id: INGREDIENT_A, quantity: 5 }],
+    });
+
+    expect(result.data).toBeNull();
+    expect(result.error).toBeTruthy();
+    expect(purchaseInserts).toHaveLength(0);
+    expect(itemInserts).toHaveLength(0);
+  });
+});
