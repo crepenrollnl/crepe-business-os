@@ -48,6 +48,37 @@ function readErrorMessage(error: unknown): string | null {
 }
 
 /**
+ * Recognizable raw-Postgres/PostgREST wording that must never reach the UI
+ * verbatim, even though it carries an otherwise-normal `.message` string.
+ * Deliberately message-text patterns, not a `.code` check — modeled on
+ * DELETE_BLOCKED_BY_REFERENCE_PATTERN below, which is also message-text
+ * only despite the errors it matches carrying a `.code`.
+ *
+ * A prior attempt gated on SQLSTATE code instead (pass through only
+ * `code === 'P0001'`, our own RAISE EXCEPTION default) and broke ~59
+ * existing tests: many of our own deliberately human-readable messages
+ * (RPC-raised business errors, thrown validation `Error`s) are mocked or
+ * thrown with no `.code` at all, so a code-gated allow-list swallowed them
+ * too. It also couldn't tell require_role's own deliberate 42501 messages
+ * apart from a genuine RLS violation, which is also 42501. Matching on the
+ * specific raw wording instead only intercepts the exact patterns the
+ * audit named — everything else, including messages with no code,
+ * continues to pass through exactly as before.
+ */
+const RAW_POSTGRES_ERROR_PATTERNS: readonly RegExp[] = [
+  /violates row-level security policy/i,
+  /violates not-null constraint/i,
+  /violates foreign key constraint/i,
+  /violates check constraint/i,
+  /duplicate key value violates unique constraint/i,
+  /permission denied for/i,
+];
+
+function isRawPostgresError(message: string): boolean {
+  return RAW_POSTGRES_ERROR_PATTERNS.some((pattern) => pattern.test(message));
+}
+
+/**
  * Normalize an unknown failure into a user-safe error string.
  *
  * @param error - Caught value, Supabase error, or prior string error
@@ -69,7 +100,16 @@ export function toUserError(
     return fallback;
   }
 
-  return isNetworkMessage(message) ? NETWORK_ERROR_MESSAGE : message;
+  if (isNetworkMessage(message)) {
+    return NETWORK_ERROR_MESSAGE;
+  }
+
+  if (isRawPostgresError(message)) {
+    console.error("ServiceErrorSuppressed", { fallback, error });
+    return fallback;
+  }
+
+  return message;
 }
 
 /**

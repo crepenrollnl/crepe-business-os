@@ -1066,7 +1066,10 @@ describe("salesReadService.getSoldQuantityByProductId", () => {
     const result = await salesReadService.getSoldQuantityByProductId();
 
     expect(result.data).toBeNull();
-    expect(result.error).toBe("permission denied for table sale_lines");
+    // Updated for the 2026-09-09 raw-Postgres-error-hiding fix: this mock
+    // stands in for a generic backend error, not an assertion that
+    // permission-denied text must reach the user.
+    expect(result.error).toBe("Failed to load sold quantities");
     expect(supabaseMock.rpc).not.toHaveBeenCalled();
   });
 });
