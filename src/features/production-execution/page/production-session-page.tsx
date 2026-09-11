@@ -1,6 +1,8 @@
 "use client";
 
+import { useState } from "react";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
+import { ConfirmFinishProductionDialog } from "../components/confirm-finish-production-dialog";
 import { ProductionSessionBatchesSection } from "../components/production-session-batches-section";
 import { ProductionSessionHeader } from "../components/production-session-header";
 import { ProductionSessionLinesSection } from "../components/production-session-lines-section";
@@ -35,6 +37,24 @@ export function ProductionSessionPage({ sessionId }: ProductionSessionPageProps)
     retry,
     zeroCostWarning,
   } = useProductionSession(sessionId);
+  const [isConfirmFinishDialogOpen, setIsConfirmFinishDialogOpen] =
+    useState(false);
+  const [confirmFinishAttempted, setConfirmFinishAttempted] = useState(false);
+
+  const handleConfirmFinish = async () => {
+    setConfirmFinishAttempted(true);
+    const ok = await finishProduction();
+    if (ok) {
+      setIsConfirmFinishDialogOpen(false);
+      setConfirmFinishAttempted(false);
+    }
+    return ok;
+  };
+
+  const openConfirmFinishDialog = () => {
+    setConfirmFinishAttempted(false);
+    setIsConfirmFinishDialogOpen(true);
+  };
 
   return (
     <DashboardLayout activePath="/production-execution">
@@ -76,9 +96,7 @@ export function ProductionSessionPage({ sessionId }: ProductionSessionPageProps)
               onSaveProgress={() => {
                 void saveProgress();
               }}
-              onFinish={() => {
-                void finishProduction();
-              }}
+              onFinish={openConfirmFinishDialog}
             />
             <ProductionSessionLinesSection
               lines={session.lines}
@@ -108,6 +126,20 @@ export function ProductionSessionPage({ sessionId }: ProductionSessionPageProps)
                 />
               </>
             ) : null}
+
+            <ConfirmFinishProductionDialog
+              isOpen={isConfirmFinishDialogOpen}
+              sessionNumber={session.session_number}
+              finishing={finishing}
+              error={confirmFinishAttempted ? actionError : null}
+              onClose={() => {
+                if (!finishing) {
+                  setIsConfirmFinishDialogOpen(false);
+                  setConfirmFinishAttempted(false);
+                }
+              }}
+              onConfirm={handleConfirmFinish}
+            />
           </>
         )}
       </div>

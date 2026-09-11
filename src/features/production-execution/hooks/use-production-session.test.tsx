@@ -156,10 +156,12 @@ describe("useProductionSession.finishProduction (accounting posting wiring)", ()
 
     await waitFor(() => expect(result.current.loading).toBe(false));
 
+    let ok: boolean | undefined;
     await act(async () => {
-      await result.current.finishProduction();
+      ok = await result.current.finishProduction();
     });
 
+    expect(ok).toBe(true);
     expect(completeSessionAndPostJournalMock).toHaveBeenCalledTimes(1);
     expect(completeSessionMock).not.toHaveBeenCalled();
     expect(result.current.session?.status).toBe("completed");
@@ -189,10 +191,12 @@ describe("useProductionSession.finishProduction (accounting posting wiring)", ()
 
     await waitFor(() => expect(result.current.loading).toBe(false));
 
+    let ok: boolean | undefined;
     await act(async () => {
-      await result.current.finishProduction();
+      ok = await result.current.finishProduction();
     });
 
+    expect(ok).toBe(true);
     expect(result.current.session?.status).toBe("completed");
     expect(result.current.postingError).toBe(
       "Production completed but accounting posting failed.",
@@ -215,10 +219,12 @@ describe("useProductionSession.finishProduction (accounting posting wiring)", ()
 
     await waitFor(() => expect(result.current.loading).toBe(false));
 
+    let ok: boolean | undefined;
     await act(async () => {
-      await result.current.finishProduction();
+      ok = await result.current.finishProduction();
     });
 
+    expect(ok).toBe(true);
     expect(completeSessionMock).toHaveBeenCalledTimes(1);
     expect(completeSessionAndPostJournalMock).not.toHaveBeenCalled();
     expect(result.current.session?.status).toBe("completed");
@@ -243,10 +249,12 @@ describe("useProductionSession.finishProduction (accounting posting wiring)", ()
 
     await waitFor(() => expect(result.current.loading).toBe(false));
 
+    let ok: boolean | undefined;
     await act(async () => {
-      await result.current.finishProduction();
+      ok = await result.current.finishProduction();
     });
 
+    expect(ok).toBe(false);
     expect(result.current.session?.status).toBe("in_progress");
     expect(result.current.actionError).toBe("Insufficient stock for Chicken Crepe.");
     expect(result.current.postingError).toBeNull();
