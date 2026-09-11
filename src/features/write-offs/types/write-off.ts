@@ -46,6 +46,8 @@ export interface WriteOffIngredientOption {
 export interface WriteOffProductOption {
   id: string;
   name: string;
+  /** Recipe's yield_unit (same source as Finished Goods' item.yield_unit) — null if unset. */
+  unit: string | null;
 }
 
 export interface RecordWriteOffInput {
