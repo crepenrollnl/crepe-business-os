@@ -201,6 +201,7 @@ export const writeOffService = {
       .map((row) => ({
         id: row.product_id,
         name: row.product_name ?? "—",
+        unit: row.yield_unit,
       }))
       .sort((a, b) =>
         a.name.localeCompare(b.name, undefined, { sensitivity: "base" }),

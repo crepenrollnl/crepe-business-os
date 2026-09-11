@@ -14,7 +14,8 @@ const INGREDIENTS: WriteOffIngredientOption[] = [
 ];
 
 const PRODUCTS: WriteOffProductOption[] = [
-  { id: "recipe-1", name: "Chicken Crepe" },
+  { id: "recipe-1", name: "Chicken Crepe", unit: "pcs" },
+  { id: "recipe-2", name: "Unitless Product", unit: null },
 ];
 
 function renderForm(overrides?: {
@@ -129,6 +130,41 @@ describe("WriteOffForm", () => {
         note: null,
       });
     });
+  });
+
+  it("shows the selected ingredient's unit beside the quantity field", () => {
+    renderForm();
+
+    expect(screen.queryByText("kg")).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Ingredient"), {
+      target: { value: "ing-1" },
+    });
+
+    expect(screen.getByText("kg")).toBeInTheDocument();
+  });
+
+  it("shows the selected finished good's yield_unit beside the quantity field", () => {
+    renderForm();
+
+    fireEvent.click(screen.getByRole("button", { name: "Finished good" }));
+    fireEvent.change(screen.getByLabelText("Finished good"), {
+      target: { value: "recipe-1" },
+    });
+
+    expect(screen.getByText("pcs")).toBeInTheDocument();
+  });
+
+  it("shows no unit hint for a finished good with no yield_unit set", () => {
+    renderForm();
+
+    fireEvent.click(screen.getByRole("button", { name: "Finished good" }));
+    fireEvent.change(screen.getByLabelText("Finished good"), {
+      target: { value: "recipe-2" },
+    });
+
+    expect(screen.queryByText("pcs")).not.toBeInTheDocument();
+    expect(screen.queryByText("kg")).not.toBeInTheDocument();
   });
 
   it("shows a neutral note when no accounting entry was created", () => {

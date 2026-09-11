@@ -168,6 +168,15 @@ export function WriteOffForm({
   const quantityError = showFieldError("quantity");
   const itemLabel =
     draft.itemType === "ingredient" ? "Ingredient" : "Finished good";
+  const selectedIngredient =
+    draft.itemType === "ingredient"
+      ? ingredients.find((ingredient) => ingredient.id === draft.itemId)
+      : undefined;
+  const selectedProduct =
+    draft.itemType === "finished_good"
+      ? products.find((product) => product.id === draft.itemId)
+      : undefined;
+  const selectedItemUnit = selectedIngredient?.unit ?? selectedProduct?.unit ?? null;
 
   return (
     <div className="rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
@@ -290,9 +299,7 @@ export function WriteOffForm({
             <option value="">Select {itemLabel.toLowerCase()}</option>
             {filteredOptions.map((option) => (
               <option key={option.id} value={option.id}>
-                {"unit" in option
-                  ? `${option.name} (${option.unit})`
-                  : option.name}
+                {option.unit ? `${option.name} (${option.unit})` : option.name}
               </option>
             ))}
           </select>
@@ -304,16 +311,25 @@ export function WriteOffForm({
             <label htmlFor="writeOffQuantity" className="block text-sm font-medium text-zinc-700">
               Quantity
             </label>
-            <NumericInput
-              id="writeOffQuantity"
-              value={draft.quantity}
-              onChange={(value) => updateField("quantity", value)}
-              onBlur={() =>
-                setTouched((current) => ({ ...current, quantity: true }))
-              }
-              placeholder="0"
-              aria-invalid={Boolean(quantityError)}
-            />
+            <div className="flex items-center gap-2">
+              <div className="min-w-0 flex-1">
+                <NumericInput
+                  id="writeOffQuantity"
+                  value={draft.quantity}
+                  onChange={(value) => updateField("quantity", value)}
+                  onBlur={() =>
+                    setTouched((current) => ({ ...current, quantity: true }))
+                  }
+                  placeholder="0"
+                  aria-invalid={Boolean(quantityError)}
+                />
+              </div>
+              {selectedItemUnit && (
+                <span className="shrink-0 text-sm text-zinc-500">
+                  {selectedItemUnit}
+                </span>
+              )}
+            </div>
             {quantityError && (
               <p className="text-sm text-red-600">{quantityError}</p>
             )}

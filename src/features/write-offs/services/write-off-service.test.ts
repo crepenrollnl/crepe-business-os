@@ -183,8 +183,27 @@ describe("writeOffService.listProductOptions", () => {
 
     expect(result.error).toBeNull();
     expect(result.data).toEqual([
-      { id: "recipe-apple", name: "Apple Crepe" },
-      { id: "recipe-crepe", name: "Chicken Crepe" },
+      { id: "recipe-apple", name: "Apple Crepe", unit: "pcs" },
+      { id: "recipe-crepe", name: "Chicken Crepe", unit: "pcs" },
+    ]);
+  });
+
+  it("passes through a null yield_unit as-is", async () => {
+    listProductAvailability.mockResolvedValue(
+      ok([
+        fgRow({
+          product_id: "recipe-crepe",
+          product_name: "Chicken Crepe",
+          available_quantity: 4,
+          yield_unit: null,
+        }),
+      ]),
+    );
+
+    const result = await writeOffService.listProductOptions();
+
+    expect(result.data).toEqual([
+      { id: "recipe-crepe", name: "Chicken Crepe", unit: null },
     ]);
   });
 
