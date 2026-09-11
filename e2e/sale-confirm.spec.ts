@@ -130,7 +130,11 @@ test("build and execute a component, assemble it, sell it, confirm the sale", as
   );
   await expect(producedInput).toBeVisible();
   await producedInput.fill("5");
+  // Same duplicate-accessible-name confirmation-dialog pattern as the
+  // header/dialog "Confirm Sale" pair later in this spec -- see the comment
+  // there. .last() picks the dialog's own button, rendered after the header.
   await page.getByRole("button", { name: "Finish Production" }).click();
+  await page.getByRole("button", { name: "Finish Production" }).last().click();
 
   await expect(
     page.getByText(

@@ -141,11 +141,17 @@ test("create recipe and plan, execute production, confirm stock deducted", async
   await expect(producedInput).toBeVisible();
   await producedInput.fill("5");
 
+  // Header "Finish Production" opens a confirmation dialog that has its own,
+  // second "Finish Production" button -- both share the same accessible name
+  // while the dialog is open, so .last() (the dialog's, rendered after the
+  // header in the component tree) disambiguates deliberately, same pattern
+  // already used for "Confirm Sale" in sale-confirm.spec.ts.
   await page.getByRole("button", { name: "Finish Production" }).click();
+  await page.getByRole("button", { name: "Finish Production" }).last().click();
 
   // Success signal: the session's completed banner (unique sentence, only
-  // rendered once session.status === "completed") and the Finish button
-  // gone.
+  // rendered once session.status === "completed") and both Finish Production
+  // buttons (header + dialog, now closed) gone.
   await expect(
     page.getByText(
       "Production session completed. Raw materials were consumed, production batches were created, and finished goods are now available for sales.",
