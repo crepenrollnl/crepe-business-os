@@ -277,8 +277,14 @@ BEGIN
     (v_purchase_1, v_ing_a, 10, 3.00, 30.00),
     (v_purchase_1, v_ing_b, 5, 6.00, 30.00);
 
-  v_expected_cost_a := round((100 * 2.00 + 10 * 3.00) / (100 + 10), 4);
-  v_expected_cost_b := round((50 * 4.00 + 5 * 6.00) / (50 + 5), 4);
+  -- Round to 2 decimals, matching ingredients.cost_per_unit's actual column
+  -- scale (numeric(12,2), sql/000) — not the 4-decimal precision used inside
+  -- receive_purchase_line_stock_and_cost's own round(...) call. That internal
+  -- round(...,4) is harmless but moot: Postgres silently re-rounds any value
+  -- assigned to a numeric(12,2) column down to 2 decimals on storage, so a
+  -- 4-decimal expected value here could never actually match what's stored.
+  v_expected_cost_a := round((100 * 2.00 + 10 * 3.00) / (100 + 10), 2);
+  v_expected_cost_b := round((50 * 4.00 + 5 * 6.00) / (50 + 5), 2);
 
   v_result := receive_purchase(v_purchase_1);
   RAISE NOTICE 'SCENARIO A receive_purchase result: %', v_result;
