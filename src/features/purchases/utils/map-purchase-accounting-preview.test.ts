@@ -3,10 +3,14 @@
  */
 
 import { describe, expect, it } from "vitest";
-import type { PurchaseJournalProposal } from "../types/purchase-accounting";
+import type {
+  PurchaseJournalPosting,
+  PurchaseJournalProposal,
+} from "../types/purchase-accounting";
 import type { PurchaseTaxResult } from "../types/purchase-tax";
 import type { PurchaseWithRelations } from "../types/purchase";
 import {
+  mapPurchaseJournalPostingToPreview,
   mapPurchaseJournalProposalToPreview,
   mapPurchaseTotalsToAccountingPreview,
 } from "./map-purchase-accounting-preview";
@@ -106,8 +110,8 @@ function proposal(): PurchaseJournalProposal {
           id: "jl-3",
           journal_entry_id: "je-1",
           line_no: 3,
-          account_id: "acct-ap",
-          description: "Accounts Payable",
+          account_id: "acct-cash",
+          description: "Cash / Bank",
           debit_transaction: 0,
           credit_transaction: 121,
           debit_base: 0,
@@ -117,6 +121,36 @@ function proposal(): PurchaseJournalProposal {
       ],
       ledger_entries: [],
     },
+  };
+}
+
+function posting(): PurchaseJournalPosting {
+  return {
+    ...proposal(),
+    posted_journal: {
+      journal_entry: {
+        id: "je-1",
+        business_event_id: "evt-1",
+        transaction_id: "txn-1",
+        fiscal_period_id: "period-1",
+        entry_date: "2026-07-26",
+        memo: null,
+        status: "posted",
+        posting_number: "JE-2026-000001",
+        transaction_currency: "EUR",
+        base_currency: "EUR",
+        exchange_rate: 1,
+        reversal_of_journal_entry_id: null,
+        posted_at: "2026-07-26T12:00:00.000Z",
+        created_at: "2026-07-26T12:00:00.000Z",
+      },
+      journal_lines: [],
+      ledger_entries: [],
+      posting_number: "JE-2026-000001",
+      posting_date: "2026-07-26",
+      fiscal_period_id: "period-1",
+    },
+    posting_status: "posted_now",
   };
 }
 
@@ -156,7 +190,34 @@ describe("mapPurchaseAccountingPreview (DEV-101)", () => {
         currency: "EUR",
       },
       {
-        account_role: "accounts_payable",
+        account_role: "cash",
+        debit: 0,
+        credit: 121,
+        currency: "EUR",
+      },
+    ]);
+  });
+
+  it("maps a persisted journal posting with status posted", () => {
+    const preview = mapPurchaseJournalPostingToPreview(posting());
+
+    expect(preview.status).toBe("posted");
+    expect(preview.has_proposal).toBe(true);
+    expect(preview.lines).toEqual([
+      {
+        account_role: "inventory_asset",
+        debit: 100,
+        credit: 0,
+        currency: "EUR",
+      },
+      {
+        account_role: "vat_input",
+        debit: 21,
+        credit: 0,
+        currency: "EUR",
+      },
+      {
+        account_role: "cash",
         debit: 0,
         credit: 121,
         currency: "EUR",

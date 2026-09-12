@@ -52,6 +52,11 @@ type PurchaseDocumentModalProps = {
   error: string | null;
   /** Existing in-memory / document-derived accounting preview (display only). */
   accountingPreview?: PurchaseAccountingPreviewData | null;
+  /**
+   * Set only when Receive succeeded but posting the Accounting journal
+   * failed — the purchase and its stock are already updated regardless.
+   */
+  postingError?: string | null;
   onClose: () => void;
   onSaveDraft: (values: PurchaseFormValues) => Promise<boolean>;
   onReceiveGoods: (values: PurchaseFormValues) => Promise<boolean>;
@@ -250,6 +255,7 @@ function PurchaseDocumentForm({
   isSaving,
   error,
   accountingPreview = null,
+  postingError = null,
   onClose,
   onSaveDraft,
   onReceiveGoods,
@@ -1277,6 +1283,9 @@ function PurchaseDocumentForm({
         </div>
 
         <PurchaseAccountingPreview preview={previewForDisplay} />
+        {postingError ? (
+          <p className="text-sm text-amber-700">{postingError}</p>
+        ) : null}
 
         <div className="flex items-center justify-end border-t border-zinc-200 pt-4">
           <div className="space-y-1 text-right">
@@ -1347,6 +1356,7 @@ export function PurchaseDocumentModal({
   isSaving,
   error,
   accountingPreview = null,
+  postingError = null,
   onClose,
   onSaveDraft,
   onReceiveGoods,
@@ -1375,6 +1385,7 @@ export function PurchaseDocumentModal({
         isSaving={isSaving}
         error={error}
         accountingPreview={accountingPreview}
+        postingError={postingError}
         onClose={onClose}
         onSaveDraft={onSaveDraft}
         onReceiveGoods={onReceiveGoods}

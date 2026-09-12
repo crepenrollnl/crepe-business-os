@@ -18,7 +18,7 @@ import type {
 } from "../types/purchase";
 import type {
   PurchaseAccountingContext,
-  PurchaseJournalProposal,
+  PurchaseJournalPosting,
 } from "../types/purchase-accounting";
 import type { PurchaseTaxDocument, PurchaseTaxResult } from "../types/purchase-tax";
 import {
@@ -926,18 +926,32 @@ export const purchaseService = {
   },
 
   /**
-   * Confirm/receive a purchase, then propose an Accounting journal.
+   * Receive a purchase, then post the Accounting journal (audit finding #3).
    *
    * Requires a precomputed PurchaseTaxResult (DEV-100).
    * Accounting never recalculates taxes.
-   * Does not persist journal_entries or ledger_entries.
-   * Existing receivePurchase (hooks/UI) remains unchanged.
+   *
+   * receivePurchase has already succeeded and is durable by the time
+   * posting is attempted — a posting failure must never look like the
+   * whole operation failed (that would silently discard a real received
+   * purchase from the caller's point of view). So this only ever returns
+   * an error when receivePurchase itself fails; once that succeeds, the
+   * result is always ok(...), with posting/postingError reporting whether
+   * the accounting entry was actually created. Same pattern as
+   * completeSessionAndPostJournal (Production) / confirmSaleAndPostJournals
+   * (Sales).
    */
-  async receivePurchaseAndProposeJournal(
+  async receivePurchaseAndPostJournal(
     input: SavePurchaseInput,
     accounting: PurchaseAccountingContext,
     tax: PurchaseTaxResult,
-  ): Promise<ServiceResult<PurchaseJournalProposal>> {
+  ): Promise<
+    ServiceResult<{
+      purchase: PurchaseWithRelations;
+      posting: PurchaseJournalPosting | null;
+      postingError: string | null;
+    }>
+  > {
     const received = await purchaseService.receivePurchase(input);
 
     if (received.error || !received.data) {
@@ -947,10 +961,31 @@ export const purchaseService = {
       };
     }
 
-    return purchaseAccountingService.proposeJournalForPurchaseReceived(
+    const posting = await purchaseAccountingService.postJournalForPurchaseReceived(
       received.data,
       accounting,
       tax,
     );
+
+    if (posting.error || !posting.data) {
+      return {
+        data: {
+          purchase: received.data,
+          posting: null,
+          postingError:
+            posting.error ?? "Purchase received but accounting posting failed.",
+        },
+        error: null,
+      };
+    }
+
+    return {
+      data: {
+        purchase: received.data,
+        posting: posting.data,
+        postingError: null,
+      },
+      error: null,
+    };
   },
 };

@@ -6,7 +6,7 @@
  *
  * Purchases supplies money facts + opaque source refs only.
  * Accounting never recalculates taxes.
- * Ledger persistence remains Accounting-owned (propose mode today).
+ * Ledger persistence is Accounting-owned via post mode (audit finding #3).
  */
 
 import type {
@@ -16,6 +16,7 @@ import type {
   PostingRule,
 } from "@/types/accounting";
 import type { PostingResult } from "@/features/accounting/types/posting-engine";
+import type { OperationalPostingResult } from "@/features/accounting/types/operational-integration";
 import type { PurchaseWithRelations } from "./purchase";
 import type { PurchaseTaxResult } from "./purchase-tax";
 
@@ -39,6 +40,14 @@ export interface PurchaseAccountingContext {
    * When omitted, Accounting resolves the purchase_received default rule.
    */
   postingRules?: readonly PostingRule[];
+  /**
+   * Test-only hook for simulating an already-posted idempotency key.
+   * Never populated by real production code — the actual, sole protection
+   * against duplicate posting is the on-DB ALREADY_POSTED check inside
+   * post_journal_proposals (business_event_id, sql/091). Present here only
+   * for parity with the same test-only pattern in Production/Sales contexts.
+   */
+  alreadyPostedIdempotencyKeys?: readonly string[];
   nowIso?: string;
   createId?: () => string;
 }
@@ -49,6 +58,17 @@ export interface PurchaseJournalProposal {
   journalProposal: PostingResult;
   /** Tax facts used for the proposal (never recalculated by Accounting). */
   tax: PurchaseTaxResult;
+}
+
+/**
+ * Result of persisting (not just proposing) the purchase_received journal.
+ * posted_journal / posting_status are null/absent only if post mode was not
+ * actually reached (never happens via postJournalForPurchaseReceived, which
+ * only ever returns this shape on a successful post).
+ */
+export interface PurchaseJournalPosting extends PurchaseJournalProposal {
+  posted_journal: OperationalPostingResult["posted_journal"];
+  posting_status: OperationalPostingResult["posting_status"];
 }
 
 export type { PostingResult, PurchaseTaxResult };

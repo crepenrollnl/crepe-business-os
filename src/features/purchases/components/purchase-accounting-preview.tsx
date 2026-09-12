@@ -17,6 +17,9 @@ function statusLabel(status: PurchaseAccountingPreviewData["status"]): string {
   if (status === "draft_proposal") {
     return "Draft Proposal";
   }
+  if (status === "posted") {
+    return "Posted";
+  }
   return status;
 }
 
@@ -43,7 +46,8 @@ export function PurchaseAccountingPreview({
             Accounting Preview
           </h3>
           <p className="mt-0.5 text-xs text-zinc-500">
-            {statusLabel(preview.status)} · no ledger persistence
+            {statusLabel(preview.status)}
+            {preview.status === "draft_proposal" ? " · no ledger persistence" : ""}
           </p>
         </div>
         <span
@@ -102,7 +106,13 @@ export function PurchaseAccountingPreview({
               <h4 className="text-sm font-medium text-zinc-800">
                 Journal Proposal
               </h4>
-              <span className="rounded-full bg-amber-50 px-2.5 py-0.5 text-xs font-medium text-amber-800">
+              <span
+                className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                  preview.status === "posted"
+                    ? "bg-emerald-50 text-emerald-800"
+                    : "bg-amber-50 text-amber-800"
+                }`}
+              >
                 {statusLabel(preview.status)}
               </span>
             </div>

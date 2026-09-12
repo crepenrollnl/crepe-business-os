@@ -17,18 +17,25 @@ import type { PurchaseAccountingContext } from "../types/purchase-accounting";
 import type { PurchaseTaxDocument, PurchaseTaxResult } from "../types/purchase-tax";
 import type { PurchaseWithRelations } from "../types/purchase";
 
-const { proposeSpy, calculateSpy, previewSpy, validateSpy, supabaseMock } =
-  vi.hoisted(() => ({
-    proposeSpy: vi.fn(),
-    calculateSpy: vi.fn(),
-    previewSpy: vi.fn(),
-    validateSpy: vi.fn(),
-    supabaseMock: {
-      from: vi.fn(),
-      rpc: vi.fn(),
-      auth: { getUser: vi.fn() },
-    },
-  }));
+const {
+  proposeSpy,
+  postSpy,
+  calculateSpy,
+  previewSpy,
+  validateSpy,
+  supabaseMock,
+} = vi.hoisted(() => ({
+  proposeSpy: vi.fn(),
+  postSpy: vi.fn(),
+  calculateSpy: vi.fn(),
+  previewSpy: vi.fn(),
+  validateSpy: vi.fn(),
+  supabaseMock: {
+    from: vi.fn(),
+    rpc: vi.fn(),
+    auth: { getUser: vi.fn() },
+  },
+}));
 
 vi.mock("@/lib/supabase", () => ({
   supabase: supabaseMock,
@@ -55,10 +62,31 @@ vi.mock(
             ...args,
           );
         },
+        post: async (
+          ...args: Parameters<
+            typeof actual.operationalAccountingIntegrationService.post
+          >
+        ) => {
+          postSpy(...args);
+          return actual.operationalAccountingIntegrationService.post(...args);
+        },
       },
     };
   },
 );
+
+vi.mock("@/features/accounting/services/posting-service", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/features/accounting/services/posting-service")
+  >("@/features/accounting/services/posting-service");
+  return {
+    postingService: {
+      ...actual.postingService,
+      postJournalProposal: vi.fn(),
+      rejectLedgerMutation: actual.postingService.rejectLedgerMutation,
+    },
+  };
+});
 
 vi.mock("@/features/tax-integration", async () => {
   const actual = await vi.importActual<
@@ -90,9 +118,12 @@ vi.mock("@/features/tax-integration", async () => {
   };
 });
 
+import { postingService } from "@/features/accounting/services/posting-service";
+import type { PostedJournalRecord } from "@/features/accounting/types/posting-persistence";
 import { purchaseAccountingService } from "./purchase-accounting-service";
 import { purchaseTaxService } from "./purchase-tax-service";
 import { createPurchaseReceivedPostingRule } from "./purchase-received-posting-rule";
+import { stableBusinessEventId } from "../utils/stable-business-event-id";
 
 /**
  * Fixture-only NL rate table for the calculate_purchase_taxes RPC mock below.
@@ -294,9 +325,9 @@ function bindings(): AccountRoleBinding[] {
       created_at: "2020-01-01T00:00:00.000Z",
     },
     {
-      id: "bind-ap",
-      role: "accounts_payable",
-      account_id: "acct-ap",
+      id: "bind-cash",
+      role: "cash",
+      account_id: "acct-cash",
       effective_from: "2020-01-01",
       effective_to: null,
       is_active: true,
@@ -331,8 +362,8 @@ function accounting(
         is_postable: true,
         is_active: true,
       },
-      "acct-ap": {
-        id: "acct-ap",
+      "acct-cash": {
+        id: "acct-cash",
         is_postable: true,
         is_active: true,
       },
@@ -459,10 +490,12 @@ async function proposeWithTax(
 describe("purchaseAccountingService (DEV-100)", () => {
   beforeEach(() => {
     proposeSpy.mockClear();
+    postSpy.mockClear();
     calculateSpy.mockClear();
     previewSpy.mockClear();
     validateSpy.mockClear();
     supabaseMock.rpc.mockReset();
+    vi.mocked(postingService.postJournalProposal).mockReset();
     mockCalculatePurchaseTaxesRpc();
   });
 
@@ -492,7 +525,7 @@ describe("purchaseAccountingService (DEV-100)", () => {
     });
   });
 
-  it("proposes standard VAT journal: Dr Inventory / Dr Recoverable VAT / Cr AP", async () => {
+  it("proposes standard VAT journal: Dr Inventory / Dr Recoverable VAT / Cr Cash", async () => {
     const { result } = await proposeWithTax(taxDocument());
 
     expect(result.error).toBeNull();
@@ -505,13 +538,13 @@ describe("purchaseAccountingService (DEV-100)", () => {
     const vat = result.data?.journalProposal.journal_lines.find(
       (line) => line.account_id === "acct-vat-input",
     );
-    const ap = result.data?.journalProposal.journal_lines.find(
-      (line) => line.account_id === "acct-ap",
+    const cash = result.data?.journalProposal.journal_lines.find(
+      (line) => line.account_id === "acct-cash",
     );
 
     expect(inventory?.debit_base).toBe(100);
     expect(vat?.debit_base).toBe(21);
-    expect(ap?.credit_base).toBe(121);
+    expect(cash?.credit_base).toBe(121);
     expect(result.data?.tax.tax_total).toBe(21);
   });
 
@@ -536,11 +569,11 @@ describe("purchaseAccountingService (DEV-100)", () => {
     const vat = result.data?.journalProposal.journal_lines.find(
       (line) => line.account_id === "acct-vat-input",
     );
-    const ap = result.data?.journalProposal.journal_lines.find(
-      (line) => line.account_id === "acct-ap",
+    const cash = result.data?.journalProposal.journal_lines.find(
+      (line) => line.account_id === "acct-cash",
     );
     expect(vat?.debit_base).toBe(9);
-    expect(ap?.credit_base).toBe(109);
+    expect(cash?.credit_base).toBe(109);
   });
 
   it("omits recoverable VAT line for zero VAT (balanced Dr net / Cr gross)", async () => {
@@ -568,13 +601,13 @@ describe("purchaseAccountingService (DEV-100)", () => {
     const vat = result.data?.journalProposal.journal_lines.find(
       (line) => line.account_id === "acct-vat-input",
     );
-    const ap = result.data?.journalProposal.journal_lines.find(
-      (line) => line.account_id === "acct-ap",
+    const cash = result.data?.journalProposal.journal_lines.find(
+      (line) => line.account_id === "acct-cash",
     );
 
     expect(vat).toBeUndefined();
     expect(inventory?.debit_base).toBe(100);
-    expect(ap?.credit_base).toBe(100);
+    expect(cash?.credit_base).toBe(100);
   });
 
   it("supports reverse charge with zero tax and tax_line propagation", async () => {
@@ -660,13 +693,13 @@ describe("purchaseAccountingService (DEV-100)", () => {
     const vat = result.data?.journalProposal.journal_lines.find(
       (line) => line.account_id === "acct-vat-input",
     );
-    const ap = result.data?.journalProposal.journal_lines.find(
-      (line) => line.account_id === "acct-ap",
+    const cash = result.data?.journalProposal.journal_lines.find(
+      (line) => line.account_id === "acct-cash",
     );
 
     expect(inventory?.debit_base).toBe(200);
     expect(vat?.debit_base).toBe(30);
-    expect(ap?.credit_base).toBe(230);
+    expect(cash?.credit_base).toBe(230);
     expect(proposeSpy.mock.calls[0]?.[0].event.tax_lines).toHaveLength(2);
   });
 
@@ -819,13 +852,13 @@ describe("purchaseAccountingService (DEV-100)", () => {
           id: "c1",
           posting_rule_id: "imbalanced-purchase-rule",
           line_no: 2,
-          account_role: "accounts_payable",
+          account_role: "cash",
           side: "credit",
           amount_field: "net_amount",
           currency_source: "event_transaction",
           tax_behaviour: "none",
           tax_code: null,
-          description: "AP",
+          description: "Cash",
         },
       ],
     });
@@ -865,14 +898,14 @@ describe("purchaseAccountingService (DEV-100)", () => {
     const lines = result.data?.journalProposal.journal_lines ?? [];
     const inventory = lines.find((line) => line.account_id === "acct-inventory");
     const vat = lines.find((line) => line.account_id === "acct-vat-input");
-    const ap = lines.find((line) => line.account_id === "acct-ap");
+    const cash = lines.find((line) => line.account_id === "acct-cash");
 
     expect(inventory?.debit_transaction).toBe(100);
     expect(inventory?.debit_base).toBe(90);
     expect(vat?.debit_transaction).toBe(21);
     expect(vat?.debit_base).toBe(18.9);
-    expect(ap?.credit_transaction).toBe(121);
-    expect(ap?.credit_base).toBe(108.9);
+    expect(cash?.credit_transaction).toBe(121);
+    expect(cash?.credit_base).toBe(108.9);
     expect(result.data?.journalProposal.journal_entry.transaction_currency).toBe(
       "USD",
     );
@@ -919,8 +952,8 @@ describe("purchaseAccountingService (DEV-100)", () => {
             is_postable: true,
             is_active: true,
           },
-          "acct-ap": {
-            id: "acct-ap",
+          "acct-cash": {
+            id: "acct-cash",
             is_postable: true,
             is_active: true,
           },
@@ -934,5 +967,138 @@ describe("purchaseAccountingService (DEV-100)", () => {
       (line) => line.debit_base === 21,
     );
     expect(vat?.account_id).toBe("acct-recoverable-tax-custom");
+  });
+});
+
+function postedJournalRecord(overrides?: Partial<PostedJournalRecord>) {
+  return {
+    journal_entry: {
+      id: "journal-1",
+      business_event_id: stableBusinessEventId("purchase_received:purchase-1"),
+      transaction_id: "txn-1",
+      fiscal_period_id: "period-1",
+      entry_date: "2026-07-26",
+      memo: null,
+      status: "posted" as const,
+      posting_number: "JE-2026-000001",
+      transaction_currency: "EUR",
+      base_currency: "EUR",
+      exchange_rate: 1,
+      reversal_of_journal_entry_id: null,
+      posted_at: "2026-07-26T16:00:00.000Z",
+      created_at: "2026-07-26T16:00:00.000Z",
+    },
+    journal_lines: [],
+    ledger_entries: [],
+    posting_number: "JE-2026-000001",
+    posting_date: "2026-07-26",
+    fiscal_period_id: "period-1",
+    ...overrides,
+  };
+}
+
+describe("purchaseAccountingService.postJournalForPurchaseReceived (audit finding #3)", () => {
+  beforeEach(() => {
+    postSpy.mockClear();
+    vi.mocked(postingService.postJournalProposal).mockReset();
+  });
+
+  it("successfully posts purchase_received through Posting Service", async () => {
+    vi.mocked(postingService.postJournalProposal).mockResolvedValue({
+      data: postedJournalRecord(),
+      error: null,
+    });
+
+    const result = await purchaseAccountingService.postJournalForPurchaseReceived(
+      purchase(),
+      accounting(),
+      stubTaxResult({ subtotal: 200, tax_total: 40, grand_total: 240 }),
+    );
+
+    expect(result.error).toBeNull();
+    expect(postSpy).toHaveBeenCalledTimes(1);
+    expect(postSpy.mock.calls[0]?.[0]).toMatchObject({
+      mode: "post",
+      event: {
+        event_type: "purchase_received",
+        id: stableBusinessEventId("purchase_received:purchase-1"),
+        amounts: { net_amount: 200, tax_amount: 40, gross_amount: 240 },
+      },
+      metadata: {
+        source_module: "purchases",
+        idempotency_key: "purchase_received:purchase-1",
+      },
+    });
+    expect(result.data?.posting_status).toBe("posted_now");
+    expect(result.data?.posted_journal?.posting_number).toBe(
+      "JE-2026-000001",
+    );
+    expect(postingService.postJournalProposal).toHaveBeenCalledTimes(1);
+  });
+
+  it("credits Cash / Bank, not Accounts Payable (audit finding #3 fix)", async () => {
+    vi.mocked(postingService.postJournalProposal).mockResolvedValue({
+      data: postedJournalRecord(),
+      error: null,
+    });
+
+    const result = await purchaseAccountingService.postJournalForPurchaseReceived(
+      purchase(),
+      accounting(),
+      stubTaxResult({ subtotal: 200, tax_total: 40, grand_total: 240 }),
+    );
+
+    const lines = result.data?.journalProposal.journal_lines ?? [];
+    const cash = lines.find((line) => line.account_id === "acct-cash");
+
+    expect(cash?.credit_base).toBe(240);
+    expect(
+      lines.find((line) => line.account_id === "acct-ap"),
+    ).toBeUndefined();
+  });
+
+  it("protects against duplicate posting (in-memory idempotency keys)", async () => {
+    const result = await purchaseAccountingService.postJournalForPurchaseReceived(
+      purchase(),
+      accounting({
+        alreadyPostedIdempotencyKeys: ["purchase_received:purchase-1"],
+      }),
+      stubTaxResult({ subtotal: 200, tax_total: 40, grand_total: 240 }),
+    );
+
+    expect(result.data).toBeNull();
+    expect(result.error).toMatch(/already been posted/i);
+    expect(postSpy).not.toHaveBeenCalled();
+  });
+
+  it("protects against duplicate posting (Posting Service ALREADY_POSTED)", async () => {
+    vi.mocked(postingService.postJournalProposal).mockResolvedValue({
+      data: null,
+      error: "Journal proposal has already been posted.",
+    });
+
+    const result = await purchaseAccountingService.postJournalForPurchaseReceived(
+      purchase(),
+      accounting(),
+      stubTaxResult({ subtotal: 200, tax_total: 40, grand_total: 240 }),
+    );
+
+    expect(result.data).toBeNull();
+    expect(result.error).toMatch(/already been posted/i);
+    expect(postSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails when the cash account role binding is missing", async () => {
+    const result = await purchaseAccountingService.postJournalForPurchaseReceived(
+      purchase(),
+      accounting({
+        accountRoleBindings: bindings().filter((row) => row.role !== "cash"),
+      }),
+      stubTaxResult({ subtotal: 200, tax_total: 40, grand_total: 240 }),
+    );
+
+    expect(result.data).toBeNull();
+    expect(result.error).toMatch(/no active account binding/i);
+    expect(postingService.postJournalProposal).not.toHaveBeenCalled();
   });
 });
