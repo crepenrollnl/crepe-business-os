@@ -7,8 +7,17 @@
  *
  * Accounting never recalculates taxes — TaxResult amounts are facts only.
  *
+ * Audit finding #3 (2026-09) adds post mode (persist journal + ledger) —
+ * Receive is the physical operation and is never rolled back if posting
+ * fails; postJournalForPurchaseReceived only ever reports a posting
+ * failure back to the caller, it does not undo the receive.
+ *
+ * Purchases may only:
+ *   - emit Business Events (via Event Factory)
+ *   - receive Posting Results
+ *
  * Does NOT:
- *   - create Journal Entries / Ledger Entries
+ *   - write journal_entries / ledger_entries directly
  *   - resolve Posting Rules (except optional test overrides)
  *   - access Accounting SQL / Tax Engine
  *   - change Purchases UI
@@ -26,11 +35,27 @@ import type {
 import { fail, ok, type ServiceResult } from "@/types/service";
 import type {
   PurchaseAccountingContext,
+  PurchaseJournalPosting,
   PurchaseJournalProposal,
 } from "../types/purchase-accounting";
 import type { PurchaseTaxResult } from "../types/purchase-tax";
 import type { PurchaseWithRelations } from "../types/purchase";
 import { createPurchaseReceivedPostingRule } from "./purchase-received-posting-rule";
+import { stableBusinessEventId } from "../utils/stable-business-event-id";
+
+function purchaseReceivedIdempotencyKey(purchaseId: string): string {
+  return `purchase_received:${purchaseId}`;
+}
+
+function assertNotDuplicate(
+  key: string,
+  alreadyPosted: readonly string[] | undefined,
+): ServiceResult<true> {
+  if (alreadyPosted?.includes(key)) {
+    return fail("Purchase accounting has already been posted for this event.");
+  }
+  return ok(true);
+}
 
 function mapTaxResultToEventTaxLines(
   tax: PurchaseTaxResult,
@@ -107,6 +132,7 @@ export function buildPurchaseReceivedBusinessEvent(
   }
 
   const taxResult = taxCheck.data;
+  const idempotencyKey = purchaseReceivedIdempotencyKey(purchase.id);
 
   return createBusinessEvent({
     event_type: "purchase_received",
@@ -129,7 +155,8 @@ export function buildPurchaseReceivedBusinessEvent(
       other_amount: null,
     },
     tax_lines: mapTaxResultToEventTaxLines(taxResult),
-    idempotency_key: `purchase_received:${purchase.id}`,
+    idempotency_key: idempotencyKey,
+    event_id: stableBusinessEventId(idempotencyKey),
     nowIso: accounting.nowIso,
     createId: accounting.createId,
   });
@@ -200,6 +227,77 @@ export const purchaseAccountingService = {
       tax,
     });
   },
+
+  /**
+   * Post purchase_received: propose then persist journal + ledger.
+   * Uses the precomputed TaxResult — never recalculates.
+   * Idempotent via stable business_event_id + Posting Service ALREADY_POSTED.
+   */
+  async postJournalForPurchaseReceived(
+    purchase: PurchaseWithRelations,
+    accounting: PurchaseAccountingContext,
+    tax: PurchaseTaxResult,
+  ): Promise<ServiceResult<PurchaseJournalPosting>> {
+    const dup = assertNotDuplicate(
+      purchaseReceivedIdempotencyKey(purchase.id),
+      accounting.alreadyPostedIdempotencyKeys,
+    );
+    if (dup.error) {
+      return fail(dup.error);
+    }
+
+    const eventResult = buildPurchaseReceivedBusinessEvent(
+      purchase,
+      accounting,
+      tax,
+    );
+    if (eventResult.error || !eventResult.data) {
+      return fail(
+        eventResult.error ?? "Failed to build purchase_received business event",
+      );
+    }
+
+    const event = eventResult.data;
+    const requestedAt = accounting.nowIso ?? new Date().toISOString();
+
+    const posted = await operationalAccountingIntegrationService.post({
+      event,
+      metadata: createPostingMetadata({
+        event,
+        requested_at: requestedAt,
+        correlation_id: purchase.transaction_id,
+        tags: {
+          module: "purchases",
+          document: "purchase",
+          tax_mode: tax.mode,
+        },
+      }),
+      context: {
+        fiscalPeriod: accounting.fiscalPeriod,
+        accountRoleBindings: accounting.accountRoleBindings,
+        accountsById: accounting.accountsById,
+        postingRules: accounting.postingRules,
+        nowIso: accounting.nowIso,
+        createId: accounting.createId,
+      },
+      mode: "post",
+    });
+
+    if (posted.error || !posted.data) {
+      return fail(
+        posted.error ?? "Failed to post journal for purchase_received",
+      );
+    }
+
+    return ok({
+      purchase,
+      business_event_id: posted.data.business_event_id,
+      journalProposal: posted.data.journal_proposal,
+      posted_journal: posted.data.posted_journal,
+      posting_status: posted.data.posting_status,
+      tax,
+    });
+  },
 };
 
-export type { PurchaseAccountingContext, PurchaseJournalProposal };
+export type { PurchaseAccountingContext, PurchaseJournalPosting, PurchaseJournalProposal };

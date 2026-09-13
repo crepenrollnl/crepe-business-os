@@ -5,7 +5,10 @@
  */
 
 import type { PurchaseWithRelations } from "../types/purchase";
-import type { PurchaseJournalProposal } from "../types/purchase-accounting";
+import type {
+  PurchaseJournalPosting,
+  PurchaseJournalProposal,
+} from "../types/purchase-accounting";
 import type { PurchaseAccountingPreviewData } from "../types/purchase-accounting-preview";
 import { createPurchaseReceivedPostingRule } from "../services/purchase-received-posting-rule";
 
@@ -56,5 +59,19 @@ export function mapPurchaseJournalProposalToPreview(
       credit: line.credit_transaction,
       currency,
     })),
+  };
+}
+
+/**
+ * Map a real, persisted Journal Posting (audit finding #3) for display.
+ * Same journal-line shape as the proposal — only the status differs,
+ * since these lines are now an actual fact in journal_entries/ledger_entries.
+ */
+export function mapPurchaseJournalPostingToPreview(
+  posting: PurchaseJournalPosting,
+): PurchaseAccountingPreviewData {
+  return {
+    ...mapPurchaseJournalProposalToPreview(posting),
+    status: "posted",
   };
 }

@@ -15,11 +15,11 @@ import type {
 } from "../types/purchase";
 import type { PurchaseAccountingPreviewData } from "../types/purchase-accounting-preview";
 import type { PurchaseTaxResult } from "../types/purchase-tax";
+import { accountingContextService } from "@/features/accounting/services/accounting-context-service";
 import { buildPurchaseTaxDocument } from "../utils/build-purchase-tax-document";
-import { createPurchaseAccountingPreviewContext } from "../utils/create-purchase-accounting-preview-context";
 import { purchaseToFormValues } from "../utils/map-purchase-form-values";
 import {
-  mapPurchaseJournalProposalToPreview,
+  mapPurchaseJournalPostingToPreview,
   mapPurchaseTotalsToAccountingPreview,
 } from "../utils/map-purchase-accounting-preview";
 import { toNetPurchaseLines } from "../utils/to-net-purchase-lines";
@@ -115,6 +115,7 @@ export function usePurchases() {
   const [isLoadingPurchase, setIsLoadingPurchase] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [postingError, setPostingError] = useState<string | null>(null);
   const [accountingPreview, setAccountingPreview] =
     useState<PurchaseAccountingPreviewData | null>(null);
   const openedFromQueryRef = useRef(false);
@@ -208,11 +209,13 @@ export function usePurchases() {
     setEditingPurchase(null);
     setAccountingPreview(null);
     setActionError(null);
+    setPostingError(null);
     setIsModalOpen(true);
   }, []);
 
   const openPurchaseById = useCallback(async (purchaseId: string) => {
     setActionError(null);
+    setPostingError(null);
     setEditingPurchase(null);
     setAccountingPreview(null);
     setIsLoadingPurchase(true);
@@ -284,6 +287,7 @@ export function usePurchases() {
     setEditingPurchase(null);
     setAccountingPreview(null);
     setActionError(null);
+    setPostingError(null);
     setIsLoadingPurchase(false);
   }, [isSaving]);
 
@@ -356,6 +360,7 @@ export function usePurchases() {
     async (values: PurchaseFormValues) => {
       setIsSaving(true);
       setActionError(null);
+      setPostingError(null);
 
       const resolved = await resolvePurchaseTax(values);
       if (resolved.error || !resolved.tax) {
@@ -374,21 +379,41 @@ export function usePurchases() {
         return false;
       }
 
-      const accountingContext = createPurchaseAccountingPreviewContext({
-        currency: tax.tax_result.currency || "EUR",
-        purchasedAt: values.purchased_at,
-        baseCurrency: tax.tax_result.currency || "EUR",
-        exchangeRate: 1,
-      });
+      const receiveInput = {
+        ...values,
+        id: editingPurchase?.id,
+        lines: netLines.data,
+        tax_total: tax.tax_total,
+      };
 
-      const result = await purchaseService.receivePurchaseAndProposeJournal(
-        {
-          ...values,
-          id: editingPurchase?.id,
-          lines: netLines.data,
-          tax_total: tax.tax_total,
-        },
-        accountingContext,
+      const contextResult =
+        await accountingContextService.getCurrentAccountingContext();
+
+      if (contextResult.error || !contextResult.data) {
+        // Accounting infra not ready (e.g. no open fiscal period) — the
+        // purchase must still receive; only the journal is skipped,
+        // surfaced via postingError rather than blocking the receive itself.
+        const fallback = await purchaseService.receivePurchase(receiveInput);
+
+        if (fallback.error || !fallback.data) {
+          setActionError(fallback.error ?? "Failed to receive purchase");
+          setIsSaving(false);
+          return false;
+        }
+
+        setEditingPurchase(fallback.data);
+        setAccountingPreview(mapPurchaseTotalsToAccountingPreview(fallback.data));
+        setPostingError(
+          contextResult.error ?? "Accounting posting was skipped.",
+        );
+        await loadPurchases({ silent: true });
+        setIsSaving(false);
+        return true;
+      }
+
+      const result = await purchaseService.receivePurchaseAndPostJournal(
+        receiveInput,
+        contextResult.data,
         tax,
       );
 
@@ -398,9 +423,14 @@ export function usePurchases() {
         return false;
       }
 
-      // Keep modal open so the owner can verify totals + journal proposal.
+      // Keep modal open so the owner can verify totals + the posted journal.
       setEditingPurchase(result.data.purchase);
-      setAccountingPreview(mapPurchaseJournalProposalToPreview(result.data));
+      setAccountingPreview(
+        result.data.posting
+          ? mapPurchaseJournalPostingToPreview(result.data.posting)
+          : mapPurchaseTotalsToAccountingPreview(result.data.purchase),
+      );
+      setPostingError(result.data.postingError);
       await loadPurchases({ silent: true });
       setIsSaving(false);
       return true;
@@ -433,6 +463,7 @@ export function usePurchases() {
     isLoadingPurchase,
     isSaving,
     actionError,
+    postingError,
     accountingPreview,
     openCreateModal,
     openPurchaseModal,

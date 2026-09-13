@@ -34,7 +34,7 @@ function previewWithProposal(
         currency: "EUR",
       },
       {
-        account_role: "accounts_payable",
+        account_role: "cash",
         debit: 0,
         credit: 121,
         currency: "EUR",
@@ -101,11 +101,23 @@ describe("PurchaseAccountingPreview (DEV-101)", () => {
     expect(screen.getAllByText("Draft Proposal").length).toBeGreaterThan(0);
     expect(screen.getByText("inventory_asset")).toBeInTheDocument();
     expect(screen.getByText("vat_input")).toBeInTheDocument();
-    expect(screen.getByText("accounts_payable")).toBeInTheDocument();
+    expect(screen.getByText("cash")).toBeInTheDocument();
     expect(screen.getByText("100.00")).toBeInTheDocument();
     expect(screen.getByText("21.00")).toBeInTheDocument();
     expect(screen.getByText("121.00")).toBeInTheDocument();
     expect(screen.getAllByText("EUR")).toHaveLength(3);
+  });
+
+  it("shows a Posted status without the no-ledger-persistence caption", () => {
+    render(
+      <PurchaseAccountingPreview
+        preview={previewWithProposal({ status: "posted" })}
+        defaultOpen
+      />,
+    );
+
+    expect(screen.getAllByText("Posted").length).toBeGreaterThan(0);
+    expect(screen.queryByText(/no ledger persistence/i)).not.toBeInTheDocument();
   });
 
   it("shows empty state when no proposal is available", () => {

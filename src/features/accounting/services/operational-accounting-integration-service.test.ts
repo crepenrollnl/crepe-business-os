@@ -70,9 +70,9 @@ function bindings(): AccountRoleBinding[] {
       created_at: "2020-01-01T00:00:00.000Z",
     },
     {
-      id: "bind-ap",
-      role: "accounts_payable",
-      account_id: "acct-ap",
+      id: "bind-cash",
+      role: "cash",
+      account_id: "acct-cash",
       effective_from: "2020-01-01",
       effective_to: null,
       is_active: true,
@@ -144,8 +144,8 @@ function buildPurchaseReceivedRequest(
           is_postable: true,
           is_active: true,
         },
-        "acct-ap": {
-          id: "acct-ap",
+        "acct-cash": {
+          id: "acct-cash",
           is_postable: true,
           is_active: true,
         },
@@ -181,12 +181,12 @@ describe("operationalAccountingIntegrationService (DEV-092)", () => {
     const vat = result.data?.journal_proposal.journal_lines.find(
       (line) => line.account_id === "acct-vat-input",
     );
-    const ap = result.data?.journal_proposal.journal_lines.find(
-      (line) => line.account_id === "acct-ap",
+    const cash = result.data?.journal_proposal.journal_lines.find(
+      (line) => line.account_id === "acct-cash",
     );
     expect(inventory?.debit_base).toBe(200);
     expect(vat?.debit_base).toBe(40);
-    expect(ap?.credit_base).toBe(240);
+    expect(cash?.credit_base).toBe(240);
     expect(postJournalProposalMock).not.toHaveBeenCalled();
   });
 

@@ -4,11 +4,16 @@
  * Owned by Accounting. Operational Purchases must not resolve rules —
  * it only emits purchase_received events with TaxResult money facts.
  *
+ * Version 3 (audit finding #3, 2026-09): suppliers are always paid
+ * immediately at receive time (cash/card/transfer) — this business never
+ * buys on credit. Credits Cash/Bank directly instead of Accounts Payable;
+ * there is no accounts-payable settlement flow anywhere in this system.
+ *
  * Business Event: purchase_received (Purchase Confirmed / received)
  * Proposed entry:
- *   Dr Inventory (inventory_asset)           ← net_amount
- *   Dr Recoverable VAT (vat_input)           ← tax_amount (skipped when 0)
- *   Cr Accounts Payable (accounts_payable)   ← gross_amount
+ *   Dr Inventory (inventory_asset)   ← net_amount
+ *   Dr Recoverable VAT (vat_input)   ← tax_amount (skipped when 0)
+ *   Cr Cash / Bank (cash)            ← gross_amount
  */
 
 import type { PostingRule } from "@/types/accounting";
@@ -52,16 +57,16 @@ export function createPurchaseReceivedPostingRule(
       description: "Recoverable tax",
     },
     {
-      id: `${id}-credit-ap`,
+      id: `${id}-credit-cash`,
       posting_rule_id: id,
       line_no: 3,
-      account_role: "accounts_payable",
+      account_role: "cash",
       side: "credit",
       amount_field: "gross_amount",
       currency_source: "event_transaction",
       tax_behaviour: "none",
       tax_code: null,
-      description: "Accounts Payable",
+      description: "Cash / Bank",
     },
   ];
 
@@ -73,13 +78,13 @@ export function createPurchaseReceivedPostingRule(
   return {
     id,
     event_type: "purchase_received",
-    version: 2,
+    version: 3,
     priority: 100,
     effective_from: "2020-01-01",
     effective_to: null,
     is_active: true,
     description:
-      "Purchase confirmed: Dr Inventory / Dr Recoverable tax / Cr Accounts Payable",
+      "Purchase confirmed: Dr Inventory / Dr Recoverable tax / Cr Cash / Bank",
     created_at: "2020-01-01T00:00:00.000Z",
     ...overrides,
     lines,

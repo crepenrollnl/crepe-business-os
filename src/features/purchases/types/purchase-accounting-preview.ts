@@ -5,7 +5,7 @@
  * persisted purchase totals — never from Tax/Accounting recalculation in UI.
  */
 
-export type PurchaseAccountingPreviewStatus = "draft_proposal";
+export type PurchaseAccountingPreviewStatus = "draft_proposal" | "posted";
 
 export interface PurchaseAccountingPreviewLine {
   account_role: string;
