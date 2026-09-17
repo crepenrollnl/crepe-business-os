@@ -70,10 +70,14 @@ export interface ConfirmSaleResult {
 /**
  * createDraftSale input (DEV-034).
  * SQL create_draft_sale owns insert + sale_number; service validates UX only.
+ * client_request_id (sql/118) is an optional client-generated idempotency
+ * token: a repeat call with the same token returns the existing sale
+ * instead of creating a second one.
  */
 export interface CreateDraftSaleInput {
   customer_id?: string | null;
   notes?: string | null;
+  client_request_id?: string | null;
 }
 
 /**
@@ -127,6 +131,9 @@ export interface QuickSaleLineInput {
  * SQL create_and_confirm_sale owns create + line inserts + confirm in one
  * transaction — no separate create_draft_sale / add_sale_line / confirmSale
  * calls for this path.
+ * client_request_id (sql/118) is an optional client-generated idempotency
+ * token: a repeat call with the same token as an already-confirmed sale
+ * returns that sale's frozen result instead of creating a second one.
  */
 export interface CreateAndConfirmSaleInput {
   customer_id?: string | null;
@@ -134,6 +141,7 @@ export interface CreateAndConfirmSaleInput {
   discount_type?: SaleDiscountType | null;
   discount_value?: number | null;
   lines: QuickSaleLineInput[];
+  client_request_id?: string | null;
 }
 
 /**

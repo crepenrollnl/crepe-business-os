@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { accountingContextService } from "@/features/accounting/services/accounting-context-service";
 import { recipeService } from "@/features/recipes/services/recipe-service";
 import { salesReadService } from "@/features/sales/services/sales-read-service";
@@ -86,6 +86,18 @@ export function usePosSale() {
     useState<SaleDiscountType>("percent");
   const [discountInput, setDiscountInput] = useState("");
 
+  /**
+   * Idempotency token for the current checkout attempt (sql/118, audit
+   * finding #9). Generated lazily on the first confirm() call for this
+   * cart and reused across a retry (network error, or a click that fires
+   * again before "Confirming..." disables the button) so a duplicate
+   * request never creates a second sale. Invalidated whenever the cart
+   * itself changes (add/increment/decrement) since a retry must not
+   * silently replay a stale cart under a new one's token, and cleared
+   * after a successful confirm so the next sale gets a fresh token.
+   */
+  const clientRequestIdRef = useRef<string | null>(null);
+
   const loadProducts = useCallback(async () => {
     setLoading(true);
     const result = await fetchPosSaleProducts();
@@ -99,6 +111,7 @@ export function usePosSale() {
   const addToCart = useCallback((product: PosSaleProduct) => {
     setActionError(null);
     setLastConfirmedSaleNumber(null);
+    clientRequestIdRef.current = null;
 
     setCart((current) => {
       const existing = current[product.id];
@@ -118,6 +131,8 @@ export function usePosSale() {
   }, []);
 
   const incrementLine = useCallback((productId: string) => {
+    clientRequestIdRef.current = null;
+
     setCart((current) => {
       const existing = current[productId];
 
@@ -133,6 +148,8 @@ export function usePosSale() {
   }, []);
 
   const decrementLine = useCallback((productId: string) => {
+    clientRequestIdRef.current = null;
+
     setCart((current) => {
       const existing = current[productId];
 
@@ -202,6 +219,11 @@ export function usePosSale() {
     setActionError(null);
     setPostingError(null);
 
+    if (!clientRequestIdRef.current) {
+      clientRequestIdRef.current = crypto.randomUUID();
+    }
+    const clientRequestId = clientRequestIdRef.current;
+
     const lines: QuickSaleLineInput[] = cartLines.map((line) => ({
       product_id: line.product_id,
       quantity: line.quantity,
@@ -217,6 +239,7 @@ export function usePosSale() {
         kitchen_note: kitchenNote,
         discount_type: discountValue === null ? null : discountType,
         discount_value: discountValue,
+        client_request_id: clientRequestId,
       });
 
       if (fallback.error || !fallback.data) {
@@ -243,6 +266,7 @@ export function usePosSale() {
           kitchen_note: kitchenNote,
           discount_type: discountValue === null ? null : discountType,
           discount_value: discountValue,
+          client_request_id: clientRequestId,
         },
         contextResult.data,
       );
@@ -264,6 +288,7 @@ export function usePosSale() {
       }
     }
 
+    clientRequestIdRef.current = null;
     setCart({});
     setSendToQueue(false);
     setKitchenNote("");
