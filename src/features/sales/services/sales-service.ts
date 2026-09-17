@@ -98,6 +98,11 @@ function validateCreateDraftSaleInput(
     return "Customer id is invalid.";
   }
 
+  const clientRequestId = input.client_request_id?.trim() ?? "";
+  if (clientRequestId.length > 0 && !UUID_RE.test(clientRequestId)) {
+    return "Client request id is invalid.";
+  }
+
   return null;
 }
 
@@ -658,10 +663,12 @@ export const salesService = {
 
       const customerId = input.customer_id?.trim() || null;
       const notes = input.notes?.trim() ? input.notes.trim() : null;
+      const clientRequestId = input.client_request_id?.trim() || null;
 
       const { data, error } = await supabase.rpc("create_draft_sale", {
         p_customer_id: customerId,
         p_notes: notes,
+        p_client_request_id: clientRequestId,
       });
 
       if (error) {
@@ -934,6 +941,11 @@ export const salesService = {
         return fail("Customer id is invalid.");
       }
 
+      const clientRequestId = input.client_request_id?.trim() ?? "";
+      if (clientRequestId.length > 0 && !UUID_RE.test(clientRequestId)) {
+        return fail("Client request id is invalid.");
+      }
+
       const {
         data: { user },
         error: authError,
@@ -964,6 +976,7 @@ export const salesService = {
         p_kitchen_note: kitchenNote,
         p_discount_type: discountType,
         p_discount_value: discountValue,
+        p_client_request_id: clientRequestId.length > 0 ? clientRequestId : null,
       });
 
       if (error) {

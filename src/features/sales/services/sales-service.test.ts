@@ -42,6 +42,7 @@ const SALE_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const LINE_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 const PRODUCT_ID = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 const USER_ID = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+const CLIENT_REQUEST_ID = "ffffffff-ffff-4fff-8fff-ffffffffffff";
 
 const insertMock = vi.fn();
 const updateMock = vi.fn();
@@ -491,6 +492,7 @@ describe("salesService.createDraftSale (DEV-034)", () => {
     expect(supabaseMock.rpc).toHaveBeenCalledWith("create_draft_sale", {
       p_customer_id: null,
       p_notes: null,
+      p_client_request_id: null,
     });
     expect(supabaseMock.from).not.toHaveBeenCalled();
     expect(insertMock).not.toHaveBeenCalled();
@@ -514,6 +516,7 @@ describe("salesService.createDraftSale (DEV-034)", () => {
     expect(supabaseMock.rpc).toHaveBeenCalledWith("create_draft_sale", {
       p_customer_id: null,
       p_notes: null,
+      p_client_request_id: null,
     });
   });
 
@@ -533,6 +536,7 @@ describe("salesService.createDraftSale (DEV-034)", () => {
     expect(supabaseMock.rpc).toHaveBeenCalledWith("create_draft_sale", {
       p_customer_id: CUSTOMER_ID,
       p_notes: "catering order",
+      p_client_request_id: null,
     });
   });
 
@@ -550,7 +554,36 @@ describe("salesService.createDraftSale (DEV-034)", () => {
     expect(supabaseMock.rpc).toHaveBeenCalledWith("create_draft_sale", {
       p_customer_id: null,
       p_notes: null,
+      p_client_request_id: null,
     });
+  });
+
+  it("passes a client_request_id to the RPC when provided", async () => {
+    supabaseMock.rpc.mockResolvedValue({
+      data: { sale_id: SALE_ID },
+      error: null,
+    });
+
+    const result = await salesService.createDraftSale({
+      client_request_id: CLIENT_REQUEST_ID,
+    });
+
+    expect(result.error).toBeNull();
+    expect(supabaseMock.rpc).toHaveBeenCalledWith("create_draft_sale", {
+      p_customer_id: null,
+      p_notes: null,
+      p_client_request_id: CLIENT_REQUEST_ID,
+    });
+  });
+
+  it("rejects an invalid client_request_id without calling the RPC", async () => {
+    const result = await salesService.createDraftSale({
+      client_request_id: "not-a-uuid",
+    });
+
+    expect(result.data).toBeNull();
+    expect(result.error).toBe("Client request id is invalid.");
+    expect(supabaseMock.rpc).not.toHaveBeenCalled();
   });
 
   it("maps duplicate sale_number RPC errors", async () => {
@@ -1305,6 +1338,7 @@ describe("salesService.createAndConfirmSale (sql/110 discount args)", () => {
       p_kitchen_note: null,
       p_discount_type: "amount",
       p_discount_value: 1,
+      p_client_request_id: null,
     });
   });
 
@@ -1338,6 +1372,7 @@ describe("salesService.createAndConfirmSale (sql/110 discount args)", () => {
       p_kitchen_note: null,
       p_discount_type: null,
       p_discount_value: null,
+      p_client_request_id: null,
     });
   });
 
@@ -1356,6 +1391,58 @@ describe("salesService.createAndConfirmSale (sql/110 discount args)", () => {
 
     expect(result.data).toBeNull();
     expect(result.error).toBe("Discount type and value are required together.");
+    expect(supabaseMock.rpc).not.toHaveBeenCalled();
+  });
+
+  it("passes a client_request_id to the RPC when provided", async () => {
+    mockSaleReload();
+    supabaseMock.rpc.mockResolvedValue({
+      data: rpcConfirmPayload(),
+      error: null,
+    });
+
+    const result = await salesService.createAndConfirmSale({
+      lines: [
+        {
+          product_id: PRODUCT_ID,
+          quantity: 1,
+          unit_price: 10.9,
+        },
+      ],
+      client_request_id: CLIENT_REQUEST_ID,
+    });
+
+    expect(result.error).toBeNull();
+    expect(supabaseMock.rpc).toHaveBeenCalledWith("create_and_confirm_sale", {
+      p_customer_id: null,
+      p_lines: [
+        {
+          product_id: PRODUCT_ID,
+          quantity: 1,
+          unit_price: 10.9,
+        },
+      ],
+      p_kitchen_note: null,
+      p_discount_type: null,
+      p_discount_value: null,
+      p_client_request_id: CLIENT_REQUEST_ID,
+    });
+  });
+
+  it("rejects an invalid client_request_id without calling the RPC", async () => {
+    const result = await salesService.createAndConfirmSale({
+      lines: [
+        {
+          product_id: PRODUCT_ID,
+          quantity: 1,
+          unit_price: 10.9,
+        },
+      ],
+      client_request_id: "not-a-uuid",
+    });
+
+    expect(result.data).toBeNull();
+    expect(result.error).toBe("Client request id is invalid.");
     expect(supabaseMock.rpc).not.toHaveBeenCalled();
   });
 });

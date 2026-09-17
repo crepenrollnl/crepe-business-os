@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DEFAULT_PAGE_SIZE } from "@/constants/limits";
 import { salesReadService } from "../services/sales-read-service";
 import { salesService } from "../services/sales-service";
@@ -66,6 +66,16 @@ export function useSales() {
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [creating, setCreating] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+
+  /**
+   * Idempotency token for the current "New" click (sql/118, audit finding
+   * #9). Generated lazily on the first createDraft() call and reused
+   * across a retry of that same click (network error, or a double-fire
+   * before the disabled-button state takes effect) so it never creates a
+   * second draft. Cleared after a successful draft creation so the next,
+   * distinct "New" click gets a fresh token.
+   */
+  const clientRequestIdRef = useRef<string | null>(null);
 
   const applyState = useCallback(
     (state: Awaited<ReturnType<typeof fetchSalesState>>) => {
@@ -172,7 +182,13 @@ export function useSales() {
     setCreating(true);
     setActionError(null);
 
-    const result = await salesService.createDraftSale();
+    if (!clientRequestIdRef.current) {
+      clientRequestIdRef.current = crypto.randomUUID();
+    }
+
+    const result = await salesService.createDraftSale({
+      client_request_id: clientRequestIdRef.current,
+    });
 
     if (result.error || !result.data) {
       setActionError(result.error ?? "Failed to create draft sale");
@@ -180,6 +196,7 @@ export function useSales() {
       return null;
     }
 
+    clientRequestIdRef.current = null;
     setCreating(false);
     return result.data.saleId;
   }, []);
