@@ -14,8 +14,10 @@ CREATE ROLE anon NOLOGIN;
 
 CREATE SCHEMA IF NOT EXISTS auth;
 
+-- email: live Supabase auth.users has this column; sql/113 joins it.
 CREATE TABLE auth.users (
-  id uuid PRIMARY KEY
+  id uuid PRIMARY KEY,
+  email text
 );
 
 CREATE OR REPLACE FUNCTION auth.uid()
