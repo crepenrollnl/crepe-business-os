@@ -26,8 +26,10 @@ import {
   DEFAULT_TAX_COUNTRY,
 } from "../utils/build-purchase-tax-document";
 import { toNetPurchaseLines } from "../utils/to-net-purchase-lines";
+import { reportPostingFailure } from "@/features/accounting/utils/report-posting-failure";
 import { purchaseAccountingService } from "./purchase-accounting-service";
 import { purchaseTaxService } from "./purchase-tax-service";
+import { stableBusinessEventId } from "../utils/stable-business-event-id";
 
 interface PurchaseRow {
   id: string;
@@ -968,12 +970,22 @@ export const purchaseService = {
     );
 
     if (posting.error || !posting.data) {
+      const postingError =
+        posting.error ?? "Purchase received but accounting posting failed.";
+      void reportPostingFailure({
+        sourceFlow: "purchase_receive",
+        entityType: "purchase",
+        entityId: received.data.id,
+        businessEventId: stableBusinessEventId(
+          `purchase_received:${received.data.id}`,
+        ),
+        errorMessage: postingError,
+      });
       return {
         data: {
           purchase: received.data,
           posting: null,
-          postingError:
-            posting.error ?? "Purchase received but accounting posting failed.",
+          postingError,
         },
         error: null,
       };

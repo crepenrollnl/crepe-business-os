@@ -41,7 +41,9 @@ import {
   validateInventoryForCompletion,
   type CompleteProductionRecipeBom,
 } from "../utils/complete-production";
+import { reportPostingFailure } from "@/features/accounting/utils/report-posting-failure";
 import { collectFirstLevelRawIngredients } from "../utils/collect-first-level-raw-ingredients";
+import { stableBusinessEventId } from "../utils/stable-business-event-id";
 import {
   toSessionLineView,
   validateSessionLinesForComplete,
@@ -1063,12 +1065,22 @@ export const productionSessionService = {
     );
 
     if (posting.error || !posting.data) {
+      const postingError =
+        posting.error ??
+        "Production completed but accounting posting failed.";
+      void reportPostingFailure({
+        sourceFlow: "production_complete",
+        entityType: "production_session",
+        entityId: sessionId,
+        businessEventId: stableBusinessEventId(
+          `production_completed:${sessionId}`,
+        ),
+        errorMessage: postingError,
+      });
       return ok({
         session: completed.data,
         posting: null,
-        postingError:
-          posting.error ??
-          "Production completed but accounting posting failed.",
+        postingError,
       });
     }
 

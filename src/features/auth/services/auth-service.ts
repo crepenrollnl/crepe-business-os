@@ -61,4 +61,22 @@ export const authService = {
 
     return { success: true };
   },
+
+  /**
+   * Current user's application role from get_my_role() (sql/097).
+   * Returns null when the RPC fails or the user has no active profile.
+   */
+  async getMyRole(): Promise<string | null> {
+    try {
+      const { data, error } = await supabase.rpc("get_my_role");
+      if (error || typeof data !== "string") {
+        return null;
+      }
+
+      const trimmed = data.trim();
+      return trimmed.length > 0 ? trimmed : null;
+    } catch {
+      return null;
+    }
+  },
 };

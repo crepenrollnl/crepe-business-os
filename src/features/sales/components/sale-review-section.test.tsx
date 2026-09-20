@@ -280,6 +280,25 @@ describe("SaleReviewSection (DEV-111)", () => {
     );
   });
 
+  it("renders postingError next to accounting status in the same amber pattern", () => {
+    render(
+      <SaleReviewSection
+        sale={sale()}
+        cogsSummary={cogsSummary()}
+        profitSummary={profitSummary()}
+        accountingPostingStatus="pending"
+        postingError="Sale confirmed but accounting posting failed."
+      />,
+    );
+
+    expect(screen.getByTestId("review-accounting-status")).toHaveTextContent(
+      "Pending",
+    );
+    expect(
+      screen.getByText("Sale confirmed but accounting posting failed."),
+    ).toHaveClass("text-sm", "text-amber-700");
+  });
+
   it("shows typed discount and resolved amount on a completed sale", () => {
     render(
       <SaleReviewSection

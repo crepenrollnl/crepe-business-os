@@ -32,7 +32,10 @@ import type {
   UpdateSaleLineInput,
 } from "../types/sale";
 import { SALE_STATUSES } from "../types/sale";
+import { reportPostingFailure } from "@/features/accounting/utils/report-posting-failure";
 import { saleAccountingService } from "./sale-accounting-service";
+import { stableBusinessEventId } from "../utils/stable-business-event-id";
+import type { PostingFailureSourceFlow } from "@/features/accounting/types/posting-failure";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -903,12 +906,22 @@ export const salesService = {
     );
 
     if (posting.error || !posting.data) {
+      const postingError =
+        posting.error ?? "Sale confirmed but accounting posting failed.";
+      void reportPostingFailure({
+        sourceFlow: "sale_confirm",
+        entityType: "sale",
+        entityId: confirmed.data.sale.id,
+        businessEventId: stableBusinessEventId(
+          `sale_completed:${confirmed.data.sale.id}`,
+        ),
+        errorMessage: postingError,
+      });
       return ok({
         sale: confirmed.data.sale,
         total_cogs: confirmed.data.total_cogs,
         posting: null,
-        postingError:
-          posting.error ?? "Sale confirmed but accounting posting failed.",
+        postingError,
       });
     }
 
@@ -1010,6 +1023,10 @@ export const salesService = {
   async createAndConfirmSaleAndPostJournals(
     input: CreateAndConfirmSaleInput,
     accounting: SaleAccountingContext,
+    sourceFlow: Extract<
+      PostingFailureSourceFlow,
+      "quick_sale_confirm" | "pos_confirm"
+    > = "quick_sale_confirm",
   ): Promise<
     ServiceResult<{
       sale: SaleWithLines;
@@ -1029,12 +1046,22 @@ export const salesService = {
     );
 
     if (posting.error || !posting.data) {
+      const postingError =
+        posting.error ?? "Sale confirmed but accounting posting failed.";
+      void reportPostingFailure({
+        sourceFlow,
+        entityType: "sale",
+        entityId: confirmed.data.sale.id,
+        businessEventId: stableBusinessEventId(
+          `sale_completed:${confirmed.data.sale.id}`,
+        ),
+        errorMessage: postingError,
+      });
       return ok({
         sale: confirmed.data.sale,
         total_cogs: confirmed.data.total_cogs,
         posting: null,
-        postingError:
-          posting.error ?? "Sale confirmed but accounting posting failed.",
+        postingError,
       });
     }
 

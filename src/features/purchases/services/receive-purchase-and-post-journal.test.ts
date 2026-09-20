@@ -16,9 +16,11 @@ import type { PurchaseAccountingContext } from "../types/purchase-accounting";
 import type { PurchaseTaxResult } from "../types/purchase-tax";
 import type { PurchaseWithRelations, SavePurchaseInput } from "../types/purchase";
 
-const { postJournalForPurchaseReceivedMock } = vi.hoisted(() => ({
-  postJournalForPurchaseReceivedMock: vi.fn(),
-}));
+const { postJournalForPurchaseReceivedMock, reportPostingFailureMock } =
+  vi.hoisted(() => ({
+    postJournalForPurchaseReceivedMock: vi.fn(),
+    reportPostingFailureMock: vi.fn(),
+  }));
 
 // Not exercised directly (receivePurchase is spied on below) — only needed
 // so importing purchase-service.ts doesn't construct a real Supabase client.
@@ -35,6 +37,11 @@ vi.mock("./purchase-accounting-service", () => ({
     postJournalForPurchaseReceived: (...args: unknown[]) =>
       postJournalForPurchaseReceivedMock(...args),
   },
+}));
+
+vi.mock("@/features/accounting/utils/report-posting-failure", () => ({
+  reportPostingFailure: (...args: unknown[]) =>
+    reportPostingFailureMock(...args),
 }));
 
 import { purchaseService } from "./purchase-service";
@@ -110,6 +117,7 @@ function saveInput(): SavePurchaseInput {
 describe("purchaseService.receivePurchaseAndPostJournal (audit finding #3)", () => {
   beforeEach(() => {
     postJournalForPurchaseReceivedMock.mockReset();
+    reportPostingFailureMock.mockReset();
   });
 
   it("returns ok() with the posted journal when receive and posting both succeed", async () => {
@@ -139,6 +147,7 @@ describe("purchaseService.receivePurchaseAndPostJournal (audit finding #3)", () 
     expect(result.data?.purchase.status).toBe("received");
     expect(result.data?.posting).not.toBeNull();
     expect(result.data?.postingError).toBeNull();
+    expect(reportPostingFailureMock).not.toHaveBeenCalled();
 
     receiveSpy.mockRestore();
   });
@@ -165,6 +174,14 @@ describe("purchaseService.receivePurchaseAndPostJournal (audit finding #3)", () 
     expect(result.data?.posting).toBeNull();
     expect(result.data?.postingError).toBe(
       "No open fiscal period covers today's date.",
+    );
+    expect(reportPostingFailureMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourceFlow: "purchase_receive",
+        entityType: "purchase",
+        entityId: PURCHASE_ID,
+        errorMessage: "No open fiscal period covers today's date.",
+      }),
     );
 
     receiveSpy.mockRestore();

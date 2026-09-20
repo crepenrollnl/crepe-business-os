@@ -11,9 +11,11 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { postJournalForProductionCompletedMock } = vi.hoisted(() => ({
-  postJournalForProductionCompletedMock: vi.fn(),
-}));
+const { postJournalForProductionCompletedMock, reportPostingFailureMock } =
+  vi.hoisted(() => ({
+    postJournalForProductionCompletedMock: vi.fn(),
+    reportPostingFailureMock: vi.fn(),
+  }));
 
 // Not exercised directly (completeSession is spied on below) — only needed
 // so importing production-session-service.ts doesn't construct a real
@@ -31,6 +33,11 @@ vi.mock("./production-accounting-service", () => ({
     postJournalForProductionCompleted: (...args: unknown[]) =>
       postJournalForProductionCompletedMock(...args),
   },
+}));
+
+vi.mock("@/features/accounting/utils/report-posting-failure", () => ({
+  reportPostingFailure: (...args: unknown[]) =>
+    reportPostingFailureMock(...args),
 }));
 
 import { productionSessionService } from "./production-session-service";
@@ -84,6 +91,7 @@ function completedSession(): ProductionSessionWithRelations {
 describe("productionSessionService.completeSessionAndPostJournal (DEV-105)", () => {
   beforeEach(() => {
     postJournalForProductionCompletedMock.mockReset();
+    reportPostingFailureMock.mockReset();
   });
 
   it("returns ok() with the posted journal when completion and posting both succeed", async () => {
@@ -111,6 +119,7 @@ describe("productionSessionService.completeSessionAndPostJournal (DEV-105)", () 
     expect(result.data?.session.status).toBe("completed");
     expect(result.data?.posting).not.toBeNull();
     expect(result.data?.postingError).toBeNull();
+    expect(reportPostingFailureMock).not.toHaveBeenCalled();
 
     completeSessionSpy.mockRestore();
   });
@@ -137,6 +146,14 @@ describe("productionSessionService.completeSessionAndPostJournal (DEV-105)", () 
     expect(result.data?.posting).toBeNull();
     expect(result.data?.postingError).toBe(
       "No open fiscal period covers today's date.",
+    );
+    expect(reportPostingFailureMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourceFlow: "production_complete",
+        entityType: "production_session",
+        entityId: SESSION_ID,
+        errorMessage: "No open fiscal period covers today's date.",
+      }),
     );
 
     completeSessionSpy.mockRestore();

@@ -205,6 +205,52 @@ describe("auditLogService.getAuditLog (DEV-048)", () => {
     ] satisfies AuditEvent[]);
   });
 
+  it("maps a write_off row from the sql/115 audit_log branch", async () => {
+    mockAuditLogList([
+      {
+        event_id: `write_off.recorded.${ENTITY_ID}`,
+        occurred_at: "2026-09-05T10:00:00.000Z",
+        entity_type: "write_off",
+        entity_id: ENTITY_ID,
+        action: "spoilage",
+        user_id: USER_ID,
+        summary: "Write-off recorded ingredient (spoilage)",
+        metadata: {
+          item_type: "ingredient",
+          ingredient_id: ENTITY_ID,
+          product_id: null,
+          quantity: 2,
+          total_value: 15,
+          reason: "spoilage",
+        },
+      },
+    ]);
+
+    const result = await auditLogService.getAuditLog();
+
+    expect(result.error).toBeNull();
+    expect(result.data).toEqual([
+      {
+        eventId: `write_off.recorded.${ENTITY_ID}`,
+        occurredAt: "2026-09-05T10:00:00.000Z",
+        entityType: "write_off",
+        entityId: ENTITY_ID,
+        action: "spoilage",
+        userId: USER_ID,
+        summary: "Write-off recorded ingredient (spoilage)",
+        metadata: {
+          item_type: "ingredient",
+          ingredient_id: ENTITY_ID,
+          product_id: null,
+          quantity: 2,
+          total_value: 15,
+          reason: "spoilage",
+        },
+      },
+    ] satisfies AuditEvent[]);
+    expectReadOnly();
+  });
+
   it("returns an empty array when the view has no rows", async () => {
     mockAuditLogList([]);
 
@@ -304,6 +350,40 @@ describe("auditLogService.getEntityHistory (DEV-048)", () => {
     expect(badId.error).toBe("Entity id is required.");
 
     expect(supabaseMock.from).not.toHaveBeenCalled();
+  });
+
+  it("accepts write_off as an entity type for entity history", async () => {
+    mockEntityHistory([
+      {
+        event_id: `write_off.recorded.${ENTITY_ID}`,
+        occurred_at: "2026-09-05T10:00:00.000Z",
+        entity_type: "write_off",
+        entity_id: ENTITY_ID,
+        action: "spoilage",
+        user_id: USER_ID,
+        summary: "Write-off recorded ingredient (spoilage)",
+        metadata: {
+          item_type: "ingredient",
+          ingredient_id: ENTITY_ID,
+          product_id: null,
+          quantity: 2,
+          total_value: 15,
+          reason: "spoilage",
+        },
+      },
+    ]);
+
+    const result = await auditLogService.getEntityHistory(
+      "write_off",
+      ENTITY_ID,
+    );
+
+    expect(result.error).toBeNull();
+    expect(result.data?.[0]?.entityType).toBe("write_off");
+    expect(result.data?.[0]?.action).toBe("spoilage");
+    expect(result.data?.[0]?.summary).toBe(
+      "Write-off recorded ingredient (spoilage)",
+    );
   });
 
   it("maps missing-view errors for entity history", async () => {

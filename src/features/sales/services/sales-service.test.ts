@@ -11,7 +11,8 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { supabaseMock, postJournalsForSaleCompletedMock } = vi.hoisted(() => {
+const { supabaseMock, postJournalsForSaleCompletedMock, reportPostingFailureMock } =
+  vi.hoisted(() => {
   const supabaseMock = {
     from: vi.fn(),
     rpc: vi.fn(),
@@ -22,6 +23,7 @@ const { supabaseMock, postJournalsForSaleCompletedMock } = vi.hoisted(() => {
   return {
     supabaseMock,
     postJournalsForSaleCompletedMock: vi.fn(),
+    reportPostingFailureMock: vi.fn(),
   };
 });
 
@@ -36,6 +38,12 @@ vi.mock("./sale-accounting-service", () => ({
   },
 }));
 
+vi.mock("@/features/accounting/utils/report-posting-failure", () => ({
+  reportPostingFailure: (...args: unknown[]) =>
+    reportPostingFailureMock(...args),
+}));
+
+import type { Sale, SaleLine } from "../types/sale";
 import { salesService } from "./sales-service";
 
 const SALE_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
@@ -55,7 +63,7 @@ function rpcConfirmPayload(totalCogs = 18.75) {
   };
 }
 
-function saleRow() {
+function saleRow(): Sale {
   return {
     id: SALE_ID,
     sale_number: "S-1001",
@@ -77,7 +85,7 @@ function saleRow() {
   };
 }
 
-function saleLineRow() {
+function saleLineRow(): SaleLine {
   return {
     id: LINE_ID,
     sale_id: SALE_ID,
@@ -1081,6 +1089,7 @@ describe("salesService.confirmSaleAndPostJournals (DEV-109)", () => {
     updateMock.mockReset();
     deleteMock.mockReset();
     postJournalsForSaleCompletedMock.mockReset();
+    reportPostingFailureMock.mockReset();
     supabaseMock.auth.getUser.mockResolvedValue({
       data: { user: { id: USER_ID } },
       error: null,
@@ -1113,6 +1122,7 @@ describe("salesService.confirmSaleAndPostJournals (DEV-109)", () => {
     expect(result.data?.total_cogs).toBe(18.75);
     expect(result.data?.posting).not.toBeNull();
     expect(result.data?.postingError).toBeNull();
+    expect(reportPostingFailureMock).not.toHaveBeenCalled();
   });
 
   it("still returns ok() with the confirmed sale when posting fails — never discards a successful confirm", async () => {
@@ -1139,6 +1149,14 @@ describe("salesService.confirmSaleAndPostJournals (DEV-109)", () => {
     expect(result.data?.postingError).toBe(
       "No open fiscal period covers today's date.",
     );
+    expect(reportPostingFailureMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourceFlow: "sale_confirm",
+        entityType: "sale",
+        entityId: SALE_ID,
+        errorMessage: "No open fiscal period covers today's date.",
+      }),
+    );
   });
 
   it("returns fail() and never calls posting when confirmSale itself fails", async () => {
@@ -1155,6 +1173,77 @@ describe("salesService.confirmSaleAndPostJournals (DEV-109)", () => {
     expect(result.data).toBeNull();
     expect(result.error).toBe("Only draft sales can be confirmed.");
     expect(postJournalsForSaleCompletedMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("salesService.createAndConfirmSaleAndPostJournals sourceFlow", () => {
+  const input = {
+    lines: [{ product_id: PRODUCT_ID, quantity: 1, unit_price: 10.9 }],
+  };
+
+  function spyCreateAndConfirm() {
+    return vi.spyOn(salesService, "createAndConfirmSale").mockResolvedValue({
+      data: {
+        sale: { ...saleRow(), lines: [saleLineRow()] },
+        total_cogs: 18.75,
+      },
+      error: null,
+    });
+  }
+
+  beforeEach(() => {
+    reportPostingFailureMock.mockReset();
+    postJournalsForSaleCompletedMock.mockReset();
+    postJournalsForSaleCompletedMock.mockResolvedValue({
+      data: null,
+      error: "No open fiscal period covers today's date.",
+    });
+  });
+
+  it("reports quick_sale_confirm when the third argument is omitted", async () => {
+    const spy = spyCreateAndConfirm();
+
+    const result = await salesService.createAndConfirmSaleAndPostJournals(
+      input,
+      ACCOUNTING_CONTEXT,
+    );
+
+    expect(result.error).toBeNull();
+    expect(result.data?.postingError).toBe(
+      "No open fiscal period covers today's date.",
+    );
+    expect(reportPostingFailureMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourceFlow: "quick_sale_confirm",
+        entityType: "sale",
+        entityId: SALE_ID,
+        errorMessage: "No open fiscal period covers today's date.",
+      }),
+    );
+
+    spy.mockRestore();
+  });
+
+  it("reports pos_confirm when the third argument is pos_confirm", async () => {
+    const spy = spyCreateAndConfirm();
+
+    const result = await salesService.createAndConfirmSaleAndPostJournals(
+      input,
+      ACCOUNTING_CONTEXT,
+      "pos_confirm",
+    );
+
+    expect(result.error).toBeNull();
+    expect(reportPostingFailureMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourceFlow: "pos_confirm",
+        entityType: "sale",
+        entityId: SALE_ID,
+        errorMessage: "No open fiscal period covers today's date.",
+      }),
+    );
+
+    spy.mockRestore();
   });
 });
 

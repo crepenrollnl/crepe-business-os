@@ -20,7 +20,22 @@ import {
   type RecordWriteOffAndPostResult,
   type RecordWriteOffInput,
 } from "../types/write-off";
+import { reportPostingFailure } from "@/features/accounting/utils/report-posting-failure";
 import { writeOffService } from "./write-off-service";
+
+function reportWriteOffPostingFailure(
+  writeOffId: string,
+  errorMessage: string,
+  businessEventId?: string | null,
+): void {
+  void reportPostingFailure({
+    sourceFlow: "write_off_record",
+    entityType: "write_off",
+    entityId: writeOffId,
+    businessEventId: businessEventId ?? null,
+    errorMessage,
+  });
+}
 
 function writeOffIdempotencyKey(writeOffId: string): string {
   return `waste_recognized:${writeOffId}`;
@@ -47,11 +62,13 @@ export const writeOffAccountingService = {
 
     const context = await accountingContextService.getCurrentAccountingContext();
     if (context.error || !context.data) {
+      const postingError =
+        context.error ??
+        "Write-off recorded but accounting context is unavailable.";
+      reportWriteOffPostingFailure(writeOff.id, postingError);
       return ok({
         writeOff,
-        postingError:
-          context.error ??
-          "Write-off recorded but accounting context is unavailable.",
+        postingError,
         accountingNote: null,
       });
     }
@@ -80,11 +97,13 @@ export const writeOffAccountingService = {
     });
 
     if (eventResult.error || !eventResult.data) {
+      const postingError =
+        eventResult.error ??
+        "Write-off recorded but the accounting event could not be built.";
+      reportWriteOffPostingFailure(writeOff.id, postingError);
       return ok({
         writeOff,
-        postingError:
-          eventResult.error ??
-          "Write-off recorded but the accounting event could not be built.",
+        postingError,
         accountingNote: null,
       });
     }
@@ -110,11 +129,17 @@ export const writeOffAccountingService = {
     });
 
     if (posted.error || !posted.data) {
+      const postingError =
+        posted.error ??
+        "Write-off recorded but accounting posting failed.";
+      reportWriteOffPostingFailure(
+        writeOff.id,
+        postingError,
+        eventResult.data.id,
+      );
       return ok({
         writeOff,
-        postingError:
-          posted.error ??
-          "Write-off recorded but accounting posting failed.",
+        postingError,
         accountingNote: null,
       });
     }

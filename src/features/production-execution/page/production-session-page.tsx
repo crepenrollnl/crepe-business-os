@@ -36,6 +36,7 @@ export function ProductionSessionPage({ sessionId }: ProductionSessionPageProps)
     finishProduction,
     retry,
     zeroCostWarning,
+    postingError,
   } = useProductionSession(sessionId);
   const [isConfirmFinishDialogOpen, setIsConfirmFinishDialogOpen] =
     useState(false);
@@ -123,6 +124,7 @@ export function ProductionSessionPage({ sessionId }: ProductionSessionPageProps)
                   accountingPostingStatus={
                     session.accounting_posting_status ?? "pending"
                   }
+                  postingError={postingError}
                 />
               </>
             ) : null}

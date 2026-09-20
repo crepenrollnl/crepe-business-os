@@ -153,6 +153,20 @@ describe("ProductionSessionBatchesSection (DEV-106)", () => {
     );
   });
 
+  it("renders postingError next to accounting status in the same amber pattern", () => {
+    render(
+      <ProductionSessionBatchesSection
+        batches={[batch()]}
+        accountingPostingStatus="pending"
+        postingError="Production completed but accounting posting failed."
+      />,
+    );
+
+    expect(
+      screen.getByText("Production completed but accounting posting failed."),
+    ).toHaveClass("text-sm", "text-amber-700");
+  });
+
   it("handles missing valuation without displaying cost figures", () => {
     render(
       <ProductionSessionBatchesSection

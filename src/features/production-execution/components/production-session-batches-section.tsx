@@ -9,6 +9,7 @@ type ProductionSessionBatchesSectionProps = {
   completionDate?: string | null;
   /** Session-level accounting journal status (DEV-106). */
   accountingPostingStatus?: ProductionAccountingPostingStatus;
+  postingError?: string | null;
 };
 
 function formatQuantity(value: number, unit: string): string {
@@ -26,11 +27,15 @@ export function ProductionSessionBatchesSection({
   batches,
   completionDate,
   accountingPostingStatus = "pending",
+  postingError = null,
 }: ProductionSessionBatchesSectionProps) {
   if (batches.length === 0) {
     return (
       <div className="rounded-xl border border-zinc-200 bg-white px-4 py-6 text-sm text-zinc-600 shadow-sm">
         No production batches were created (all actual quantities were zero).
+        {postingError ? (
+          <p className="mt-3 text-sm text-amber-700">{postingError}</p>
+        ) : null}
       </div>
     );
   }
@@ -75,6 +80,9 @@ export function ProductionSessionBatchesSection({
               </dd>
             </div>
           </dl>
+          {postingError ? (
+            <p className="mt-3 text-sm text-amber-700">{postingError}</p>
+          ) : null}
         </div>
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-zinc-200 text-sm">
