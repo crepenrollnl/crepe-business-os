@@ -1,0 +1,67 @@
+name: Scratch full SQL replay
+
+on:
+  push:
+    branches:
+      - claude/sql-replay-experiment
+
+jobs:
+  full-replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      PGHOST: 127.0.0.1
+      PGPORT: 5432
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      PGDATABASE: postgres
+      PGCLIENTENCODING: UTF8
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install psql
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+
+      - name: Wait for Postgres
+        run: |
+          for i in $(seq 1 30); do
+            pg_isready -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" && exit 0
+            sleep 2
+          done
+          echo "Postgres did not become ready"
+          exit 1
+
+      - name: Apply prelude stubs
+        run: |
+          set -euo pipefail
+          echo "Applying tests/sql/bootstrap/prelude_auth.sql"
+          psql -v ON_ERROR_STOP=1 -f tests/sql/bootstrap/prelude_auth.sql
+          echo "Applying tests/sql/bootstrap/stub_suppliers.sql"
+          psql -v ON_ERROR_STOP=1 -f tests/sql/bootstrap/stub_suppliers.sql
+
+      - name: Replay all tracked sql/*.sql in number order
+        run: |
+          set -euo pipefail
+          mapfile -t files < <(git ls-files "sql/*.sql" | sort)
+          for f in "${files[@]}"; do
+            echo "========================================"
+            echo "Applying $f"
+            echo "========================================"
+            psql -v ON_ERROR_STOP=1 -f "$f"
+          done
+          echo "FULL REPLAY SUCCESS: all tracked sql/*.sql applied"
