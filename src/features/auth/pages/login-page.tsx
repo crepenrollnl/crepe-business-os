@@ -2,18 +2,17 @@
 
 import { GuestGuard } from "@/features/auth/components/guest-guard";
 import { LoginForm } from "@/features/auth/components/login-form";
-import { LoginLogo } from "@/features/auth/components/login-logo";
 
 export function LoginPage() {
   return (
     <GuestGuard>
-      <div className="flex min-h-screen items-center justify-center bg-zinc-50 px-4 py-12">
-        <div className="w-full max-w-md">
-          <LoginLogo />
+      <div className="flex min-h-screen items-center justify-center bg-zinc-100">
+        <div className="w-full max-w-md rounded-xl bg-white p-8 shadow-lg">
+          <h1 className="mb-6 text-center text-3xl font-bold">
+            Crepe&apos;n Roll OS
+          </h1>
 
-          <div className="mt-10 rounded-2xl border border-zinc-200 bg-white p-8 shadow-sm">
-            <LoginForm />
-          </div>
+          <LoginForm />
         </div>
       </div>
     </GuestGuard>
