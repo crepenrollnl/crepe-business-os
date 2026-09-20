@@ -53,6 +53,8 @@ jobs:
           psql -v ON_ERROR_STOP=1 -f tests/sql/bootstrap/prelude_auth.sql
           echo "Applying tests/sql/bootstrap/stub_suppliers.sql"
           psql -v ON_ERROR_STOP=1 -f tests/sql/bootstrap/stub_suppliers.sql
+          echo "Applying tests/sql/bootstrap/stub_storage.sql"
+          psql -v ON_ERROR_STOP=1 -f tests/sql/bootstrap/stub_storage.sql
 
       - name: Replay all tracked sql/*.sql in number order
         run: |
