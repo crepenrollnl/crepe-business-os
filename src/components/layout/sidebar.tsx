@@ -1,5 +1,8 @@
+"use client";
+
 import Link from "next/link";
-import { navItems } from "@/lib/navigation";
+import { useMyRole } from "@/features/auth/hooks/use-my-role";
+import { isNavItemVisible, navItems } from "@/lib/navigation";
 
 type SidebarProps = {
   isOpen: boolean;
@@ -8,6 +11,9 @@ type SidebarProps = {
 };
 
 export function Sidebar({ isOpen, onClose, activePath = "/" }: SidebarProps) {
+  const { role } = useMyRole();
+  const visibleItems = navItems.filter((item) => isNavItemVisible(item, role));
+
   return (
     <>
       {isOpen && (
@@ -32,7 +38,7 @@ export function Sidebar({ isOpen, onClose, activePath = "/" }: SidebarProps) {
 
         <nav className="flex-1 overflow-y-auto px-3 py-4">
           <ul className="space-y-1">
-            {navItems.map((item) => {
+            {visibleItems.map((item) => {
               const isActive =
                 item.href !== "#" && item.href === activePath;
 

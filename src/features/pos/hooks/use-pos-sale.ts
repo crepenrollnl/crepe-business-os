@@ -269,6 +269,7 @@ export function usePosSale() {
           client_request_id: clientRequestId,
         },
         contextResult.data,
+        "pos_confirm",
       );
 
       if (posted.error || !posted.data) {

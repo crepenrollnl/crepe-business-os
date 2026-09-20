@@ -20,6 +20,7 @@ type SaleReviewSectionProps = {
   cogsSummary?: SaleCostSummary | null;
   profitSummary?: SaleProfitSummary | null;
   accountingPostingStatus?: SaleAccountingPostingStatus;
+  postingError?: string | null;
   cogsError?: string | null;
   profitError?: string | null;
   loading?: boolean;
@@ -91,6 +92,7 @@ export function SaleReviewSection({
   cogsSummary = null,
   profitSummary = null,
   accountingPostingStatus = "pending",
+  postingError = null,
   cogsError = null,
   profitError = null,
   loading = false,
@@ -260,6 +262,10 @@ export function SaleReviewSection({
               </dd>
             </div>
           </dl>
+
+          {postingError ? (
+            <p className="mt-3 text-sm text-amber-700">{postingError}</p>
+          ) : null}
 
           {cogsError ? (
             <p
