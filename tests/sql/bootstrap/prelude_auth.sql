@@ -9,13 +9,24 @@
 --     (nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'sub')
 --   )::uuid
 
-CREATE ROLE authenticated NOLOGIN;
-CREATE ROLE anon NOLOGIN;
+DO $$
+BEGIN
+  CREATE ROLE authenticated NOLOGIN;
+EXCEPTION
+  WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  CREATE ROLE anon NOLOGIN;
+EXCEPTION
+  WHEN duplicate_object THEN NULL;
+END $$;
 
 CREATE SCHEMA IF NOT EXISTS auth;
 
 -- email: live Supabase auth.users has this column; sql/113 joins it.
-CREATE TABLE auth.users (
+CREATE TABLE IF NOT EXISTS auth.users (
   id uuid PRIMARY KEY,
   email text
 );
