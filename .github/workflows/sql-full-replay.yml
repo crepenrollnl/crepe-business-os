@@ -1,0 +1,91 @@
+name: SQL full replay
+
+on:
+  pull_request:
+
+jobs:
+  sql-full-replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      PGHOST: 127.0.0.1
+      PGPORT: 5432
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      PGDATABASE: postgres
+      PGCLIENTENCODING: UTF8
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install psql
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+
+      - name: Wait for Postgres
+        run: |
+          for i in $(seq 1 30); do
+            pg_isready -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" && exit 0
+            sleep 2
+          done
+          echo "Postgres did not become ready"
+          exit 1
+
+      - name: Apply prelude stubs
+        run: |
+          set -euo pipefail
+          echo "Applying tests/sql/bootstrap/prelude_auth.sql"
+          psql -v ON_ERROR_STOP=1 -f tests/sql/bootstrap/prelude_auth.sql
+          echo "Applying tests/sql/bootstrap/stub_suppliers.sql"
+          psql -v ON_ERROR_STOP=1 -f tests/sql/bootstrap/stub_suppliers.sql
+          echo "Applying tests/sql/bootstrap/stub_storage.sql"
+          psql -v ON_ERROR_STOP=1 -f tests/sql/bootstrap/stub_storage.sql
+
+      - name: Replay all tracked sql/*.sql in number order
+        run: |
+          set -euo pipefail
+          mapfile -t files < <(git ls-files "sql/*.sql" | sort)
+          apply_psql() {
+            local f="$1"
+            echo "========================================"
+            echo "Applying $f"
+            echo "========================================"
+            set +e
+            output=$(psql -v ON_ERROR_STOP=1 -f "$f" 2>&1)
+            status=$?
+            set -e
+            echo "$output"
+            if [ "$status" -ne 0 ]; then
+              err=$(printf '%s' "$output" | tr '\n' ' | ')
+              echo "::error file=$f,title=psql failed on ${f}::${err}"
+              {
+                echo "## First failure: \`$f\`"
+                echo
+                echo '```'
+                echo "$output"
+                echo '```'
+              } >> "$GITHUB_STEP_SUMMARY"
+              exit "$status"
+            fi
+          }
+
+          for f in "${files[@]}"; do
+            apply_psql "$f"
+            if [ "$f" = "sql/097_profiles_and_role_guard.sql" ]; then
+              apply_psql tests/sql/bootstrap/stub_owner_profile.sql
+            fi
+          done
+          echo "FULL REPLAY SUCCESS: all tracked sql/*.sql applied"

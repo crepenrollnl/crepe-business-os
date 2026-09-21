@@ -2024,8 +2024,7 @@ SELECT
   p.proname AS function_name,
   p.prosecdef AS is_security_definer,
   has_function_privilege('authenticated', p.oid, 'EXECUTE') AS authenticated_can_execute,
-  has_function_privilege('anon', p.oid, 'EXECUTE') AS anon_can_execute,
-  has_function_privilege('PUBLIC', p.oid, 'EXECUTE') AS public_can_execute
+  has_function_privilege('anon', p.oid, 'EXECUTE') AS anon_can_execute
 FROM pg_proc p
 WHERE p.proname IN (
   'post_journal_proposals',
@@ -2033,8 +2032,19 @@ WHERE p.proname IN (
   'record_write_off'
 );
 -- Expect all three rows: is_security_definer = true,
--- authenticated_can_execute = true, anon_can_execute = false,
--- public_can_execute = false -- unchanged from before this migration.
+-- authenticated_can_execute = true, anon_can_execute = false
+-- (unchanged from before this migration).
+
+SELECT grantee, routine_name, privilege_type
+FROM information_schema.routine_privileges
+WHERE routine_schema = 'public'
+  AND routine_name IN (
+    'post_journal_proposals',
+    'allocate_finished_goods_fifo',
+    'record_write_off'
+  )
+  AND grantee = 'PUBLIC';
+-- Expect 0 rows.
 
 -- 3c. Confirm the new RLS policy text on all three ledger tables matches
 --     the exact, already-proven shape live on accounts/fiscal_periods
