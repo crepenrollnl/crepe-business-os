@@ -60,7 +60,8 @@ jobs:
         run: |
           set -euo pipefail
           mapfile -t files < <(git ls-files "sql/*.sql" | sort)
-          for f in "${files[@]}"; do
+          apply_psql() {
+            local f="$1"
             echo "========================================"
             echo "Applying $f"
             echo "========================================"
@@ -80,6 +81,13 @@ jobs:
                 echo '```'
               } >> "$GITHUB_STEP_SUMMARY"
               exit "$status"
+            fi
+          }
+
+          for f in "${files[@]}"; do
+            apply_psql "$f"
+            if [ "$f" = "sql/097_profiles_and_role_guard.sql" ]; then
+              apply_psql tests/sql/bootstrap/stub_owner_profile.sql
             fi
           done
           echo "FULL REPLAY SUCCESS: all tracked sql/*.sql applied"
