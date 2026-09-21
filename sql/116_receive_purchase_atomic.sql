@@ -506,13 +506,18 @@ SELECT
   p.proname AS function_name,
   p.prosecdef AS is_security_definer,
   has_function_privilege('authenticated', p.oid, 'EXECUTE') AS authenticated_can_execute,
-  has_function_privilege('anon', p.oid, 'EXECUTE') AS anon_can_execute,
-  has_function_privilege('PUBLIC', p.oid, 'EXECUTE') AS public_can_execute
+  has_function_privilege('anon', p.oid, 'EXECUTE') AS anon_can_execute
 FROM pg_proc p
 WHERE p.proname = 'receive_purchase';
 -- Expect exactly one row: is_security_definer = true,
--- authenticated_can_execute = true, anon_can_execute = false,
--- public_can_execute = false.
+-- authenticated_can_execute = true, anon_can_execute = false.
+
+SELECT grantee, routine_name, privilege_type
+FROM information_schema.routine_privileges
+WHERE routine_schema = 'public'
+  AND routine_name = 'receive_purchase'
+  AND grantee = 'PUBLIC';
+-- Expect 0 rows.
 
 -- 3b. After a REAL purchase has been received through the app, confirm its
 --     status and every line's ingredient stock/cost reflect the receive.
