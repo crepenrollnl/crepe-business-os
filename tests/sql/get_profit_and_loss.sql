@@ -104,6 +104,8 @@ DECLARE
   v_journal uuid;
   v_line uuid;
 BEGIN
+  -- Journal stays draft: journal_lines_immutable_posted rejects INSERT
+  -- onto a posted header. get_profit_and_loss reads ledger_entries only.
   SELECT id INTO v_period
   FROM fiscal_periods
   WHERE p_entry_date BETWEEN start_date AND end_date
@@ -131,18 +133,16 @@ BEGIN
     status,
     transaction_currency,
     base_currency,
-    exchange_rate,
-    posted_at
+    exchange_rate
   )
   VALUES (
     v_period,
     p_entry_date,
     'TEST_PNL ' || p_account_code,
-    'posted',
+    'draft',
     'EUR',
     'EUR',
-    1,
-    now()
+    1
   )
   RETURNING id INTO v_journal;
 
