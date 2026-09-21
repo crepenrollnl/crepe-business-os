@@ -15,6 +15,9 @@
 --   C — confirmed sale with no ledger_entries: sales_revenue.mismatch = true
 --   D — sale status = 'paid' with matching ledger 4000: operational
 --       revenue still counts it, mismatch = false
+--   E — confirmed sale whose COGS is only stock_movements (sql/120
+--       assembly ingredient_id branch: sale_out / reference_type sale /
+--       reference_id = sale_line.id). No fgbc rows. mismatch = false
 --
 -- Actor: stub_owner_profile.sql (applied after sql/097). JWT GUCs match
 -- prelude_auth.sql's auth.uid(). Dummy production_batches are inserted
@@ -521,6 +524,90 @@ BEGIN
   END IF;
 
   RAISE NOTICE 'PASS D — paid sale is included in operational revenue with mismatch=false';
+
+  -- ------------------------------------------------------------------ E
+  -- Mirrors sql/120 confirm_sale ingredient_id branch: decrement is
+  -- recorded as stock_movements (not finished_goods_batch_consumptions).
+  INSERT INTO sales (
+    sale_number,
+    status,
+    sale_date,
+    confirmed_at,
+    subtotal,
+    tax_total,
+    total
+  )
+  VALUES (
+    'TEST-PNL-E-' || v_suffix,
+    'confirmed',
+    DATE '2026-09-12',
+    TIMESTAMPTZ '2026-09-12 14:00:00+00',
+    20.00,
+    1.80,
+    21.80
+  )
+  RETURNING id INTO v_sale;
+
+  INSERT INTO sale_lines (
+    sale_id, product_id, quantity, unit_price, line_total
+  )
+  VALUES (
+    v_sale, v_recipe, 1, 21.80, 21.80
+  )
+  RETURNING id INTO v_line;
+
+  INSERT INTO stock_movements (
+    ingredient_id,
+    product_id,
+    movement_type,
+    quantity,
+    unit_cost,
+    transaction_id,
+    reference_type,
+    reference_id,
+    occurred_at,
+    created_at
+  )
+  VALUES (
+    (SELECT id FROM ingredients WHERE name = 'TEST_PNL_ing_' || v_suffix),
+    NULL,
+    'sale_out',
+    2,
+    3.5000,
+    NULL,
+    'sale',
+    v_line,
+    TIMESTAMPTZ '2026-09-12 14:00:00+00',
+    TIMESTAMPTZ '2026-09-12 14:00:00+00'
+  );
+
+  PERFORM insert_test_ledger_line(DATE '2026-09-12', '4000', 0, 20.00);
+  PERFORM insert_test_ledger_line(DATE '2026-09-12', '5000', 7.00, 0);
+
+  v_result := get_profit_and_loss(DATE '2026-09-01', DATE '2026-09-30');
+  RAISE NOTICE 'E result: %', v_result;
+
+  IF (v_result->>'cogs')::numeric <> 7.00 THEN
+    RAISE EXCEPTION 'E ledger cogs expected 7.00 got %', v_result->>'cogs';
+  END IF;
+  IF (v_result#>>'{reconciliation,cogs,operational_amount}')::numeric <> 7.00 THEN
+    RAISE EXCEPTION 'E cogs operational expected 7.00 got %',
+      v_result#>>'{reconciliation,cogs,operational_amount}';
+  END IF;
+  IF (v_result#>>'{reconciliation,cogs,mismatch}')::boolean IS DISTINCT FROM false THEN
+    RAISE EXCEPTION 'E cogs.mismatch expected false got %',
+      v_result#>>'{reconciliation,cogs,mismatch}';
+  END IF;
+  IF EXISTS (
+    SELECT 1
+    FROM finished_goods_batch_consumptions fgbc
+    WHERE fgbc.source_id = v_line
+      AND fgbc.source_type = 'sale_line'
+  ) THEN
+    RAISE EXCEPTION 'E must not have fgbc rows for this sale_line';
+  END IF;
+
+  RAISE NOTICE 'PASS E — stock_movements sale_out COGS is included with mismatch=false';
 END;
 $test$;
 
