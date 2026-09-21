@@ -466,7 +466,7 @@ BEGIN
     RAISE EXCEPTION 'SCENARIO E FAIL: sale is not confirmed';
   END IF;
 
-  SELECT count(*), COALESCE(sum(quantity), 0)
+  SELECT count(*), COALESCE(sum(fgbc.quantity), 0)
   INTO v_fifo_e, v_consumed_e
   FROM finished_goods_batch_consumptions fgbc
   JOIN sale_lines sl ON sl.id = fgbc.source_id
