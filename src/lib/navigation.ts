@@ -23,6 +23,11 @@ export const navItems: NavItem[] = [
   { label: "Sales", href: "/sales" },
   { label: "Expenses", href: "/expenses" },
   { label: "Fixed Assets", href: "/fixed-assets" },
+  {
+    label: "Accounting",
+    href: "/accounting/profit-and-loss",
+    roles: ["owner", "partner"],
+  },
   { label: "Reports", href: "/reports" },
   {
     label: "Posting Failures",
