@@ -49,7 +49,7 @@ describe("Sidebar posting-failures role gate", () => {
       screen.queryByRole("link", { name: "Posting Failures" }),
     ).not.toBeInTheDocument();
     expect(
-      screen.queryByRole("link", { name: "Accounting" }),
+      screen.queryByRole("link", { name: "Profit and Loss" }),
     ).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Dashboard" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Reports" })).toBeInTheDocument();
@@ -63,7 +63,7 @@ describe("Sidebar posting-failures role gate", () => {
     expect(
       screen.getByRole("link", { name: "Posting Failures" }),
     ).toHaveAttribute("href", "/reports/posting-failures");
-    expect(screen.getByRole("link", { name: "Accounting" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "Profit and Loss" })).toHaveAttribute(
       "href",
       "/accounting/profit-and-loss",
     );
