@@ -15,15 +15,16 @@
 -- Reconciliation compares those ledger totals to operational tables
 -- because confirm_sale / record_write_off post GL in a later TS step, not
 -- in the same SQL transaction:
---   sales_revenue — SUM(sales.subtotal) for status = 'confirmed'
+--   sales_revenue — SUM(sales.subtotal) for status IN ('confirmed', 'paid')
 --                   whose confirmed_at::date is inside the period
---                   (subtotal is the field sale-accounting posts to 4000)
+--                   (subtotal is the field sale-accounting posts to 4000;
+--                   paid replaces confirmed, so both must count)
 --   cogs          — SUM(finished_goods_batch_consumptions.total_cost)
 --                   + SUM(stock_movements.quantity * unit_cost) for those
---                   same confirmed sales (sql/109 grain; sales has no
+--                   same confirmed/paid sales (sql/109 grain; sales has no
 --                   total_cogs column)
 --   write_offs    — SUM(write_offs.total_value) whose created_at::date
---                   is inside the period
+--                   is inside the period (write_offs has no status column)
 -- mismatch is true when abs(operational − ledger) > 0.01.
 --
 -- Does NOT:
@@ -181,7 +182,7 @@ BEGIN
   SELECT round(COALESCE(SUM(s.subtotal), 0), 2)
   INTO v_op_revenue
   FROM sales s
-  WHERE s.status = 'confirmed'
+  WHERE s.status IN ('confirmed', 'paid')
     AND s.confirmed_at IS NOT NULL
     AND s.confirmed_at::date BETWEEN p_period_start AND p_period_end;
 
@@ -194,7 +195,7 @@ BEGIN
       WHERE fgbc.source_type = 'sale_line'
         AND fgbc.direction = 'out'
         AND fgbc.reason = 'sale'
-        AND s.status = 'confirmed'
+        AND s.status IN ('confirmed', 'paid')
         AND s.confirmed_at IS NOT NULL
         AND s.confirmed_at::date BETWEEN p_period_start AND p_period_end
     ), 0)
@@ -206,7 +207,7 @@ BEGIN
       JOIN sales s ON s.id = sl.sale_id
       WHERE sm.reference_type = 'sale'
         AND sm.movement_type = 'sale_out'
-        AND s.status = 'confirmed'
+        AND s.status IN ('confirmed', 'paid')
         AND s.confirmed_at IS NOT NULL
         AND s.confirmed_at::date BETWEEN p_period_start AND p_period_end
     ), 0),
@@ -252,7 +253,7 @@ END;
 $$;
 
 COMMENT ON FUNCTION get_profit_and_loss(date, date) IS
-  'Owner/partner P&L from ledger_entries for an inclusive date window, plus operational-vs-ledger reconciliation for sales revenue, COGS, and write-offs.';
+  'Owner/partner P&L from ledger_entries for an inclusive date window, plus operational-vs-ledger reconciliation for confirmed/paid sales revenue, COGS, and write-offs.';
 
 REVOKE ALL ON FUNCTION get_profit_and_loss(date, date) FROM PUBLIC;
 REVOKE ALL ON FUNCTION get_profit_and_loss(date, date) FROM anon;

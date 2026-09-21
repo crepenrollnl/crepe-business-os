@@ -13,6 +13,8 @@
 --   B — period with no operational or ledger rows: all zeros,
 --       mismatch = false
 --   C — confirmed sale with no ledger_entries: sales_revenue.mismatch = true
+--   D — sale status = 'paid' with matching ledger 4000: operational
+--       revenue still counts it, mismatch = false
 --
 -- Actor: stub_owner_profile.sql (applied after sql/097). JWT GUCs match
 -- prelude_auth.sql's auth.uid(). Dummy production_batches are inserted
@@ -478,6 +480,47 @@ BEGIN
   END IF;
 
   RAISE NOTICE 'PASS C — confirmed sale without ledger sets sales_revenue.mismatch';
+
+  -- ------------------------------------------------------------------ D
+  INSERT INTO sales (
+    sale_number,
+    status,
+    sale_date,
+    confirmed_at,
+    paid_at,
+    subtotal,
+    tax_total,
+    total
+  )
+  VALUES (
+    'TEST-PNL-D-' || v_suffix,
+    'paid',
+    DATE '2026-08-08',
+    TIMESTAMPTZ '2026-08-08 11:00:00+00',
+    TIMESTAMPTZ '2026-08-08 11:05:00+00',
+    80.00,
+    7.20,
+    87.20
+  );
+
+  PERFORM insert_test_ledger_line(DATE '2026-08-08', '4000', 0, 80.00);
+
+  v_result := get_profit_and_loss(DATE '2026-08-01', DATE '2026-08-31');
+  RAISE NOTICE 'D result: %', v_result;
+
+  IF (v_result->>'revenue')::numeric <> 80.00 THEN
+    RAISE EXCEPTION 'D ledger revenue expected 80.00 got %', v_result->>'revenue';
+  END IF;
+  IF (v_result#>>'{reconciliation,sales_revenue,operational_amount}')::numeric <> 80.00 THEN
+    RAISE EXCEPTION 'D sales_revenue operational expected 80.00 got %',
+      v_result#>>'{reconciliation,sales_revenue,operational_amount}';
+  END IF;
+  IF (v_result#>>'{reconciliation,sales_revenue,mismatch}')::boolean IS DISTINCT FROM false THEN
+    RAISE EXCEPTION 'D sales_revenue.mismatch expected false got %',
+      v_result#>>'{reconciliation,sales_revenue,mismatch}';
+  END IF;
+
+  RAISE NOTICE 'PASS D — paid sale is included in operational revenue with mismatch=false';
 END;
 $test$;
 

@@ -1,13 +1,13 @@
 name: SQL P&L report
 
 # Dedicated job: apply sql/121 on empty Postgres 16 and run
-# tests/sql/get_profit_and_loss.sql. Push is included so a throwaway
-# branch can produce a real run before a PR is opened. sql-tests.yml
-# stays pull_request-only.
+# tests/sql/get_profit_and_loss.sql. pull_request-only for CI on PRs
+# (same as sql-tests.yml / sql-full-replay.yml). workflow_dispatch lets
+# a throwaway branch be re-run without a push-to-main trigger.
 
 on:
-  push:
   pull_request:
+  workflow_dispatch:
 
 jobs:
   profit-and-loss-report:
