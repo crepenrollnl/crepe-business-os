@@ -17,6 +17,11 @@ export const navItems: NavItem[] = [
   { label: "Dashboard", href: "/" },
   { label: "Inventory", href: "/inventory" },
   { label: "Recipes", href: "/recipes" },
+  {
+    label: "Recipe Cost",
+    href: "/recipes/cost-report",
+    roles: ["owner", "partner"],
+  },
   { label: "Purchases", href: "/purchases" },
   { label: "Production Planning", href: "/production-planning" },
   { label: "Production Execution", href: "/production-execution" },

@@ -51,6 +51,9 @@ describe("Sidebar posting-failures role gate", () => {
     expect(
       screen.queryByRole("link", { name: "Profit and Loss" }),
     ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("link", { name: "Recipe Cost" }),
+    ).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Dashboard" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Reports" })).toBeInTheDocument();
   });
@@ -66,6 +69,21 @@ describe("Sidebar posting-failures role gate", () => {
     expect(screen.getByRole("link", { name: "Profit and Loss" })).toHaveAttribute(
       "href",
       "/accounting/profit-and-loss",
+    );
+    expect(screen.getByRole("link", { name: "Recipe Cost" })).toHaveAttribute(
+      "href",
+      "/recipes/cost-report",
+    );
+  });
+
+  it("shows Recipe Cost to a partner", () => {
+    useMyRoleMock.mockReturnValue({ role: "partner" });
+
+    render(<Sidebar isOpen onClose={() => undefined} />);
+
+    expect(screen.getByRole("link", { name: "Recipe Cost" })).toHaveAttribute(
+      "href",
+      "/recipes/cost-report",
     );
   });
 });
