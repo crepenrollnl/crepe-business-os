@@ -243,6 +243,17 @@ export function InventoryRow({
           {formatQuantity(currentQuantity)}
         </span>
       </td>
+      <td
+        className="px-4 py-4 text-right text-zinc-600"
+        data-testid="last-purchase-price"
+      >
+        {review?.last_purchase_price == null
+          ? "—"
+          : formatMoney(review.last_purchase_price)}
+      </td>
+      <td className="px-4 py-4 text-right font-medium text-zinc-900">
+        {formatMoney(item.cost_per_unit)}
+      </td>
       {showAll && (
         <td
           className="px-4 py-4 text-right text-zinc-600"
@@ -299,16 +310,6 @@ export function InventoryRow({
       )}
       {showAll && (
         <td
-          className="px-4 py-4 text-right text-zinc-600"
-          data-testid="last-purchase-price"
-        >
-          {review?.last_purchase_price == null
-            ? "—"
-            : formatMoney(review.last_purchase_price)}
-        </td>
-      )}
-      {showAll && (
-        <td
           className="px-4 py-4 text-zinc-600"
           data-testid="last-purchase-date"
         >
@@ -326,11 +327,6 @@ export function InventoryRow({
       {showAll && (
         <td className="px-4 py-4 text-right text-zinc-600">
           {item.minimum_stock}
-        </td>
-      )}
-      {showAll && (
-        <td className="px-4 py-4 text-right font-medium text-zinc-900">
-          {formatMoney(item.cost_per_unit)}
         </td>
       )}
       <td className="px-4 py-4 text-right">
