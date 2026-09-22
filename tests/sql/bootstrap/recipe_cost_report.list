@@ -1,0 +1,38 @@
+# Bootstrap for tests/sql/get_recipe_cost_report.sql.
+# Applied in this order on clean PostgreSQL 16 (no Supabase).
+#
+# Reuses the proven complete_production_session chain through sql/101
+# (explode_component_recipe_leaves + component-in-component role trigger)
+# and adds the recipe cost RPCs. sql/106 is not required.
+#
+# Scratch extras (not numbered migrations):
+tests/sql/bootstrap/prelude_auth.sql
+tests/sql/bootstrap/stub_suppliers.sql
+#
+# Numbered sql/ files:
+sql/000_backfill_ingredients_ingredient_categories.sql
+sql/001_create_purchases.sql
+sql/019_create_suppliers.sql
+sql/002_create_recipes.sql
+sql/004_create_production_plans.sql
+sql/006_create_production_sessions.sql
+sql/007_complete_production.sql
+sql/010_finished_goods_batch_consumptions.sql
+sql/013_create_sales.sql
+sql/016_create_draft_sale.sql
+sql/018_create_customers.sql
+sql/104_sales_fulfilled_at.sql
+sql/107_sales_kitchen_flags.sql
+sql/060_create_shifts.sql
+sql/085_recipe_assembly_layer.sql
+sql/086_quick_sale.sql
+sql/087_fix_finished_goods_consumption_rounding.sql
+sql/088_fix_finished_goods_total_cost_check.sql
+sql/089_recipe_components_ingredients.sql
+sql/093_raw_material_scale_override.sql
+sql/097_profiles_and_role_guard.sql
+tests/sql/bootstrap/stub_owner_profile.sql
+sql/098_role_guard_purchases_production.sql
+sql/100_component_in_component.sql
+sql/101_component_bom_explosion.sql
+sql/122_recipe_cost_report.sql
