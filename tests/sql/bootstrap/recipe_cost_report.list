@@ -25,6 +25,7 @@ sql/104_sales_fulfilled_at.sql
 sql/107_sales_kitchen_flags.sql
 sql/060_create_shifts.sql
 sql/085_recipe_assembly_layer.sql
+sql/086_quick_sale.sql
 sql/087_fix_finished_goods_consumption_rounding.sql
 sql/088_fix_finished_goods_total_cost_check.sql
 sql/089_recipe_components_ingredients.sql
