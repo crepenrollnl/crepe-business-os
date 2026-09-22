@@ -1,0 +1,84 @@
+name: SQL recipe cost report
+
+# Dedicated job: apply sql/122 on empty Postgres 16 and run
+# tests/sql/get_recipe_cost_report.sql. Same pattern as
+# sql-profit-and-loss.yml / sql-tests.yml.
+#
+# workflow_dispatch + push on the throwaway branch so CI can run without
+# a PR or a merge to main (GitHub only lists workflow_dispatch from
+# default-branch files).
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - cursor/recipe-cost-report-throwaway
+
+jobs:
+  recipe-cost-report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      PGHOST: 127.0.0.1
+      PGPORT: 5432
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      PGDATABASE: postgres
+      PGCLIENTENCODING: UTF8
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install psql
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+
+      - name: Wait for Postgres
+        run: |
+          for i in $(seq 1 30); do
+            pg_isready -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" && exit 0
+            sleep 2
+          done
+          echo "Postgres did not become ready"
+          exit 1
+
+      - name: Apply recipe-cost bootstrap + get_recipe_cost_report
+        run: |
+          set -euo pipefail
+          grep -E -v '^[[:space:]]*(#|$)' tests/sql/bootstrap/recipe_cost_report.list \
+            | while IFS= read -r f; do
+                echo "Applying $f"
+                set +e
+                output=$(psql -v ON_ERROR_STOP=1 -f "$f" 2>&1)
+                status=$?
+                set -e
+                echo "$output"
+                if [ "$status" -ne 0 ]; then
+                  err=$(printf '%s' "$output" | tr '\n' ' | ')
+                  echo "::error file=$f,title=psql failed on ${f}::${err}"
+                  exit "$status"
+                fi
+              done
+          set +e
+          output=$(psql -v ON_ERROR_STOP=1 -f tests/sql/get_recipe_cost_report.sql 2>&1)
+          status=$?
+          set -e
+          echo "$output"
+          if [ "$status" -ne 0 ]; then
+            err=$(printf '%s' "$output" | tr '\n' ' | ')
+            echo "::error file=tests/sql/get_recipe_cost_report.sql,title=psql failed on get_recipe_cost_report::${err}"
+            exit "$status"
+          fi
