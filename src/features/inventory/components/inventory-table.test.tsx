@@ -3,11 +3,12 @@
  * "/inventory table overloaded with columns"). No test file existed for
  * `inventory-table.tsx`/`inventory-row.tsx` before this task.
  *
- * Covers: default compact view shows only the 6 always-visible columns,
- * "Show more columns" reveals the remaining 12, COLUMN_COUNT-derived
- * colSpan/skeleton width stays correct in both states, and the removed
- * "Reason" column surfaces via a tooltip on Recommendation instead (same
- * pattern already used for Alert).
+ * Covers: default compact view shows the 8 always-visible columns
+ * (including Last Price and Price), "Show more columns" reveals the
+ * remaining expanded-only columns, COLUMN_COUNT-derived colSpan/skeleton
+ * width stays correct in both states, and the removed "Reason" column
+ * surfaces via a tooltip on Recommendation instead (same pattern already
+ * used for Alert).
  */
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
@@ -99,13 +100,15 @@ describe("InventoryTable compact/expanded columns", () => {
     cleanup();
   });
 
-  it("shows only the 6 compact columns by default", () => {
+  it("shows the 8 compact columns by default, including Last Price and Price", () => {
     render(<InventoryTable {...defaultProps} items={[ingredient()]} />);
 
     for (const label of [
       "Name",
       "Category",
       "Current Quantity",
+      "Last Price",
+      "Price",
       "Alert",
       "Recommendation",
       "Actions",
@@ -121,11 +124,9 @@ describe("InventoryTable compact/expanded columns", () => {
       "Recommended Qty",
       "Target Stock",
       "Last Supplier",
-      "Last Price",
       "Last Purchase",
       "Purchase Count",
       "Minimum Stock",
-      "Price",
     ]) {
       expect(screen.queryByText(label)).not.toBeInTheDocument();
     }
@@ -136,7 +137,7 @@ describe("InventoryTable compact/expanded columns", () => {
     ).toBeInTheDocument();
   });
 
-  it("reveals the remaining 12 columns after clicking 'Show more columns', and the toggle flips to 'Show fewer columns'", () => {
+  it("reveals the remaining expanded-only columns after clicking 'Show more columns', and the toggle flips to 'Show fewer columns'", () => {
     render(<InventoryTable {...defaultProps} items={[ingredient()]} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Show more columns" }));
@@ -149,14 +150,15 @@ describe("InventoryTable compact/expanded columns", () => {
       "Recommended Qty",
       "Target Stock",
       "Last Supplier",
-      "Last Price",
       "Last Purchase",
       "Purchase Count",
       "Minimum Stock",
-      "Price",
     ]) {
       expect(screen.getByText(label)).toBeInTheDocument();
     }
+
+    expect(screen.getAllByText("Last Price")).toHaveLength(1);
+    expect(screen.getAllByText("Price")).toHaveLength(1);
 
     expect(screen.queryByText("Reason")).not.toBeInTheDocument();
     expect(
@@ -164,7 +166,7 @@ describe("InventoryTable compact/expanded columns", () => {
     ).toBeInTheDocument();
   });
 
-  it("collapses back to 6 columns after clicking 'Show fewer columns' again", () => {
+  it("collapses back to compact columns after clicking 'Show fewer columns' again", () => {
     render(<InventoryTable {...defaultProps} items={[ingredient()]} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Show more columns" }));
@@ -176,13 +178,13 @@ describe("InventoryTable compact/expanded columns", () => {
     ).toBeInTheDocument();
   });
 
-  it("uses a 6-column skeleton in compact view and an 18-column skeleton once expanded", () => {
+  it("uses an 8-column skeleton in compact view and an 18-column skeleton once expanded", () => {
     const { rerender } = render(
       <InventoryTable {...defaultProps} items={[]} loading />,
     );
 
     const compactSkeletonRow = document.querySelector("tbody tr");
-    expect(compactSkeletonRow?.children.length).toBe(6);
+    expect(compactSkeletonRow?.children.length).toBe(8);
 
     rerender(<InventoryTable {...defaultProps} items={[]} loading />);
     fireEvent.click(screen.getByRole("button", { name: "Show more columns" }));
@@ -191,10 +193,10 @@ describe("InventoryTable compact/expanded columns", () => {
     expect(expandedSkeletonRow?.children.length).toBe(18);
   });
 
-  it("uses colSpan 6 for the empty state in compact view and 18 once expanded", () => {
+  it("uses colSpan 8 for the empty state in compact view and 18 once expanded", () => {
     render(<InventoryTable {...defaultProps} items={[]} />);
 
-    expect(document.querySelector("tbody td")).toHaveAttribute("colspan", "6");
+    expect(document.querySelector("tbody td")).toHaveAttribute("colspan", "8");
 
     fireEvent.click(screen.getByRole("button", { name: "Show more columns" }));
 

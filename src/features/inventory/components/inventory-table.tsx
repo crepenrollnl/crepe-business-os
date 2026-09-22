@@ -23,9 +23,9 @@ type InventoryTableProps = {
   onDelete: (item: IngredientWithRelations) => void;
 };
 
-/** Always visible: Name, Category, Current Quantity, Alert, Recommendation, Actions. */
-const COMPACT_COLUMN_COUNT = 6;
-/** All columns, "Show more columns" expanded (Reason folded into Recommendation's tooltip, so 19 - 1). */
+/** Always visible: Name, Category, Current Quantity, Last Price, Price, Alert, Recommendation, Actions. */
+const COMPACT_COLUMN_COUNT = 8;
+/** Compact 8 + the remaining 10 expanded-only columns (Reason still folded into Recommendation's tooltip). */
 const EXPANDED_COLUMN_COUNT = 18;
 
 function InventoryTableSkeleton({ columnCount }: { columnCount: number }) {
@@ -234,6 +234,17 @@ export function InventoryTable({
                 align="right"
                 onSort={onSort}
               />
+              <th className="px-4 py-3 text-right text-sm font-semibold text-zinc-700">
+                Last Price
+              </th>
+              <SortableHeader
+                label="Price"
+                field="cost_per_unit"
+                sortField={sortField}
+                sortDirection={sortDirection}
+                align="right"
+                onSort={onSort}
+              />
               {showAll && (
                 <th className="px-4 py-3 text-right text-sm font-semibold text-zinc-700">
                   Avg Daily Usage
@@ -266,11 +277,6 @@ export function InventoryTable({
                 </th>
               )}
               {showAll && (
-                <th className="px-4 py-3 text-right text-sm font-semibold text-zinc-700">
-                  Last Price
-                </th>
-              )}
-              {showAll && (
                 <th className="px-4 py-3 text-left text-sm font-semibold text-zinc-700">
                   Last Purchase
                 </th>
@@ -284,16 +290,6 @@ export function InventoryTable({
                 <SortableHeader
                   label="Minimum Stock"
                   field="minimum_stock"
-                  sortField={sortField}
-                  sortDirection={sortDirection}
-                  align="right"
-                  onSort={onSort}
-                />
-              )}
-              {showAll && (
-                <SortableHeader
-                  label="Price"
-                  field="cost_per_unit"
                   sortField={sortField}
                   sortDirection={sortDirection}
                   align="right"
