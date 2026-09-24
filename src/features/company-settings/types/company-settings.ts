@@ -2,7 +2,8 @@
  * Company Settings domain contracts (DEV-051).
  *
  * Read/write path: get_company_settings / update_company_settings RPCs.
- * Single-row configuration lives in SQL only. No auth/permissions.
+ * Single-row configuration lives in SQL only.
+ * update_company_settings is owner-only (require_role).
  */
 
 /**
