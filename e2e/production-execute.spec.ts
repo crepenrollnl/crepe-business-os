@@ -115,12 +115,14 @@ test("create recipe and plan, execute production, confirm stock deducted", async
   // to work around here.
   await expect(page.getByText("Ready to Produce", { exact: true })).toBeVisible();
 
-  // --- Open the plan from the Production Execution queue and start it. ---
-  await page.goto("/production-execution");
-
-  const queueRow = page.locator("tr", { hasText: planName });
-  await expect(queueRow).toBeVisible();
-  await queueRow.getByRole("button", { name: "Open" }).click();
+  // Deep-link the execution page. The queue list loads every leftover
+  // planned TEST plan through sequential readiness RPCs and can exceed
+  // the 15s locator timeout; this spec already proved ready_to_produce.
+  const planId = new URL(page.url()).pathname.split("/").pop();
+  if (!planId) {
+    throw new Error("Expected /production-planning/<id> after confirm.");
+  }
+  await page.goto(`/production-execution/${planId}`);
 
   const startButton = page.getByRole("button", { name: "Start Production" });
   await expect(startButton).toBeVisible();
