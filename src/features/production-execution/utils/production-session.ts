@@ -128,6 +128,122 @@ export function canFinishProductionSession(
   );
 }
 
+export const SESSION_FIELD_PRODUCED = "produced" as const;
+export const SESSION_FIELD_SCALE = "recipe_batches_used" as const;
+export const SESSION_FIELD_HELPER = "actual_ingredient_used" as const;
+
+export type SessionLineFieldKind =
+  | typeof SESSION_FIELD_PRODUCED
+  | typeof SESSION_FIELD_SCALE
+  | typeof SESSION_FIELD_HELPER;
+
+export interface SessionLineFieldError {
+  lineId: string;
+  productName: string;
+  field: SessionLineFieldKind;
+}
+
+export interface SessionLineDraftError {
+  error: string | null;
+}
+
+export const FINISH_MISSING_PRODUCED_REASON =
+  "Enter an actual produced quantity for every product";
+
+export const FINISH_NO_PRODUCTS_REASON =
+  "This session has no products to produce.";
+
+const SESSION_FIELD_REASON_PHRASE: Record<SessionLineFieldKind, string> = {
+  produced: "produced quantity",
+  recipe_batches_used: "Recipe Batches Used value",
+  actual_ingredient_used: "Actual ingredient used value",
+};
+
+export function findFirstSessionLineFieldError(
+  lines: ReadonlyArray<{ id: string; product_name: string }>,
+  drafts: Readonly<Record<string, SessionLineDraftError | undefined>>,
+  scaleDrafts: Readonly<Record<string, SessionLineDraftError | undefined>>,
+  helperDrafts: Readonly<Record<string, SessionLineDraftError | undefined>>,
+): SessionLineFieldError | null {
+  for (const line of lines) {
+    if (drafts[line.id]?.error) {
+      return {
+        lineId: line.id,
+        productName: line.product_name,
+        field: SESSION_FIELD_PRODUCED,
+      };
+    }
+
+    if (scaleDrafts[line.id]?.error) {
+      return {
+        lineId: line.id,
+        productName: line.product_name,
+        field: SESSION_FIELD_SCALE,
+      };
+    }
+
+    if (helperDrafts[line.id]?.error) {
+      return {
+        lineId: line.id,
+        productName: line.product_name,
+        field: SESSION_FIELD_HELPER,
+      };
+    }
+  }
+
+  return null;
+}
+
+export function formatSessionFieldBlockReason(
+  error: SessionLineFieldError,
+  suffix: "save" | "finish" | "block",
+): string {
+  const phrase = SESSION_FIELD_REASON_PHRASE[error.field];
+  const base = `Fix the invalid ${phrase} for ${error.productName}`;
+
+  if (suffix === "save") {
+    return `${base} before saving.`;
+  }
+
+  if (suffix === "finish") {
+    return `${base} before finishing.`;
+  }
+
+  return `${base}.`;
+}
+
+export function getFinishProductionBlockedReason(
+  lines: ReadonlyArray<{ id: string; product_name: string }>,
+  producedLines: ReadonlyArray<
+    Pick<ProductionSessionLineInput, "actual_produced_quantity">
+  >,
+  fieldError: SessionLineFieldError | null,
+): string | null {
+  if (fieldError) {
+    return formatSessionFieldBlockReason(fieldError, "block");
+  }
+
+  if (lines.length === 0) {
+    return FINISH_NO_PRODUCTS_REASON;
+  }
+
+  if (!canFinishProductionSession(producedLines)) {
+    return FINISH_MISSING_PRODUCED_REASON;
+  }
+
+  return null;
+}
+
+export function getSaveProgressBlockedReason(
+  fieldError: SessionLineFieldError | null,
+): string | null {
+  if (!fieldError) {
+    return null;
+  }
+
+  return formatSessionFieldBlockReason(fieldError, "save");
+}
+
 export function validateSessionLinesForComplete(
   lines: ProductionSessionLineInput[],
 ): string | null {

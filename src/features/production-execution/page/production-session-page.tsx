@@ -24,6 +24,7 @@ export function ProductionSessionPage({ sessionId }: ProductionSessionPageProps)
     firstLevelRawByRecipeId,
     canEdit,
     canFinish,
+    finishBlockedReason,
     saving,
     finishing,
     actionError,
@@ -59,7 +60,11 @@ export function ProductionSessionPage({ sessionId }: ProductionSessionPageProps)
 
   return (
     <DashboardLayout activePath="/production-execution">
-      <div className="mx-auto max-w-7xl space-y-8">
+      <div
+        className={`mx-auto max-w-7xl space-y-8 ${
+          canEdit ? "pb-28 lg:pb-0" : ""
+        }`}
+      >
         {loading ? (
           <div className="space-y-6">
             <div className="h-10 w-72 animate-pulse rounded-lg bg-zinc-100" />
@@ -89,6 +94,7 @@ export function ProductionSessionPage({ sessionId }: ProductionSessionPageProps)
               notes={notes}
               canEdit={canEdit}
               canFinish={canFinish}
+              finishBlockedReason={finishBlockedReason}
               finishing={finishing}
               saving={saving}
               actionError={actionError}

@@ -2,9 +2,17 @@ import { describe, expect, it } from "vitest";
 import {
   canFinishProductionSession,
   computeLineDifference,
+  FINISH_MISSING_PRODUCED_REASON,
+  FINISH_NO_PRODUCTS_REASON,
+  findFirstSessionLineFieldError,
+  getFinishProductionBlockedReason,
+  getSaveProgressBlockedReason,
   hasAllProducedQuantities,
   parseProducedQuantityInput,
   parseRawMaterialScaleInput,
+  SESSION_FIELD_HELPER,
+  SESSION_FIELD_PRODUCED,
+  SESSION_FIELD_SCALE,
   validateProducedQuantity,
   validateRawMaterialScale,
   validateSessionLinesForComplete,
@@ -134,6 +142,115 @@ describe("canFinishProductionSession", () => {
   it("rejects empty line lists", () => {
     expect(hasAllProducedQuantities([])).toBe(false);
     expect(canFinishProductionSession([])).toBe(false);
+  });
+});
+
+describe("session action blocked reasons", () => {
+  const lines = [
+    { id: "line-1", product_name: "Chicken Crepe" },
+    { id: "line-2", product_name: "Apple Crepe" },
+  ];
+
+  it("reports the first field error in produced → scale → helper order", () => {
+    expect(
+      findFirstSessionLineFieldError(
+        lines,
+        { "line-1": { error: "Produced quantity cannot be negative." } },
+        { "line-1": { error: "Recipe batches used must be greater than zero." } },
+        { "line-1": { error: "Quantity must be greater than zero." } },
+      ),
+    ).toEqual({
+      lineId: "line-1",
+      productName: "Chicken Crepe",
+      field: SESSION_FIELD_PRODUCED,
+    });
+
+    expect(
+      findFirstSessionLineFieldError(
+        lines,
+        { "line-1": { error: null } },
+        { "line-1": { error: "Recipe batches used must be greater than zero." } },
+        { "line-1": { error: "Quantity must be greater than zero." } },
+      ),
+    ).toEqual({
+      lineId: "line-1",
+      productName: "Chicken Crepe",
+      field: SESSION_FIELD_SCALE,
+    });
+
+    expect(
+      findFirstSessionLineFieldError(
+        lines,
+        {},
+        {},
+        { "line-2": { error: "Enter a valid quantity." } },
+      ),
+    ).toEqual({
+      lineId: "line-2",
+      productName: "Apple Crepe",
+      field: SESSION_FIELD_HELPER,
+    });
+  });
+
+  it("names the actual field on save and finish reasons", () => {
+    expect(
+      getSaveProgressBlockedReason({
+        lineId: "line-1",
+        productName: "Chicken Crepe",
+        field: SESSION_FIELD_SCALE,
+      }),
+    ).toBe(
+      "Fix the invalid Recipe Batches Used value for Chicken Crepe before saving.",
+    );
+
+    expect(
+      getFinishProductionBlockedReason(
+        lines,
+        [
+          { actual_produced_quantity: 10 },
+          { actual_produced_quantity: 4 },
+        ],
+        {
+          lineId: "line-1",
+          productName: "Chicken Crepe",
+          field: SESSION_FIELD_HELPER,
+        },
+      ),
+    ).toBe(
+      "Fix the invalid Actual ingredient used value for Chicken Crepe.",
+    );
+  });
+
+  it("explains a missing produced quantity when there is no field error", () => {
+    expect(
+      getFinishProductionBlockedReason(
+        lines,
+        [
+          { actual_produced_quantity: 10 },
+          { actual_produced_quantity: null },
+        ],
+        null,
+      ),
+    ).toBe(FINISH_MISSING_PRODUCED_REASON);
+  });
+
+  it("explains an empty session", () => {
+    expect(getFinishProductionBlockedReason([], [], null)).toBe(
+      FINISH_NO_PRODUCTS_REASON,
+    );
+  });
+
+  it("returns null when finish is allowed", () => {
+    expect(
+      getFinishProductionBlockedReason(
+        lines,
+        [
+          { actual_produced_quantity: 10 },
+          { actual_produced_quantity: 0 },
+        ],
+        null,
+      ),
+    ).toBeNull();
   });
 });
 

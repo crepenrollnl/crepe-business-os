@@ -1,11 +1,29 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
 import type {
   FirstLevelRawIngredient,
   ProductionSessionLineView,
 } from "../types/production-session";
-import { ProductionSessionLinesSection } from "./production-session-lines-section";
+import {
+  clearMatchMediaStub,
+  stubMatchMedia,
+} from "../hooks/stub-match-media";
+import { ADJUST_INGREDIENT_SCALE_SUMMARY } from "./production-session-line-card";
+import {
+  HELPER_HELP,
+  ProductionSessionLinesSection,
+  RAW_MATERIAL_SCALE_HELP,
+  SESSION_LINES_CARDS_TEST_ID,
+  SESSION_LINES_TABLE_TEST_ID,
+} from "./production-session-lines-section";
 
 const LINE_ID = "line-1";
 const RECIPE_ID = "recipe-1";
@@ -66,22 +84,31 @@ function renderLines(
   );
 }
 
+function table() {
+  return within(screen.getByTestId(SESSION_LINES_TABLE_TEST_ID));
+}
+
+function cards() {
+  return within(screen.getByTestId(SESSION_LINES_CARDS_TEST_ID));
+}
+
 describe("ProductionSessionLinesSection raw-scale helper", () => {
   afterEach(() => {
     cleanup();
     vi.clearAllMocks();
+    clearMatchMediaStub();
   });
 
   it("hides the helper when the recipe has no first-level raw ingredients", () => {
     renderLines([]);
 
     expect(
-      screen.queryByText("Actual ingredient used"),
+      table().queryByText("Actual ingredient used"),
     ).not.toBeInTheDocument();
     expect(
-      screen.getByLabelText("Recipe batches used for Smoked Salmon"),
+      table().getByLabelText("Recipe batches used for Smoked Salmon"),
     ).toBeVisible();
-    expect(screen.getByText("Recipe Batches Used")).toBeVisible();
+    expect(table().getByText("Recipe Batches Used")).toBeVisible();
   });
 
   it("labels a single raw ingredient without a picker", () => {
@@ -94,12 +121,12 @@ describe("ProductionSessionLinesSection raw-scale helper", () => {
       },
     ]);
 
-    expect(screen.getByText("Salmon (recipe: 3 kg)")).toBeVisible();
+    expect(table().getByText("Salmon (recipe: 3 kg)")).toBeVisible();
     expect(
-      screen.queryByLabelText("Reference ingredient for Smoked Salmon"),
+      table().queryByLabelText("Reference ingredient for Smoked Salmon"),
     ).not.toBeInTheDocument();
     expect(
-      screen.getByLabelText("Actual Salmon used for Smoked Salmon"),
+      table().getByLabelText("Actual Salmon used for Smoked Salmon"),
     ).toBeVisible();
   });
 
@@ -120,10 +147,58 @@ describe("ProductionSessionLinesSection raw-scale helper", () => {
     ]);
 
     expect(
-      screen.getByLabelText("Reference ingredient for Smoked Salmon"),
+      table().getByLabelText("Reference ingredient for Smoked Salmon"),
     ).toBeVisible();
-    expect(screen.getByText("Salmon — recipe: 2.1 kg")).toBeInTheDocument();
-    expect(screen.getByText("Salt — recipe: 0.2 kg")).toBeInTheDocument();
+    expect(table().getByText("Salmon — recipe: 2.1 kg")).toBeInTheDocument();
+    expect(table().getByText("Salt — recipe: 0.2 kg")).toBeInTheDocument();
+  });
+
+  it("shows column help as visible text instead of title tooltips", () => {
+    renderLines([
+      {
+        ingredient_id: "salmon",
+        name: "Salmon",
+        quantity: 3,
+        unit: "kg",
+      },
+    ]);
+
+    expect(table().getByText(HELPER_HELP)).toBeVisible();
+    expect(table().getByText(RAW_MATERIAL_SCALE_HELP)).toBeVisible();
+    expect(
+      table().getByText("Actual ingredient used").closest("th"),
+    ).not.toHaveAttribute("title");
+    expect(
+      table().getByText("Recipe Batches Used").closest("th"),
+    ).not.toHaveAttribute("title");
+  });
+
+  it("still shows Recipe Batches Used help when the helper column is hidden", () => {
+    renderLines([]);
+
+    expect(table().queryByText(HELPER_HELP)).not.toBeInTheDocument();
+    expect(table().getByText(RAW_MATERIAL_SCALE_HELP)).toBeVisible();
+  });
+
+  it("uses 16px kitchen-safe number inputs", () => {
+    renderLines([
+      {
+        ingredient_id: "salmon",
+        name: "Salmon",
+        quantity: 3,
+        unit: "kg",
+      },
+    ]);
+
+    const produced = table().getByLabelText(
+      "Actual produced quantity for Smoked Salmon",
+    );
+    const helper = table().getByLabelText("Actual Salmon used for Smoked Salmon");
+    const scale = table().getByLabelText("Recipe batches used for Smoked Salmon");
+
+    for (const input of [produced, helper, scale]) {
+      expect(input).toHaveClass("h-11", "text-base");
+    }
   });
 
   it("keeps Recipe Batches Used editable next to the helper", () => {
@@ -136,8 +211,8 @@ describe("ProductionSessionLinesSection raw-scale helper", () => {
       },
     ]);
 
-    const helper = screen.getByLabelText("Actual Salmon used for Smoked Salmon");
-    const scale = screen.getByLabelText("Recipe batches used for Smoked Salmon");
+    const helper = table().getByLabelText("Actual Salmon used for Smoked Salmon");
+    const scale = table().getByLabelText("Recipe batches used for Smoked Salmon");
 
     fireEvent.change(helper, { target: { value: "6" } });
     fireEvent.change(scale, { target: { value: "1.5" } });
@@ -150,6 +225,126 @@ describe("ProductionSessionLinesSection raw-scale helper", () => {
     expect(idleHandlers.onRawMaterialScaleChange).toHaveBeenCalledWith(
       LINE_ID,
       "1.5",
+    );
+  });
+});
+
+describe("ProductionSessionLinesSection tablet cards", () => {
+  afterEach(() => {
+    cleanup();
+    vi.clearAllMocks();
+    clearMatchMediaStub();
+  });
+
+  it("mounts only the desktop table by default", () => {
+    renderLines([]);
+
+    expect(screen.getByTestId(SESSION_LINES_TABLE_TEST_ID)).toBeInTheDocument();
+    expect(
+      screen.queryByTestId(SESSION_LINES_CARDS_TEST_ID),
+    ).not.toBeInTheDocument();
+  });
+
+  it("mounts only the tablet cards below lg", async () => {
+    stubMatchMedia(false);
+    renderLines([]);
+
+    await waitFor(() => {
+      expect(screen.getByTestId(SESSION_LINES_CARDS_TEST_ID)).toBeInTheDocument();
+    });
+    expect(
+      screen.queryByTestId(SESSION_LINES_TABLE_TEST_ID),
+    ).not.toBeInTheDocument();
+  });
+
+  it("makes produced quantity the primary field and parks scale fields in a disclosure", async () => {
+    stubMatchMedia(false);
+    renderLines([
+      {
+        ingredient_id: "salmon",
+        name: "Salmon",
+        quantity: 3,
+        unit: "kg",
+      },
+    ]);
+
+    await waitFor(() => {
+      expect(screen.getByTestId(SESSION_LINES_CARDS_TEST_ID)).toBeInTheDocument();
+    });
+    const card = cards().getByRole("article");
+    expect(within(card).getByRole("heading", { name: "Smoked Salmon" })).toBeVisible();
+    expect(within(card).getByText("2 kg")).toBeVisible();
+    expect(
+      within(card).getByLabelText("Actual produced quantity for Smoked Salmon"),
+    ).toHaveClass("h-11", "w-full", "text-base");
+    expect(
+      within(card).getByText(ADJUST_INGREDIENT_SCALE_SUMMARY),
+    ).toBeVisible();
+
+    const disclosure = within(card).getByText(ADJUST_INGREDIENT_SCALE_SUMMARY)
+      .closest("details");
+    expect(disclosure).not.toBeNull();
+    expect(disclosure).not.toHaveAttribute("open");
+
+    fireEvent.click(within(card).getByText(ADJUST_INGREDIENT_SCALE_SUMMARY));
+
+    expect(within(card).getByText(HELPER_HELP)).toBeVisible();
+    expect(within(card).getByText(RAW_MATERIAL_SCALE_HELP)).toBeVisible();
+    expect(
+      within(card).getByLabelText("Actual Salmon used for Smoked Salmon"),
+    ).toBeVisible();
+    expect(
+      within(card).getByLabelText("Recipe batches used for Smoked Salmon"),
+    ).toBeVisible();
+  });
+
+  it("lets staff edit scale fields from the card disclosure", async () => {
+    stubMatchMedia(false);
+    renderLines([
+      {
+        ingredient_id: "salmon",
+        name: "Salmon",
+        quantity: 3,
+        unit: "kg",
+      },
+    ]);
+
+    await waitFor(() => {
+      expect(screen.getByTestId(SESSION_LINES_CARDS_TEST_ID)).toBeInTheDocument();
+    });
+    const card = cards().getByRole("article");
+    fireEvent.click(within(card).getByText(ADJUST_INGREDIENT_SCALE_SUMMARY));
+    fireEvent.change(
+      within(card).getByLabelText("Actual Salmon used for Smoked Salmon"),
+      { target: { value: "6" } },
+    );
+    fireEvent.change(
+      within(card).getByLabelText("Recipe batches used for Smoked Salmon"),
+      { target: { value: "1.5" } },
+    );
+
+    expect(idleHandlers.onHelperQuantityChange).toHaveBeenCalledWith(
+      LINE_ID,
+      RECIPE_ID,
+      "6",
+    );
+    expect(idleHandlers.onRawMaterialScaleChange).toHaveBeenCalledWith(
+      LINE_ID,
+      "1.5",
+    );
+  });
+
+  it("matches the tablet card class contract", async () => {
+    stubMatchMedia(false);
+    renderLines([]);
+
+    await waitFor(() => {
+      expect(screen.getByTestId(SESSION_LINES_CARDS_TEST_ID)).toBeInTheDocument();
+    });
+    expect(screen.getByTestId(SESSION_LINES_CARDS_TEST_ID).className)
+      .toMatchInlineSnapshot(`"space-y-3 bg-zinc-50 p-3"`);
+    expect(cards().getByRole("article").className).toMatchInlineSnapshot(
+      `"rounded-xl border border-zinc-200 bg-white p-4 shadow-sm"`,
     );
   });
 });

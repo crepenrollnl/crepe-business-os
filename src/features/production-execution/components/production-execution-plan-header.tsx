@@ -12,6 +12,9 @@ import {
   pickLatestCompletedPlanSession,
 } from "../utils/format-plan-session-history";
 
+export const START_PRODUCTION_NO_PRODUCTS_REASON =
+  "Add products to the plan before starting production";
+
 type ProductionExecutionPlanHeaderProps = {
   plan: ProductionExecutionPlanDetail;
   starting: boolean;
@@ -95,11 +98,6 @@ export function ProductionExecutionPlanHeader({
                 type="button"
                 onClick={onStartProduction}
                 disabled={starting || plan.products.length === 0}
-                title={
-                  plan.products.length === 0
-                    ? "Add products to the plan before starting production"
-                    : undefined
-                }
                 className="inline-flex items-center justify-center rounded-lg bg-amber-500 px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-amber-600 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {starting ? "Starting..." : "Start Production"}
@@ -114,6 +112,12 @@ export function ProductionExecutionPlanHeader({
             >
               {formatPlanSessionFactLabel(completedSession)}
             </Link>
+          ) : null}
+
+          {!openSession && plan.products.length === 0 ? (
+            <p className="max-w-sm text-right text-sm text-zinc-600">
+              {START_PRODUCTION_NO_PRODUCTS_REASON}
+            </p>
           ) : null}
 
           {startError ? (

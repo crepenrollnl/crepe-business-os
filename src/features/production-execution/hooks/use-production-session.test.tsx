@@ -18,6 +18,7 @@ const {
   getCurrentAccountingContextMock,
   loadRecipeBomsForCompletionMock,
   loadRecipeCompletionLookupsMock,
+  saveSessionProgressMock,
 } = vi.hoisted(() => ({
   getSessionByIdMock: vi.fn(),
   completeSessionMock: vi.fn(),
@@ -25,6 +26,7 @@ const {
   getCurrentAccountingContextMock: vi.fn(),
   loadRecipeBomsForCompletionMock: vi.fn(),
   loadRecipeCompletionLookupsMock: vi.fn(),
+  saveSessionProgressMock: vi.fn(),
 }));
 
 vi.mock("../services/production-session-service", () => ({
@@ -37,6 +39,7 @@ vi.mock("../services/production-session-service", () => ({
       loadRecipeBomsForCompletionMock(...args),
     loadRecipeCompletionLookups: (...args: unknown[]) =>
       loadRecipeCompletionLookupsMock(...args),
+    saveSessionProgress: (...args: unknown[]) => saveSessionProgressMock(...args),
   },
 }));
 
@@ -117,6 +120,7 @@ describe("useProductionSession.finishProduction (accounting posting wiring)", ()
     getCurrentAccountingContextMock.mockReset();
     loadRecipeBomsForCompletionMock.mockReset();
     loadRecipeCompletionLookupsMock.mockReset();
+    saveSessionProgressMock.mockReset();
 
     getSessionByIdMock.mockResolvedValue({ data: sessionFixture(), error: null });
     loadRecipeBomsForCompletionMock.mockResolvedValue({
@@ -452,5 +456,150 @@ describe("useProductionSession raw-scale helper", () => {
 
     expect(result.current.rawMaterialScaleDrafts["line-1"]?.value).toBe(1.5);
     expect(result.current.helperDrafts["line-1"]?.raw).toBe("6");
+  });
+});
+
+describe("useProductionSession blocked Save/Finish reasons", () => {
+  beforeEach(() => {
+    getSessionByIdMock.mockReset();
+    saveSessionProgressMock.mockReset();
+    loadRecipeCompletionLookupsMock.mockReset();
+    getSessionByIdMock.mockResolvedValue({ data: sessionFixture(), error: null });
+    loadRecipeCompletionLookupsMock.mockResolvedValue({
+      data: {
+        boms: new Map(),
+        firstLevelRawByRecipeId: new Map([
+          [
+            "recipe-1",
+            [
+              {
+                ingredient_id: "salmon",
+                name: "Salmon",
+                quantity: 3,
+                unit: "kg",
+              },
+            ],
+          ],
+        ]),
+      },
+      error: null,
+    });
+  });
+
+  async function readyHook() {
+    const hook = renderHook(() => useProductionSession(SESSION_ID));
+    await waitFor(() => expect(hook.result.current.loading).toBe(false));
+    await waitFor(() =>
+      expect(
+        hook.result.current.firstLevelRawByRecipeId.get("recipe-1"),
+      ).toHaveLength(1),
+    );
+    return hook;
+  }
+
+  it("blocks finish when produced quantity is missing and names that reason", async () => {
+    const { result } = await readyHook();
+
+    act(() => {
+      result.current.onProducedChange("line-1", "");
+    });
+
+    expect(result.current.canFinish).toBe(false);
+    expect(result.current.finishBlockedReason).toBe(
+      "Enter an actual produced quantity for every product",
+    );
+  });
+
+  it("blocks finish when produced quantity is invalid", async () => {
+    const { result } = await readyHook();
+
+    act(() => {
+      result.current.onProducedChange("line-1", "-1");
+    });
+
+    expect(result.current.canFinish).toBe(false);
+    expect(result.current.finishBlockedReason).toBe(
+      "Fix the invalid produced quantity for Chicken Crepe.",
+    );
+  });
+
+  it("blocks finish when Recipe Batches Used is invalid", async () => {
+    const { result } = await readyHook();
+
+    act(() => {
+      result.current.onRawMaterialScaleChange("line-1", "0");
+    });
+
+    expect(result.current.canFinish).toBe(false);
+    expect(result.current.finishBlockedReason).toBe(
+      "Fix the invalid Recipe Batches Used value for Chicken Crepe.",
+    );
+  });
+
+  it("blocks finish when Actual ingredient used is invalid", async () => {
+    const { result } = await readyHook();
+
+    act(() => {
+      result.current.onHelperQuantityChange("line-1", "recipe-1", "0");
+    });
+
+    expect(result.current.helperDrafts["line-1"]?.error).toBe(
+      "Quantity must be greater than zero.",
+    );
+    expect(result.current.canFinish).toBe(false);
+    expect(result.current.finishBlockedReason).toBe(
+      "Fix the invalid Actual ingredient used value for Chicken Crepe.",
+    );
+  });
+
+  it("names a Recipe Batches Used error on save instead of produced quantity", async () => {
+    const { result } = await readyHook();
+
+    act(() => {
+      result.current.onRawMaterialScaleChange("line-1", "abc");
+    });
+
+    await act(async () => {
+      await result.current.saveProgress();
+    });
+
+    expect(saveSessionProgressMock).not.toHaveBeenCalled();
+    expect(result.current.actionError).toBe(
+      "Fix the invalid Recipe Batches Used value for Chicken Crepe before saving.",
+    );
+  });
+
+  it("names an Actual ingredient used error on save", async () => {
+    const { result } = await readyHook();
+
+    act(() => {
+      result.current.onHelperQuantityChange("line-1", "recipe-1", "abc");
+    });
+
+    await act(async () => {
+      await result.current.saveProgress();
+    });
+
+    expect(saveSessionProgressMock).not.toHaveBeenCalled();
+    expect(result.current.actionError).toBe(
+      "Fix the invalid Actual ingredient used value for Chicken Crepe before saving.",
+    );
+  });
+
+  it("names a produced-quantity error on save", async () => {
+    const { result } = await readyHook();
+
+    act(() => {
+      result.current.onProducedChange("line-1", "-2");
+    });
+
+    await act(async () => {
+      await result.current.saveProgress();
+    });
+
+    expect(saveSessionProgressMock).not.toHaveBeenCalled();
+    expect(result.current.actionError).toBe(
+      "Fix the invalid produced quantity for Chicken Crepe before saving.",
+    );
   });
 });
