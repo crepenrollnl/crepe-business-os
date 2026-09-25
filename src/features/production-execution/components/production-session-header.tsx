@@ -3,16 +3,21 @@
 import Link from "next/link";
 import type { ProductionSessionWithRelations } from "../types/production-session";
 import { formatExecutionDateTime } from "../utils/format-execution-plan";
+import { useIsDesktopLayout } from "../hooks/use-is-desktop-layout";
 import {
   formatProductionSessionStatus,
   getProductionSessionStatusBadgeClass,
 } from "../utils/format-production-session";
+
+export const SESSION_STICKY_ACTIONS_TEST_ID = "session-sticky-actions";
+export const SESSION_HEADER_ACTIONS_TEST_ID = "session-header-actions";
 
 type ProductionSessionHeaderProps = {
   session: ProductionSessionWithRelations;
   notes: string;
   canEdit: boolean;
   canFinish: boolean;
+  finishBlockedReason: string | null;
   finishing: boolean;
   saving: boolean;
   actionError: string | null;
@@ -22,11 +27,47 @@ type ProductionSessionHeaderProps = {
   onFinish: () => void;
 };
 
+function SessionEditButtons({
+  canFinish,
+  finishing,
+  saving,
+  onSaveProgress,
+  onFinish,
+}: {
+  canFinish: boolean;
+  finishing: boolean;
+  saving: boolean;
+  onSaveProgress: () => void;
+  onFinish: () => void;
+}) {
+  return (
+    <>
+      <button
+        type="button"
+        onClick={onSaveProgress}
+        disabled={saving || finishing}
+        className="inline-flex h-11 flex-1 items-center justify-center rounded-lg border border-zinc-300 bg-white px-5 text-sm font-semibold text-zinc-700 shadow-sm transition-colors hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50 lg:flex-none"
+      >
+        {saving ? "Saving..." : "Save Progress"}
+      </button>
+      <button
+        type="button"
+        onClick={onFinish}
+        disabled={!canFinish || finishing || saving}
+        className="inline-flex h-11 flex-1 items-center justify-center rounded-lg bg-amber-500 px-5 text-sm font-semibold text-white transition-colors hover:bg-amber-600 disabled:cursor-not-allowed disabled:opacity-50 lg:flex-none"
+      >
+        {finishing ? "Finishing..." : "Finish Production"}
+      </button>
+    </>
+  );
+}
+
 export function ProductionSessionHeader({
   session,
   notes,
   canEdit,
   canFinish,
+  finishBlockedReason,
   finishing,
   saving,
   actionError,
@@ -35,6 +76,8 @@ export function ProductionSessionHeader({
   onSaveProgress,
   onFinish,
 }: ProductionSessionHeaderProps) {
+  const isDesktopLayout = useIsDesktopLayout();
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -97,39 +140,34 @@ export function ProductionSessionHeader({
           <div className="flex flex-wrap items-center justify-end gap-3">
             <Link
               href={`/production-execution/${session.plan.id}`}
-              className="inline-flex items-center justify-center rounded-lg border border-zinc-300 bg-white px-5 py-2.5 text-sm font-semibold text-zinc-700 shadow-sm transition-colors hover:bg-zinc-50"
+              className="inline-flex h-11 items-center justify-center rounded-lg border border-zinc-300 bg-white px-5 text-sm font-semibold text-zinc-700 shadow-sm transition-colors hover:bg-zinc-50"
             >
               Back to Plan
             </Link>
 
-            {canEdit ? (
-              <>
-                <button
-                  type="button"
-                  onClick={onSaveProgress}
-                  disabled={saving || finishing}
-                  className="inline-flex items-center justify-center rounded-lg border border-zinc-300 bg-white px-5 py-2.5 text-sm font-semibold text-zinc-700 shadow-sm transition-colors hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {saving ? "Saving..." : "Save Progress"}
-                </button>
-                <button
-                  type="button"
-                  onClick={onFinish}
-                  disabled={!canFinish || finishing || saving}
-                  title={
-                    canFinish
-                      ? undefined
-                      : "Enter an actual produced quantity for every product"
-                  }
-                  className="inline-flex items-center justify-center rounded-lg bg-amber-500 px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-amber-600 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {finishing ? "Finishing..." : "Finish Production"}
-                </button>
-              </>
+            {canEdit && isDesktopLayout ? (
+              <div
+                className="flex flex-wrap items-center gap-3"
+                data-testid={SESSION_HEADER_ACTIONS_TEST_ID}
+              >
+                <SessionEditButtons
+                  canFinish={canFinish}
+                  finishing={finishing}
+                  saving={saving}
+                  onSaveProgress={onSaveProgress}
+                  onFinish={onFinish}
+                />
+              </div>
             ) : null}
           </div>
 
-          {actionError ? (
+          {isDesktopLayout && !canFinish && finishBlockedReason ? (
+            <p className="max-w-sm text-right text-sm text-zinc-600">
+              {finishBlockedReason}
+            </p>
+          ) : null}
+
+          {isDesktopLayout && actionError ? (
             <p className="max-w-sm text-right text-sm text-red-600">
               {actionError}
             </p>
@@ -168,6 +206,30 @@ export function ProductionSessionHeader({
           </p>
         )}
       </div>
+
+      {canEdit && !isDesktopLayout ? (
+        <div
+          className="fixed inset-x-0 bottom-0 z-40 border-t border-zinc-200 bg-white/95 px-4 py-3 shadow-[0_-8px_24px_rgba(24,24,27,0.08)] backdrop-blur"
+          data-testid={SESSION_STICKY_ACTIONS_TEST_ID}
+          style={{ paddingBottom: "max(0.75rem, env(safe-area-inset-bottom))" }}
+        >
+          {!canFinish && finishBlockedReason ? (
+            <p className="mb-2 text-sm text-zinc-600">{finishBlockedReason}</p>
+          ) : null}
+          {actionError ? (
+            <p className="mb-2 text-sm text-red-600">{actionError}</p>
+          ) : null}
+          <div className="flex gap-3">
+            <SessionEditButtons
+              canFinish={canFinish}
+              finishing={finishing}
+              saving={saving}
+              onSaveProgress={onSaveProgress}
+              onFinish={onFinish}
+            />
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

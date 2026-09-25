@@ -15,7 +15,10 @@ import {
   type CompleteProductionRecipeBom,
 } from "../utils/complete-production";
 import {
-  canFinishProductionSession,
+  findFirstSessionLineFieldError,
+  formatSessionFieldBlockReason,
+  getFinishProductionBlockedReason,
+  getSaveProgressBlockedReason,
   parseProducedQuantityInput,
   parseRawMaterialScaleInput,
 } from "../utils/production-session";
@@ -247,22 +250,34 @@ export function useProductionSession(sessionId: string) {
     }));
   }, [drafts, rawMaterialScaleDrafts, session]);
 
-  const hasFieldErrors = useMemo(
+  const firstFieldError = useMemo(
     () =>
       session
-        ? session.lines.some(
-            (line) =>
-              drafts[line.id]?.error != null ||
-              rawMaterialScaleDrafts[line.id]?.error != null,
+        ? findFirstSessionLineFieldError(
+            session.lines,
+            drafts,
+            rawMaterialScaleDrafts,
+            helperDrafts,
           )
-        : false,
-    [drafts, rawMaterialScaleDrafts, session],
+        : null,
+    [drafts, helperDrafts, rawMaterialScaleDrafts, session],
   );
 
-  const canFinish =
-    canEdit &&
-    !hasFieldErrors &&
-    canFinishProductionSession(lineInputs);
+  const hasFieldErrors = firstFieldError != null;
+
+  const finishBlockedReason = useMemo(() => {
+    if (!session || !canEdit) {
+      return null;
+    }
+
+    return getFinishProductionBlockedReason(
+      session.lines,
+      lineInputs,
+      firstFieldError,
+    );
+  }, [canEdit, firstFieldError, lineInputs, session]);
+
+  const canFinish = canEdit && finishBlockedReason === null;
 
   const zeroCostWarning = useMemo(() => {
     if (!session || !canEdit || !completionBoms) {
@@ -462,7 +477,10 @@ export function useProductionSession(sessionId: string) {
   const saveProgress = useCallback(async () => {
     const payload = buildPayload();
     if (!payload) {
-      setActionError("Fix invalid produced quantities before saving.");
+      setActionError(
+        getSaveProgressBlockedReason(firstFieldError) ??
+          "Fix invalid values before saving.",
+      );
       return;
     }
 
@@ -482,19 +500,24 @@ export function useProductionSession(sessionId: string) {
 
     applySession(result.data);
     setSaving(false);
-  }, [applySession, buildPayload, sessionId]);
+  }, [applySession, buildPayload, firstFieldError, sessionId]);
 
   const finishProduction = useCallback(async () => {
     if (!canFinish) {
       setActionError(
-        "Enter an actual produced quantity for every product before finishing.",
+        finishBlockedReason ??
+          "Enter an actual produced quantity for every product before finishing.",
       );
       return false;
     }
 
     const payload = buildPayload();
     if (!payload) {
-      setActionError("Fix invalid produced quantities before finishing.");
+      setActionError(
+        firstFieldError
+          ? formatSessionFieldBlockReason(firstFieldError, "finish")
+          : "Fix invalid values before finishing.",
+      );
       return false;
     }
 
@@ -556,7 +579,14 @@ export function useProductionSession(sessionId: string) {
     setPostingError(result.data.postingError);
     setFinishing(false);
     return true;
-  }, [applySession, buildPayload, canFinish, sessionId]);
+  }, [
+    applySession,
+    buildPayload,
+    canFinish,
+    finishBlockedReason,
+    firstFieldError,
+    sessionId,
+  ]);
 
   const retry = useCallback(() => {
     setLoading(true);
@@ -575,6 +605,7 @@ export function useProductionSession(sessionId: string) {
     firstLevelRawByRecipeId,
     canEdit,
     canFinish,
+    finishBlockedReason,
     saving,
     finishing,
     actionError,
