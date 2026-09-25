@@ -15,7 +15,7 @@ export function PosSaleableNowSection() {
           Can sell now
         </h2>
         <p className="mt-1 text-sm text-zinc-500">
-          Portions confirm_sale can ship from finished components and raw
+          How many portions you can sell from finished components and raw
           add-ins already on hand.
         </p>
       </div>
