@@ -230,5 +230,29 @@ describe("InventoryTable compact/expanded columns", () => {
       "href",
       `/inventory?tab=write-offs&itemType=ingredient&id=${item.id}`,
     );
+    expect(
+      screen.queryByRole("button", { name: "Adjust Stock" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows Adjust Stock for owner/partner and hides it when canAdjustStock is false", () => {
+    const item = ingredient();
+    const onAdjust = vi.fn();
+    const { rerender } = render(
+      <InventoryTable
+        {...defaultProps}
+        items={[item]}
+        canAdjustStock
+        onAdjust={onAdjust}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Adjust Stock" }));
+    expect(onAdjust).toHaveBeenCalledWith(item);
+
+    rerender(<InventoryTable {...defaultProps} items={[item]} />);
+    expect(
+      screen.queryByRole("button", { name: "Adjust Stock" }),
+    ).not.toBeInTheDocument();
   });
 });

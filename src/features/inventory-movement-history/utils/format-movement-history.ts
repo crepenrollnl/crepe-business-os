@@ -4,7 +4,7 @@
  */
 
 export const MOVEMENT_HISTORY_STOCK_WARNING =
-  "This list shows purchases received into stock, ingredients used in production, and ingredients sold as recipe add-ins. The quantity on the ingredient card can still differ if stock was typed in by hand or if older activity was never recorded here.";
+  "This list shows purchases received into stock, ingredients used in production, ingredients sold as recipe add-ins, write-offs, and stock adjustments. The quantity on the ingredient card can still differ if older activity was never recorded here.";
 
 export interface MovementDocumentLink {
   label: string;
@@ -20,14 +20,18 @@ function formatQuantity(value: number): string {
 }
 
 function movementQuantitySign(movementType: string): "+" | "−" | "" {
-  if (movementType === "purchase_in") {
+  if (
+    movementType === "purchase_in" ||
+    movementType === "adjustment_increase"
+  ) {
     return "+";
   }
 
   if (
     movementType === "production_out" ||
     movementType === "sale_out" ||
-    movementType === "waste_out"
+    movementType === "waste_out" ||
+    movementType === "adjustment_decrease"
   ) {
     return "−";
   }
@@ -45,6 +49,10 @@ export function formatMovementType(movementType: string): string {
       return "Sold with product";
     case "waste_out":
       return "Written off";
+    case "adjustment_increase":
+      return "Stock increase";
+    case "adjustment_decrease":
+      return "Stock decrease";
     default:
       return movementType;
   }
@@ -88,6 +96,10 @@ export function movementDocumentLink(
       label: "Write-off",
       href: sourceId ? `/inventory?tab=write-offs` : null,
     };
+  }
+
+  if (sourceType === "inventory_adjustment") {
+    return { label: "Stock adjustment", href: null };
   }
 
   if (!sourceId) {

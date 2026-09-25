@@ -21,6 +21,8 @@ type InventoryTableProps = {
   onAddClick: () => void;
   onEdit: (item: IngredientWithRelations) => void;
   onDelete: (item: IngredientWithRelations) => void;
+  canAdjustStock?: boolean;
+  onAdjust?: (item: IngredientWithRelations) => void;
 };
 
 /** Always visible: Name, Category, Current Quantity, Last Price, Price, Alert, Recommendation, Actions. */
@@ -168,6 +170,8 @@ export function InventoryTable({
   onAddClick,
   onEdit,
   onDelete,
+  canAdjustStock = false,
+  onAdjust,
 }: InventoryTableProps) {
   const [showAll, setShowAll] = useState(false);
   const columnCount = showAll ? EXPANDED_COLUMN_COUNT : COMPACT_COLUMN_COUNT;
@@ -319,6 +323,8 @@ export function InventoryTable({
                   showAll={showAll}
                   onEdit={onEdit}
                   onDelete={onDelete}
+                  canAdjustStock={canAdjustStock}
+                  onAdjust={onAdjust}
                 />
               ))
             )}

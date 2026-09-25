@@ -27,6 +27,8 @@ type IngredientModalProps = {
   isCheckingRecipeUsage: boolean;
   onClose: () => void;
   onSave: (values: IngredientFormValues) => Promise<boolean>;
+  canAdjustStock?: boolean;
+  onAdjust?: (item: IngredientWithRelations) => void;
 };
 
 type NumericFormField = "current_stock" | "minimum_stock" | "cost_per_unit";
@@ -95,7 +97,10 @@ function validateNumericField(value: string, message: string): string | undefine
   return undefined;
 }
 
-function validateFormDraft(draft: IngredientFormDraft): FormErrors {
+function validateFormDraft(
+  draft: IngredientFormDraft,
+  isEdit: boolean,
+): FormErrors {
   const errors: FormErrors = {};
 
   if (!draft.name.trim()) {
@@ -110,12 +115,22 @@ function validateFormDraft(draft: IngredientFormDraft): FormErrors {
     errors.unit = "Unit is required";
   }
 
-  const currentStockError = validateNumericField(
-    draft.current_stock,
-    "Current stock must be 0 or greater",
-  );
-  if (currentStockError) {
-    errors.current_stock = currentStockError;
+  if (!isEdit) {
+    const currentStockError = validateNumericField(
+      draft.current_stock,
+      "Current stock must be 0 or greater",
+    );
+    if (currentStockError) {
+      errors.current_stock = currentStockError;
+    }
+
+    const costError = validateNumericField(
+      draft.cost_per_unit,
+      "Cost per unit must be 0 or greater",
+    );
+    if (costError) {
+      errors.cost_per_unit = costError;
+    }
   }
 
   const minimumStockError = validateNumericField(
@@ -124,14 +139,6 @@ function validateFormDraft(draft: IngredientFormDraft): FormErrors {
   );
   if (minimumStockError) {
     errors.minimum_stock = minimumStockError;
-  }
-
-  const costError = validateNumericField(
-    draft.cost_per_unit,
-    "Cost per unit must be 0 or greater",
-  );
-  if (costError) {
-    errors.cost_per_unit = costError;
   }
 
   return errors;
@@ -149,6 +156,8 @@ function IngredientModalForm({
   isCheckingRecipeUsage,
   onClose,
   onSave,
+  canAdjustStock = false,
+  onAdjust,
 }: IngredientModalFormProps) {
   const [formValues, setFormValues] = useState<IngredientFormDraft>(() =>
     item ? itemToFormDraft(item) : emptyForm,
@@ -156,7 +165,8 @@ function IngredientModalForm({
   const [touched, setTouched] = useState<TouchedFields>({});
   const [hasAttemptedSubmit, setHasAttemptedSubmit] = useState(false);
 
-  const fieldErrors = validateFormDraft(formValues);
+  const isEdit = item !== null;
+  const fieldErrors = validateFormDraft(formValues, isEdit);
   const isFormValid = Object.keys(fieldErrors).length === 0;
 
   const showFieldError = (field: keyof IngredientFormValues): string | undefined => {
@@ -214,25 +224,9 @@ function IngredientModalForm({
         </h2>
         <p className="mt-1 text-sm text-zinc-500">
           {item
-            ? "Update ingredient details and stock information."
+            ? "Update ingredient details."
             : "Create a new ingredient and set its initial stock levels."}
         </p>
-        {item ? (
-          <p className="mt-2 inline-flex flex-wrap gap-x-4 gap-y-1">
-            <Link
-              href={`/inventory/ingredients/${item.id}/movements`}
-              className="text-sm font-medium text-zinc-600 transition-colors hover:text-zinc-900"
-            >
-              Movement history
-            </Link>
-            <Link
-              href={writeOffPrefillHref("ingredient", item.id)}
-              className="text-sm font-medium text-zinc-600 transition-colors hover:text-zinc-900"
-            >
-              Write off
-            </Link>
-          </p>
-        ) : null}
       </div>
 
       {error && (
@@ -357,10 +351,36 @@ function IngredientModalForm({
               }
               placeholder="0"
               aria-invalid={Boolean(currentStockError)}
+              disabled={isEdit}
             />
             {currentStockError && (
               <p className="text-sm text-red-600">{currentStockError}</p>
             )}
+            {item ? (
+              <p className="inline-flex flex-wrap gap-x-3 gap-y-1">
+                <Link
+                  href={`/inventory/ingredients/${item.id}/movements`}
+                  className="text-sm font-medium text-zinc-600 transition-colors hover:text-zinc-900"
+                >
+                  Movement history
+                </Link>
+                <Link
+                  href={writeOffPrefillHref("ingredient", item.id)}
+                  className="text-sm font-medium text-zinc-600 transition-colors hover:text-zinc-900"
+                >
+                  Write off
+                </Link>
+                {canAdjustStock && onAdjust ? (
+                  <button
+                    type="button"
+                    onClick={() => onAdjust(item)}
+                    className="text-sm font-medium text-zinc-600 transition-colors hover:text-zinc-900"
+                  >
+                    Adjust Stock
+                  </button>
+                ) : null}
+              </p>
+            ) : null}
           </div>
 
           <div className="space-y-2">
@@ -401,8 +421,14 @@ function IngredientModalForm({
               }
               placeholder="0.00"
               aria-invalid={Boolean(costError)}
+              disabled={isEdit}
             />
             {costError && <p className="text-sm text-red-600">{costError}</p>}
+            {isEdit ? (
+              <p className="text-sm text-zinc-500">
+                Average cost changes on Receive, not here.
+              </p>
+            ) : null}
           </div>
         </div>
 
@@ -442,6 +468,8 @@ export function IngredientModal({
   isCheckingRecipeUsage,
   onClose,
   onSave,
+  canAdjustStock = false,
+  onAdjust,
 }: IngredientModalProps) {
   if (!isOpen) {
     return null;
@@ -468,6 +496,8 @@ export function IngredientModal({
         isCheckingRecipeUsage={isCheckingRecipeUsage}
         onClose={onClose}
         onSave={onSave}
+        canAdjustStock={canAdjustStock}
+        onAdjust={onAdjust}
       />
     </div>
   );

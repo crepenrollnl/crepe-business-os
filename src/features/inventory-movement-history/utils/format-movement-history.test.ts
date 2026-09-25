@@ -1,9 +1,17 @@
 import { describe, expect, it } from "vitest";
 import {
+  MOVEMENT_HISTORY_STOCK_WARNING,
   formatMovementQuantity,
   formatMovementType,
   movementDocumentLink,
 } from "./format-movement-history";
+
+describe("MOVEMENT_HISTORY_STOCK_WARNING", () => {
+  it("lists recorded stock adjustments and does not treat hand-typed card qty as the normal path", () => {
+    expect(MOVEMENT_HISTORY_STOCK_WARNING).toContain("stock adjustments");
+    expect(MOVEMENT_HISTORY_STOCK_WARNING).not.toMatch(/typed in by hand/i);
+  });
+});
 
 const PURCHASE_ID = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 const SESSION_ID = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
@@ -15,6 +23,8 @@ describe("formatMovementType", () => {
     expect(formatMovementType("production_out")).toBe("Used in production");
     expect(formatMovementType("sale_out")).toBe("Sold with product");
     expect(formatMovementType("waste_out")).toBe("Written off");
+    expect(formatMovementType("adjustment_increase")).toBe("Stock increase");
+    expect(formatMovementType("adjustment_decrease")).toBe("Stock decrease");
   });
 
   it("returns the raw code for an unknown movement type", () => {
@@ -30,6 +40,12 @@ describe("formatMovementQuantity", () => {
     );
     expect(formatMovementQuantity(0.5, "kg", "sale_out")).toBe("−0.5 kg");
     expect(formatMovementQuantity(2, "kg", "waste_out")).toBe("−2 kg");
+    expect(formatMovementQuantity(5, "kg", "adjustment_increase")).toBe(
+      "+5 kg",
+    );
+    expect(formatMovementQuantity(3, "kg", "adjustment_decrease")).toBe(
+      "−3 kg",
+    );
   });
 
   it("does not invent a sign for an unknown movement type", () => {
@@ -63,6 +79,13 @@ describe("movementDocumentLink", () => {
     expect(movementDocumentLink("write_off", "wo-1")).toEqual({
       label: "Write-off",
       href: "/inventory?tab=write-offs",
+    });
+  });
+
+  it("labels an inventory adjustment without an href (no list page yet)", () => {
+    expect(movementDocumentLink("inventory_adjustment", "adj-1")).toEqual({
+      label: "Stock adjustment",
+      href: null,
     });
   });
 });
