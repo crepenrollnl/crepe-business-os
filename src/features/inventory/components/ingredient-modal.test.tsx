@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
@@ -74,6 +74,49 @@ describe("IngredientModal Movement history link", () => {
     ).not.toBeInTheDocument();
     expect(
       screen.queryByRole("link", { name: "Write off" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Adjust Stock" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows Adjust Stock for owner/partner and hides it for seller", () => {
+    const onAdjust = vi.fn();
+    const { rerender } = render(
+      <IngredientModal
+        {...defaultProps}
+        item={item}
+        canAdjustStock
+        onAdjust={onAdjust}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Adjust Stock" }));
+    expect(onAdjust).toHaveBeenCalledWith(item);
+
+    rerender(<IngredientModal {...defaultProps} item={item} />);
+    expect(
+      screen.queryByRole("button", { name: "Adjust Stock" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("keeps Current Stock and Cost Per Unit read-only on Edit, and editable on Add", () => {
+    const { rerender } = render(
+      <IngredientModal {...defaultProps} item={item} />,
+    );
+
+    expect(screen.getByLabelText("Current Stock")).toBeDisabled();
+    expect(screen.getByLabelText("Cost Per Unit")).toBeDisabled();
+    expect(
+      screen.getByText("Average cost changes on Receive, not here."),
+    ).toBeInTheDocument();
+
+    rerender(<IngredientModal {...defaultProps} item={null} />);
+
+    expect(screen.getByLabelText("Current Stock")).not.toBeDisabled();
+    expect(screen.getByLabelText("Cost Per Unit")).not.toBeDisabled();
+    expect(
+      screen.queryByText("Average cost changes on Receive, not here."),
     ).not.toBeInTheDocument();
   });
 });

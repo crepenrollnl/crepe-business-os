@@ -1,12 +1,14 @@
 "use client";
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
+import { AdjustStockModal } from "../components/adjust-stock-modal";
 import { DeleteDialog } from "../components/delete-dialog";
 import { IngredientModal } from "../components/ingredient-modal";
 import { InventoryTable } from "../components/inventory-table";
 import { InventoryToolbar } from "../components/inventory-toolbar";
 import { LowStockAlertsPanel } from "../components/low-stock-alerts-panel";
 import { PurchasingReviewInfo } from "../components/purchasing-review-info";
+import { useInventoryAdjustment } from "../hooks/use-inventory-adjustment";
 import { useInventory } from "../hooks/use-inventory";
 
 type InventoryPageProps = {
@@ -49,7 +51,18 @@ export function InventoryPage({ embedded = false }: InventoryPageProps) {
     saveIngredient,
     deleteIngredient,
     retry,
+    refreshAfterAdjustment,
   } = useInventory();
+  const {
+    canAdjustStock,
+    adjustingItem,
+    isAdjustModalOpen,
+    isAdjusting,
+    adjustError,
+    openAdjustModal,
+    closeAdjustModal,
+    submitAdjustment,
+  } = useInventoryAdjustment({ onSuccess: refreshAfterAdjustment });
 
   const content = (
     <div className="mx-auto max-w-7xl space-y-8">
@@ -93,6 +106,8 @@ export function InventoryPage({ embedded = false }: InventoryPageProps) {
         onAddClick={openCreateModal}
         onEdit={openEditModal}
         onDelete={openDeleteDialog}
+        canAdjustStock={canAdjustStock}
+        onAdjust={openAdjustModal}
       />
 
       <IngredientModal
@@ -106,6 +121,17 @@ export function InventoryPage({ embedded = false }: InventoryPageProps) {
         isCheckingRecipeUsage={isCheckingRecipeUsage}
         onClose={closeModal}
         onSave={saveIngredient}
+        canAdjustStock={canAdjustStock}
+        onAdjust={openAdjustModal}
+      />
+
+      <AdjustStockModal
+        isOpen={isAdjustModalOpen}
+        item={adjustingItem}
+        isSaving={isAdjusting}
+        error={adjustError}
+        onClose={closeAdjustModal}
+        onSubmit={submitAdjustment}
       />
 
       <DeleteDialog

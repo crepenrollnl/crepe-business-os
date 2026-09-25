@@ -52,7 +52,9 @@ export type StockMovementType =
   | "waste_out"
   | "transfer_in"
   | "transfer_out"
-  | "adjustment";
+  | "adjustment"
+  | "adjustment_increase"
+  | "adjustment_decrease";
 
 /**
  * Immutable quantity ledger. Future stock truth lives here.

@@ -337,6 +337,23 @@ export function useInventory() {
     [closeModal, editingItem, loadInventory],
   );
 
+  const refreshAfterAdjustment = useCallback(async () => {
+    const state = await fetchInventoryState();
+    applyInventoryState(state);
+    setEditingItem((current) => {
+      if (!current) {
+        return current;
+      }
+
+      const updated = state.items.find((item) => item.id === current.id);
+      if (!updated) {
+        return current;
+      }
+
+      return { ...current, current_stock: updated.current_stock };
+    });
+  }, [applyInventoryState]);
+
   const deleteIngredient = useCallback(async () => {
     if (!deleteTarget) {
       return false;
@@ -393,5 +410,6 @@ export function useInventory() {
     saveIngredient,
     deleteIngredient,
     retry: () => loadInventory(),
+    refreshAfterAdjustment,
   };
 }

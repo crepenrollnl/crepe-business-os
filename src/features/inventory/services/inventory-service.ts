@@ -211,16 +211,33 @@ async function findDuplicateName(
   }
 }
 
-function toIngredientPayload(input: CreateIngredientInput | UpdateIngredientInput) {
+function toMasterDataPayload(input: CreateIngredientInput | UpdateIngredientInput) {
   return {
     name: input.name.trim(),
     category_id: input.category_id,
     supplier_id: input.supplier_id.trim().length > 0 ? input.supplier_id : null,
     unit: input.unit.trim(),
-    current_stock: input.current_stock,
     minimum_stock: input.minimum_stock,
-    cost_per_unit: input.cost_per_unit,
   };
+}
+
+function toCreateIngredientRpcArgs(input: CreateIngredientInput) {
+  return {
+    p_name: input.name.trim(),
+    p_unit: input.unit.trim(),
+    p_category_id:
+      input.category_id.trim().length > 0 ? input.category_id : null,
+    p_supplier_id:
+      input.supplier_id.trim().length > 0 ? input.supplier_id : null,
+    p_minimum_stock: input.minimum_stock,
+    p_cost_per_unit: input.cost_per_unit,
+    p_opening_quantity: input.current_stock,
+    p_opening_note: null,
+  };
+}
+
+function toUpdateIngredientPayload(input: UpdateIngredientInput) {
+  return toMasterDataPayload(input);
 }
 
 function enrichIngredients(
@@ -393,13 +410,12 @@ export const inventoryService = {
         return referenceResult;
       }
 
-      const { data, error } = await supabase
-        .from("ingredients")
-        .insert(toIngredientPayload(input))
-        .select("*")
-        .single();
+      const { data, error } = await supabase.rpc(
+        "create_ingredient",
+        toCreateIngredientRpcArgs(input),
+      );
 
-      if (error) {
+      if (error || !data) {
         return {
           data: null,
           error: toUserError(error, "Failed to create ingredient"),
@@ -407,7 +423,7 @@ export const inventoryService = {
       }
 
       const [enriched] = enrichIngredients(
-        [data],
+        [data as Ingredient],
         referenceResult.categories,
         referenceResult.suppliers,
       );
@@ -450,7 +466,7 @@ export const inventoryService = {
 
       const { data, error } = await supabase
         .from("ingredients")
-        .update(toIngredientPayload(input))
+        .update(toUpdateIngredientPayload(input))
         .eq("id", id)
         .select("*")
         .single();

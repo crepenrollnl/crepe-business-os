@@ -6,12 +6,11 @@
  * reference pattern for every other module.
  *
  * The file matches its apparent purpose (unlike production-batch-service.ts
- * on gap #1): plain CRUD over `ingredients`, enriched with `category`/
+ * on gap #1): CRUD over `ingredients`, enriched with `category`/
  * `supplier` relations, with a client-side case-insensitive duplicate-name
- * check before create/update. It does not touch current_stock mutation
- * logic (that lives in purchase-service.ts / complete_production_session,
- * per AGENTS.md's stock-mutation-authority table) -- this service is a
- * plain reference-data CRUD, not a stock ledger.
+ * check before create/update. Create goes through create_ingredient
+ * (sql/126) so a non-zero opening qty is one ledger event, not a silent
+ * INSERT of current_stock. Update still PATCHes master data only.
  *
  * deleteIngredient's toUserError now also maps foreign-key-violation
  * deletes (via the shared `mapDeletionBlockedByReference` helper in
@@ -27,7 +26,7 @@ import type {
 } from "../types/inventory";
 
 const { supabaseMock } = vi.hoisted(() => ({
-  supabaseMock: { from: vi.fn() },
+  supabaseMock: { from: vi.fn(), rpc: vi.fn() },
 }));
 
 vi.mock("@/lib/supabase", () => ({
@@ -274,29 +273,38 @@ describe("inventoryService", () => {
   });
 
   describe("createIngredient", () => {
-    it("creates the ingredient when the name is not a duplicate", async () => {
+    it("creates the ingredient through create_ingredient when the name is not a duplicate", async () => {
       mockTables({
-        ingredients: [
-          // 1st call: duplicate-name check (no existing rows)
-          { data: [], error: null },
-          // 2nd call: the insert itself
-          { data: ingredientRow(), error: null },
-        ],
+        ingredients: [{ data: [], error: null }],
         ingredient_categories: {
           data: [{ id: CATEGORY_ID, name: "Dairy" }],
           error: null,
         },
         suppliers: { data: [{ id: SUPPLIER_ID, name: "Acme" }], error: null },
       });
+      supabaseMock.rpc.mockResolvedValue({
+        data: ingredientRow(),
+        error: null,
+      });
 
       const result = await inventoryService.createIngredient(createInput());
 
+      expect(supabaseMock.rpc).toHaveBeenCalledWith("create_ingredient", {
+        p_name: "Flour",
+        p_unit: "kg",
+        p_category_id: CATEGORY_ID,
+        p_supplier_id: SUPPLIER_ID,
+        p_minimum_stock: 2,
+        p_cost_per_unit: 1.5,
+        p_opening_quantity: 10,
+        p_opening_note: null,
+      });
       expect(result.error).toBeNull();
       expect(result.data?.name).toBe("Flour");
       expect(result.data?.category?.name).toBe("Dairy");
     });
 
-    it("rejects a duplicate name case-insensitively and trimmed, without inserting", async () => {
+    it("rejects a duplicate name case-insensitively and trimmed, without calling the RPC", async () => {
       mockTables({
         ingredients: [
           { data: [{ id: "other-id", name: "  Flour  " }], error: null },
@@ -311,6 +319,7 @@ describe("inventoryService", () => {
       expect(result.error).toBe(
         "An ingredient with this name already exists. Please choose a different name.",
       );
+      expect(supabaseMock.rpc).not.toHaveBeenCalled();
     });
 
     it("propagates an error from the duplicate-name check itself", async () => {
@@ -341,21 +350,19 @@ describe("inventoryService", () => {
       expect(result.error).toBe("categories failed");
     });
 
-    it("maps a 23505 unique-violation on insert to the friendly duplicate message (race with the pre-check)", async () => {
+    it("maps a 23505 unique-violation from the RPC to the friendly duplicate message", async () => {
       mockTables({
-        ingredients: [
-          { data: [], error: null }, // pre-check saw no duplicate
-          {
-            data: null,
-            error: {
-              code: "23505",
-              message:
-                'duplicate key value violates unique constraint "ingredients_name_key"',
-            },
-          },
-        ],
+        ingredients: [{ data: [], error: null }],
         ingredient_categories: { data: [], error: null },
         suppliers: { data: [], error: null },
+      });
+      supabaseMock.rpc.mockResolvedValue({
+        data: null,
+        error: {
+          code: "23505",
+          message:
+            'duplicate key value violates unique constraint "ingredients_name_key"',
+        },
       });
 
       const result = await inventoryService.createIngredient(createInput());
@@ -366,14 +373,15 @@ describe("inventoryService", () => {
       );
     });
 
-    it("passes through an unrelated insert error unchanged", async () => {
+    it("passes through an unrelated RPC error unchanged", async () => {
       mockTables({
-        ingredients: [
-          { data: [], error: null },
-          { data: null, error: { message: "insert failed" } },
-        ],
+        ingredients: [{ data: [], error: null }],
         ingredient_categories: { data: [], error: null },
         suppliers: { data: [], error: null },
+      });
+      supabaseMock.rpc.mockResolvedValue({
+        data: null,
+        error: { message: "insert failed" },
       });
 
       const result = await inventoryService.createIngredient(createInput());
@@ -382,35 +390,30 @@ describe("inventoryService", () => {
       expect(result.error).toBe("insert failed");
     });
 
-    it("nulls supplier_id when it is blank, and trims the name", async () => {
-      // Capture the exact payload sent to .insert() on the 2nd "ingredients"
-      // call (the 1st is the duplicate-name check).
-      let capturedPayload: unknown;
-      const callCounts: Record<string, number> = {};
-      supabaseMock.from.mockImplementation((table: string) => {
-        if (table !== "ingredients") {
-          return makeBuilder({ data: [], error: null });
-        }
-        const index = callCounts.ingredients ?? 0;
-        callCounts.ingredients = index + 1;
-        if (index === 0) {
-          return makeBuilder({ data: [], error: null });
-        }
-        const builder = makeBuilder({ data: ingredientRow(), error: null });
-        builder.insert = vi.fn((payload: unknown) => {
-          capturedPayload = payload;
-          return builder;
-        });
-        return builder;
+    it("nulls supplier_id when it is blank, and trims the name on the RPC args", async () => {
+      mockTables({
+        ingredients: [{ data: [], error: null }],
+        ingredient_categories: { data: [], error: null },
+        suppliers: { data: [], error: null },
+      });
+      supabaseMock.rpc.mockResolvedValue({
+        data: ingredientRow({ name: "Sugar", supplier_id: null }),
+        error: null,
       });
 
       await inventoryService.createIngredient(
         createInput({ name: "  Sugar  ", supplier_id: "" }),
       );
 
-      expect(capturedPayload).toMatchObject({
-        name: "Sugar",
-        supplier_id: null,
+      expect(supabaseMock.rpc).toHaveBeenCalledWith("create_ingredient", {
+        p_name: "Sugar",
+        p_unit: "kg",
+        p_category_id: CATEGORY_ID,
+        p_supplier_id: null,
+        p_minimum_stock: 2,
+        p_cost_per_unit: 1.5,
+        p_opening_quantity: 10,
+        p_opening_note: null,
       });
     });
 
@@ -519,6 +522,53 @@ describe("inventoryService", () => {
 
       expect(result.data).toBeNull();
       expect(result.error).toBe("timeout");
+    });
+
+    it("omits current_stock and cost_per_unit from the PATCH even if the form still holds them", async () => {
+      let capturedPayload: unknown;
+      const callCounts: Record<string, number> = {};
+      supabaseMock.from.mockImplementation((table: string) => {
+        if (table !== "ingredients") {
+          return makeBuilder({ data: [], error: null });
+        }
+
+        const index = callCounts.ingredients ?? 0;
+        callCounts.ingredients = index + 1;
+
+        if (index === 0) {
+          return makeBuilder({
+            data: [{ id: INGREDIENT_ID, name: "Flour" }],
+            error: null,
+          });
+        }
+
+        if (index === 1) {
+          return makeBuilder({ data: { unit: "kg" }, error: null });
+        }
+
+        const builder = makeBuilder({ data: ingredientRow(), error: null });
+        builder.update = vi.fn((payload: unknown) => {
+          capturedPayload = payload;
+          return builder;
+        });
+        return builder;
+      });
+
+      await inventoryService.updateIngredient(INGREDIENT_ID, {
+        ...updateInput,
+        current_stock: 99,
+        cost_per_unit: 9.99,
+      });
+
+      expect(capturedPayload).toEqual({
+        name: "Flour",
+        category_id: CATEGORY_ID,
+        supplier_id: SUPPLIER_ID,
+        unit: "kg",
+        minimum_stock: 2,
+      });
+      expect(capturedPayload).not.toHaveProperty("current_stock");
+      expect(capturedPayload).not.toHaveProperty("cost_per_unit");
     });
 
     describe("unit change guard", () => {

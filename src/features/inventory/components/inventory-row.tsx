@@ -11,6 +11,8 @@ type InventoryRowProps = {
   showAll: boolean;
   onEdit: (item: IngredientWithRelations) => void;
   onDelete: (item: IngredientWithRelations) => void;
+  canAdjustStock?: boolean;
+  onAdjust?: (item: IngredientWithRelations) => void;
 };
 
 type StockStatus = "ok" | "low" | "out";
@@ -217,6 +219,8 @@ export function InventoryRow({
   showAll,
   onEdit,
   onDelete,
+  canAdjustStock = false,
+  onAdjust,
 }: InventoryRowProps) {
   const stockStatus = getStockStatus(item);
   const showWarning = stockStatus !== "ok";
@@ -343,6 +347,15 @@ export function InventoryRow({
           >
             Write off
           </Link>
+          {canAdjustStock && onAdjust ? (
+            <button
+              type="button"
+              onClick={() => onAdjust(item)}
+              className="rounded-lg px-3 py-1.5 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-900"
+            >
+              Adjust Stock
+            </button>
+          ) : null}
           <button
             type="button"
             onClick={() => onEdit(item)}
