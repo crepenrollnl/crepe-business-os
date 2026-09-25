@@ -52,21 +52,16 @@ test("build and execute a component, assemble it, sell it, confirm the sale", as
   await createIngredientForm
     .getByLabel("Unit", { exact: true })
     .fill(ingredientUnit);
-  await createIngredientForm.getByLabel("Current Stock").fill("0");
+  await createIngredientForm
+    .getByLabel("Current Stock")
+    .fill(String(initialStock));
   await createIngredientForm.getByLabel("Minimum Stock").fill("0");
   await createIngredientForm.getByLabel("Cost Per Unit").fill("1");
   await createIngredientForm.getByRole("button", { name: "Save" }).click();
   await expect(createIngredientForm).toHaveCount(0);
 
-  const ingredientRow = page.locator("tr", { hasText: ingredientName });
-  await ingredientRow.getByRole("button", { name: "Edit" }).click();
-
-  const editIngredientForm = page.locator("form");
-  await editIngredientForm
-    .getByLabel("Current Stock")
-    .fill(String(initialStock));
-  await editIngredientForm.getByRole("button", { name: "Save" }).click();
-  await expect(editIngredientForm).toHaveCount(0);
+  // Opening stock is set on INSERT (Add). UPDATE of current_stock as
+  // authenticated is blocked by sql/125's ingredients trigger.
 
   // --- Create the Component recipe. ---
   await page.goto("/recipes");
@@ -114,12 +109,14 @@ test("build and execute a component, assemble it, sell it, confirm the sale", as
   await page.getByRole("button", { name: "Confirm Plan" }).click();
   await expect(page.getByText("Ready to Produce", { exact: true })).toBeVisible();
 
-  // --- Execute production: create a real finished-goods batch. ---
-  await page.goto("/production-execution");
-
-  const queueRow = page.locator("tr", { hasText: planName });
-  await expect(queueRow).toBeVisible();
-  await queueRow.getByRole("button", { name: "Open" }).click();
+  // Deep-link the execution page. The queue list loads every leftover
+  // planned TEST plan through sequential readiness RPCs and can exceed
+  // the 15s locator timeout; this spec already proved ready_to_produce.
+  const planId = new URL(page.url()).pathname.split("/").pop();
+  if (!planId) {
+    throw new Error("Expected /production-planning/<id> after confirm.");
+  }
+  await page.goto(`/production-execution/${planId}`);
 
   const startButton = page.getByRole("button", { name: "Start Production" });
   await expect(startButton).toBeVisible();
