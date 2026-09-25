@@ -52,21 +52,16 @@ test("build and execute a component, assemble it, sell it, confirm the sale", as
   await createIngredientForm
     .getByLabel("Unit", { exact: true })
     .fill(ingredientUnit);
-  await createIngredientForm.getByLabel("Current Stock").fill("0");
+  await createIngredientForm
+    .getByLabel("Current Stock")
+    .fill(String(initialStock));
   await createIngredientForm.getByLabel("Minimum Stock").fill("0");
   await createIngredientForm.getByLabel("Cost Per Unit").fill("1");
   await createIngredientForm.getByRole("button", { name: "Save" }).click();
   await expect(createIngredientForm).toHaveCount(0);
 
-  const ingredientRow = page.locator("tr", { hasText: ingredientName });
-  await ingredientRow.getByRole("button", { name: "Edit" }).click();
-
-  const editIngredientForm = page.locator("form");
-  await editIngredientForm
-    .getByLabel("Current Stock")
-    .fill(String(initialStock));
-  await editIngredientForm.getByRole("button", { name: "Save" }).click();
-  await expect(editIngredientForm).toHaveCount(0);
+  // Opening stock is set on INSERT (Add). UPDATE of current_stock as
+  // authenticated is blocked by sql/125's ingredients trigger.
 
   // --- Create the Component recipe. ---
   await page.goto("/recipes");

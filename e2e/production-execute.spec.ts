@@ -48,25 +48,17 @@ test("create recipe and plan, execute production, confirm stock deducted", async
   await createIngredientForm
     .getByLabel("Unit", { exact: true })
     .fill(ingredientUnit);
-  await createIngredientForm.getByLabel("Current Stock").fill("0");
+  await createIngredientForm
+    .getByLabel("Current Stock")
+    .fill(String(initialStock));
   await createIngredientForm.getByLabel("Minimum Stock").fill("0");
   await createIngredientForm.getByLabel("Cost Per Unit").fill("1");
   await createIngredientForm.getByRole("button", { name: "Save" }).click();
   await expect(createIngredientForm).toHaveCount(0);
 
-  // --- Set sufficient stock via Edit (same form, real updateIngredient
-  // path -- shorter than routing through a full purchase-receive flow,
-  // and the field isn't locked since the ingredient isn't used in any
-  // recipe yet). ---
+  // Opening stock is set on INSERT (Add). UPDATE of current_stock as
+  // authenticated is blocked by sql/125's ingredients trigger.
   const ingredientRow = page.locator("tr", { hasText: ingredientName });
-  await ingredientRow.getByRole("button", { name: "Edit" }).click();
-
-  const editIngredientForm = page.locator("form");
-  await editIngredientForm
-    .getByLabel("Current Stock")
-    .fill(String(initialStock));
-  await editIngredientForm.getByRole("button", { name: "Save" }).click();
-  await expect(editIngredientForm).toHaveCount(0);
   await expect(ingredientRow.getByTestId("current-quantity")).toHaveText(
     String(initialStock),
   );
