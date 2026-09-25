@@ -20,6 +20,8 @@ import type {
 import type { PurchaseAccountingPreviewData } from "../types/purchase-accounting-preview";
 import {
   DEFAULT_TAX_REGIME_BY_CATEGORY,
+  formatPurchaseTaxCategoryLabel,
+  formatPurchaseTaxRegimeLabel,
   PURCHASE_TAX_CATEGORY_OPTIONS,
   PURCHASE_TAX_REGIME_OPTIONS,
   type PurchaseTaxCategoryCode,
@@ -1187,7 +1189,7 @@ function PurchaseDocumentForm({
                               <option value="">Select category</option>
                               {PURCHASE_TAX_CATEGORY_OPTIONS.map((category) => (
                                 <option key={category} value={category}>
-                                  {category}
+                                  {formatPurchaseTaxCategoryLabel(category)}
                                 </option>
                               ))}
                             </select>
@@ -1213,7 +1215,7 @@ function PurchaseDocumentForm({
                               <option value="">Select regime</option>
                               {PURCHASE_TAX_REGIME_OPTIONS.map((regime) => (
                                 <option key={regime} value={regime}>
-                                  {regime}
+                                  {formatPurchaseTaxRegimeLabel(regime)}
                                 </option>
                               ))}
                             </select>

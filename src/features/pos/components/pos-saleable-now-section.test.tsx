@@ -42,6 +42,12 @@ describe("PosSaleableNowSection", () => {
     render(<PosSaleableNowSection />);
 
     expect(screen.getByRole("heading", { name: "Can sell now" })).toBeVisible();
+    expect(
+      screen.getByText(
+        "How many portions you can sell from finished components and raw add-ins already on hand.",
+      ),
+    ).toBeVisible();
+    expect(screen.queryByText(/confirm_sale/)).not.toBeInTheDocument();
     expect(screen.getByText("Chicken Crepe")).toBeVisible();
     expect(screen.getByText("3")).toBeVisible();
     expect(screen.getByText("Dough")).toBeVisible();

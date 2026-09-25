@@ -22,6 +22,24 @@ export const PURCHASE_TAX_CATEGORY_OPTIONS = [
 export type PurchaseTaxCategoryCode =
   (typeof PURCHASE_TAX_CATEGORY_OPTIONS)[number];
 
+export const PURCHASE_TAX_CATEGORY_LABELS: Record<
+  PurchaseTaxCategoryCode,
+  string
+> = {
+  goods: "Goods",
+  services: "Services",
+  digital_services: "Digital services",
+  food: "Food",
+  alcohol: "Alcohol",
+  transport: "Transport",
+};
+
+export function formatPurchaseTaxCategoryLabel(code: string): string {
+  return code in PURCHASE_TAX_CATEGORY_LABELS
+    ? PURCHASE_TAX_CATEGORY_LABELS[code as PurchaseTaxCategoryCode]
+    : code;
+}
+
 /**
  * Optional regime override hints for Country Pack rule matching.
  */
@@ -39,6 +57,25 @@ export const PURCHASE_TAX_REGIME_OPTIONS = [
 
 export type PurchaseTaxRegimeCode =
   (typeof PURCHASE_TAX_REGIME_OPTIONS)[number];
+
+export const PURCHASE_TAX_REGIME_LABELS: Record<PurchaseTaxRegimeCode, string> =
+  {
+    standard_vat: "Standard VAT",
+    reduced_vat: "Reduced VAT",
+    zero_rate: "Zero rate",
+    exempt: "Exempt",
+    reverse_charge: "Reverse charge",
+    intra_community_supply: "Intra-community supply",
+    import: "Import",
+    export: "Export",
+    small_business_scheme_kor: "Small business scheme (KOR)",
+  };
+
+export function formatPurchaseTaxRegimeLabel(code: string): string {
+  return code in PURCHASE_TAX_REGIME_LABELS
+    ? PURCHASE_TAX_REGIME_LABELS[code as PurchaseTaxRegimeCode]
+    : code;
+}
 
 /**
  * Default regime to apply when a line's tax category changes, so a plain

@@ -7,7 +7,6 @@ import { ReportingWorkspaceEmptyState } from "../components/reporting-workspace-
 import { ReportingWorkspaceErrorState } from "../components/reporting-workspace-error-state";
 import { ReportingWorkspaceHeader } from "../components/reporting-workspace-header";
 import { ReportingWorkspaceLoadingState } from "../components/reporting-workspace-loading-state";
-import { ReportingWorkspaceNavigation } from "../components/reporting-workspace-navigation";
 import { ReportingWorkspaceOverview } from "../components/reporting-workspace-overview";
 import { useReportingWorkspace } from "../hooks/use-reporting-workspace";
 
@@ -55,9 +54,6 @@ export function ReportingWorkspacePage() {
             ) : (
               <ReportingDashboardEmptyOverview />
             )}
-            <ReportingWorkspaceNavigation
-              items={workspace.navigation_catalog}
-            />
             <ReportingWorkspaceOverview
               overview={workspace.reporting_overview}
             />

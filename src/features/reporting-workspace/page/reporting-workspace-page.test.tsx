@@ -293,13 +293,13 @@ describe("ReportingWorkspacePage (DEV-076 UI)", () => {
     ).toBeGreaterThan(0);
 
     expect(
-      screen.getByRole("heading", { name: "Dashboard navigation" }),
-    ).toBeInTheDocument();
+      screen.queryByRole("heading", { name: "Dashboard navigation" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("Sort")).not.toBeInTheDocument();
     expect(screen.getAllByText("Executive Dashboard").length).toBeGreaterThan(
       0,
     );
     expect(screen.getAllByText("Alerts Dashboard").length).toBeGreaterThan(0);
-    expect(screen.getByText("operations")).toBeInTheDocument();
 
     expect(
       screen.getByRole("heading", { name: "Reporting overview" }),
@@ -333,7 +333,7 @@ describe("ReportingWorkspacePage (DEV-076 UI)", () => {
     ).toBeInTheDocument();
   });
 
-  it("renders navigation catalog rows without recalculation", async () => {
+  it("does not show the internal Sort/Icon/Availability navigation catalog", async () => {
     getReportingWorkspaceMock.mockResolvedValue({
       data: workspace({
         navigation_catalog: [
@@ -353,17 +353,13 @@ describe("ReportingWorkspacePage (DEV-076 UI)", () => {
 
     await renderSettled();
 
-    const navigation = screen
-      .getByRole("heading", { name: "Dashboard navigation" })
-      .closest("section");
-    expect(navigation).not.toBeNull();
-
-    const section = navigation as HTMLElement;
-    expect(within(section).getByText("Audit Dashboard")).toBeInTheDocument();
-    expect(within(section).getAllByText("audit")).toHaveLength(2);
-    expect(within(section).getByText("governance")).toBeInTheDocument();
-    expect(within(section).getByText("70")).toBeInTheDocument();
-    expect(within(section).getByText("available")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: "Dashboard navigation" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("Sort")).not.toBeInTheDocument();
+    expect(screen.queryByText("Icon")).not.toBeInTheDocument();
+    expect(screen.queryByText("Availability")).not.toBeInTheDocument();
+    expect(screen.queryByText("governance")).not.toBeInTheDocument();
   });
 
   it("renders reporting overview sections without recalculation", async () => {
@@ -421,8 +417,8 @@ describe("ReportingWorkspacePage (DEV-076 UI)", () => {
       screen.getByText("No reporting dashboard cards are available yet."),
     ).toBeInTheDocument();
     expect(
-      screen.getByText("No dashboard navigation entries are available yet."),
-    ).toBeInTheDocument();
+      screen.queryByText("No dashboard navigation entries are available yet."),
+    ).not.toBeInTheDocument();
     expect(
       screen.getByText("No reporting overview is available yet."),
     ).toBeInTheDocument();
