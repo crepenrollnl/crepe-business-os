@@ -54,6 +54,15 @@ describe("Sidebar posting-failures role gate", () => {
     expect(
       screen.queryByRole("link", { name: "Recipe Cost" }),
     ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("link", { name: "Expenses" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("link", { name: "Fixed Assets" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("link", { name: "BTW Report" }),
+    ).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Dashboard" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Reports" })).toBeInTheDocument();
   });
@@ -74,6 +83,18 @@ describe("Sidebar posting-failures role gate", () => {
       "href",
       "/recipes/cost-report",
     );
+    expect(screen.getByRole("link", { name: "Expenses" })).toHaveAttribute(
+      "href",
+      "/expenses",
+    );
+    expect(screen.getByRole("link", { name: "Fixed Assets" })).toHaveAttribute(
+      "href",
+      "/fixed-assets",
+    );
+    expect(screen.getByRole("link", { name: "BTW Report" })).toHaveAttribute(
+      "href",
+      "/reports/btw",
+    );
   });
 
   it("shows Recipe Cost to a partner", () => {
@@ -84,6 +105,18 @@ describe("Sidebar posting-failures role gate", () => {
     expect(screen.getByRole("link", { name: "Recipe Cost" })).toHaveAttribute(
       "href",
       "/recipes/cost-report",
+    );
+    expect(screen.getByRole("link", { name: "Expenses" })).toHaveAttribute(
+      "href",
+      "/expenses",
+    );
+    expect(screen.getByRole("link", { name: "Fixed Assets" })).toHaveAttribute(
+      "href",
+      "/fixed-assets",
+    );
+    expect(screen.getByRole("link", { name: "BTW Report" })).toHaveAttribute(
+      "href",
+      "/reports/btw",
     );
   });
 });
