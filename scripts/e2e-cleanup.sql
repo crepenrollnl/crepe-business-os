@@ -3,22 +3,62 @@
 -- NOT run automatically — never from CI, never from a test, never by an
 -- agent. Run by hand in the Supabase SQL Editor whenever "TEST "-prefixed
 -- clutter from e2e/*.spec.ts (see e2e/README.md "Test data policy",
--- decision 09.08.2026) is worth clearing out of the shared dev project.
+-- decision 09.08.2026) is worth clearing out of the shared dev project
+-- (crepe-business-os). Do not run on production (crepe-business-V1).
 --
 -- How to run:
---   1. Paste this whole file into the Supabase SQL Editor.
---   2. Wrap it yourself: start with `BEGIN;`, run everything below, then
+--   1. Confirm the SQL Editor project is crepe-business-os (dev), not
+--      crepe-business-V1 (prod). This file cannot check that for you —
+--      see "No in-session environment guard" below.
+--   2. Paste this whole file into the Supabase SQL Editor.
+--   3. Wrap it yourself: start with `BEGIN;`, run everything below, then
 --      inspect the row counts each DELETE reports.
---   3. If the counts look right (only TEST-prefixed rows affected), run
+--   4. If the counts look right (only TEST-prefixed rows affected), run
 --      `COMMIT;`. If anything looks off, run `ROLLBACK;` instead.
 --   This file intentionally contains no BEGIN/COMMIT/ROLLBACK of its own —
 --   that decision belongs to whoever runs it, every time, not to the file.
 --
+-- No in-session environment guard:
+--   A RAISE that refuses to run on prod would need a value that is
+--   actually different in the two databases and readable from a SQL
+--   Editor session. Checked, none of these qualify:
+--     - current_database() — Supabase names both projects' catalogs
+--       "postgres".
+--     - application_info.environment — sql/033 reads
+--       current_setting('app.environment', true) and falls through to
+--       'unknown'. No sql/*.sql file ever SET that GUC, so both DBs
+--       report 'unknown'.
+--     - company_settings — both DBs seed the same company
+--       (Crepe'n Roll / EUR / Europe/Amsterdam).
+--     - COUNT of TEST-prefixed rows — this script is meant to drive that
+--       count to zero; a successful previous cleanup would then fail the
+--       "must look like dev" check, and a mistaken TEST row on prod
+--       would pass it.
+--   There is therefore no RAISE here. Safety is the operator confirming
+--   the SQL Editor is pointed at crepe-business-os before wrapping
+--   BEGIN. A fake current_database() / environment check would look
+--   like protection and would not be.
+--
+-- Shifts:
+--   shifts has no name column and E2E never writes a TEST prefix
+--   (e2e/shift.spec.ts open/closes the dedicated E2E auth user's shift;
+--   sale-confirm may auto-open one via sql/079). There is no
+--   TEST-prefixed shift row to target. Deleting closed shifts, or all
+--   shifts for a guessed email, would hit real business-day rows on
+--   this shared database. This script therefore does not DELETE FROM
+--   shifts (or shift_cash_reconciliations / shift_daily_*). Leftover
+--   E2E shift rows stay; clear them by hand if needed, keyed off the
+--   E2E auth user's opened_by (that email is a secret, not in git).
+--
 -- Deletion order follows the real FK dependency chain (verified against
 -- sql/001_create_purchases.sql, sql/002_create_recipes.sql,
 -- sql/004_create_production_plans.sql, sql/006_create_production_sessions.sql,
--- sql/007_complete_production.sql, sql/013_create_sales.sql,
--- sql/019_create_suppliers.sql, and sql/085_recipe_assembly_layer.sql):
+-- sql/007_complete_production.sql, sql/010_finished_goods_batch_consumptions.sql,
+-- sql/013_create_sales.sql, sql/019_create_suppliers.sql,
+-- sql/085_recipe_assembly_layer.sql, and sql/125_record_inventory_adjustment.sql):
+--   finished_goods_batch_consumptions --(production_batch_id)--> production_batches
+--   stock_movements --(ingredient_id)--> ingredients
+--   inventory_adjustments --(ingredient_id)--> ingredients
 --   purchase_items --(purchase_id)--> purchases --(supplier_id)--> suppliers
 --   purchase_items --(ingredient_id)--> ingredients
 --   production_batches --(production_session_id)--> production_sessions
@@ -46,7 +86,11 @@
 -- deleted before production_sessions, or the cascade from deleting
 -- production_sessions into production_session_lines would itself hit a
 -- blocking FK violation from production_batches still referencing those
--- lines. production_plan_products.recipe_id, recipe_components.
+-- lines. finished_goods_batch_consumptions.production_batch_id is also
+-- NOT cascading, so those rows must be gone before production_batches.
+-- stock_movements.ingredient_id and inventory_adjustments.ingredient_id
+-- are NOT cascading, so those rows must be gone before ingredients.
+-- production_plan_products.recipe_id, recipe_components.
 -- component_recipe_id, and recipe_items.ingredient_id are also NOT
 -- cascading, so recipes/ingredients must not be deleted before their
 -- referencing rows are gone.
@@ -63,25 +107,114 @@
 -- -- unlike every other step here, this one is not FK-ordering, it's
 -- query-ordering.
 --
--- Not covered, and intentionally so: journal_entries and ledger_entries.
--- Production Execution's "Finish Production" and Sales' "Confirm Sale" can
--- both post a real accounting journal entry -- but per docs/ACCOUNTING.md,
--- posted journals and ledger entries are append-only/immutable by
--- architecture: "Posted journals are immutable. Corrections use reversal /
--- adjusting entries, never silent edits." There is no DELETE path for
--- these tables in this project at all, by design, so this script does not
--- attempt one. Any journal entry a TEST run posts in the shared dev
--- project stays there permanently -- an accepted side effect of E2E work
--- continuing in the shared dev database, not something this cleanup
--- script is meant to solve.
+-- Not covered, and intentionally so: journal_entries, journal_lines, and
+-- ledger_entries. Production Execution's "Finish Production" and Sales'
+-- "Confirm Sale" can both post a real accounting journal entry -- but
+-- per docs/ACCOUNTING.md, posted journals and ledger entries are
+-- append-only/immutable by architecture: "Posted journals are immutable.
+-- Corrections use reversal / adjusting entries, never silent edits."
+-- There is no DELETE path for these tables in this project at all, by
+-- design, so this script does not attempt one. Any journal entry a TEST
+-- run posts in the shared dev project stays there permanently -- an
+-- accepted side effect of E2E work continuing in the shared dev
+-- database, not something this cleanup script is meant to solve.
 --
 -- Also not covered (out of scope for the specs that exist today):
 -- purchases.production_plan_id is a plain (non-cascading) FK to
 -- production_plans. No existing spec ever calls "Send to Purchases" on a
 -- TEST plan, so no TEST plan is ever referenced that way today. A future
 -- spec that does will need to extend this script further.
+-- transactions rows created alongside stock_movements are also left in
+-- place (no FK from transactions to ingredients; not requested here).
 
--- 1. purchase_items referencing TEST purchases or TEST ingredients.
+-- 1. finished_goods_batch_consumptions for TEST batches / TEST recipes /
+--    TEST sale lines — must run before production_batches
+--    (sql/010: production_batch_id REFERENCES production_batches, no CASCADE).
+DELETE FROM finished_goods_batch_consumptions
+WHERE production_batch_id IN (
+  SELECT pb.id
+  FROM production_batches pb
+  JOIN production_sessions ps ON ps.id = pb.production_session_id
+  JOIN production_plans pp ON pp.id = ps.production_plan_id
+  WHERE pp.name LIKE 'TEST %'
+)
+OR production_batch_id IN (
+  SELECT id
+  FROM production_batches
+  WHERE recipe_id IN (
+    SELECT id FROM recipes WHERE name LIKE 'TEST %'
+  )
+)
+OR (
+  source_type = 'sale_line'
+  AND source_id IN (
+    SELECT sl.id
+    FROM sale_lines sl
+    WHERE sl.product_id IN (
+      SELECT id FROM recipes WHERE name LIKE 'TEST %'
+    )
+  )
+);
+
+-- 2. stock_movements that point at TEST ingredients, TEST recipes
+--    (product_id is un-FKed recipe id for FG movements), TEST purchases,
+--    TEST production sessions, TEST sales, or TEST inventory adjustments.
+--    Must run before ingredients (sql/007: ingredient_id REFERENCES
+--    ingredients, no CASCADE).
+DELETE FROM stock_movements
+WHERE ingredient_id IN (
+  SELECT id FROM ingredients WHERE name LIKE 'TEST %'
+)
+OR product_id IN (
+  SELECT id FROM recipes WHERE name LIKE 'TEST %'
+)
+OR (
+  reference_type = 'purchase'
+  AND reference_id IN (
+    SELECT p.id
+    FROM purchases p
+    JOIN suppliers s ON s.id = p.supplier_id
+    WHERE s.name LIKE 'TEST %'
+  )
+)
+OR (
+  reference_type = 'production_session'
+  AND reference_id IN (
+    SELECT ps.id
+    FROM production_sessions ps
+    JOIN production_plans pp ON pp.id = ps.production_plan_id
+    WHERE pp.name LIKE 'TEST %'
+  )
+)
+OR (
+  reference_type = 'sale'
+  AND reference_id IN (
+    SELECT sl.sale_id
+    FROM sale_lines sl
+    WHERE sl.product_id IN (
+      SELECT id FROM recipes WHERE name LIKE 'TEST %'
+    )
+  )
+)
+OR (
+  reference_type = 'inventory_adjustment'
+  AND reference_id IN (
+    SELECT ia.id
+    FROM inventory_adjustments ia
+    JOIN ingredients i ON i.id = ia.ingredient_id
+    WHERE i.name LIKE 'TEST %'
+  )
+);
+
+-- 3. inventory_adjustments for TEST ingredients (opening stock on Add,
+--    sql/125 / create_ingredient). Must run before ingredients
+--    (ingredient_id REFERENCES ingredients, no CASCADE).
+DELETE FROM inventory_adjustments
+WHERE ingredient_id IN (
+  SELECT id FROM ingredients WHERE name LIKE 'TEST %'
+);
+
+-- 4. purchase_items referencing TEST purchases or TEST ingredients.
 DELETE FROM purchase_items
 WHERE purchase_id IN (
   SELECT p.id
@@ -93,13 +226,13 @@ OR ingredient_id IN (
   SELECT id FROM ingredients WHERE name LIKE 'TEST %'
 );
 
--- 2. purchases placed with a TEST supplier.
+-- 5. purchases placed with a TEST supplier.
 DELETE FROM purchases
 WHERE supplier_id IN (
   SELECT id FROM suppliers WHERE name LIKE 'TEST %'
 );
 
--- 3. production_batches for TEST production sessions, or referencing TEST
+-- 6. production_batches for TEST production sessions, or referencing TEST
 --    recipes -- must run before production_sessions (see FK note above).
 DELETE FROM production_batches
 WHERE production_session_id IN (
@@ -112,20 +245,20 @@ OR recipe_id IN (
   SELECT id FROM recipes WHERE name LIKE 'TEST %'
 );
 
--- 4. TEST production sessions (now unreferenced by production_batches).
+-- 7. TEST production sessions (now unreferenced by production_batches).
 --    Cascades production_session_lines automatically.
 DELETE FROM production_sessions
 WHERE production_plan_id IN (
   SELECT id FROM production_plans WHERE name LIKE 'TEST %'
 );
 
--- 5. production_plan_ingredients (requirements snapshot) for TEST plans.
+-- 8. production_plan_ingredients (requirements snapshot) for TEST plans.
 DELETE FROM production_plan_ingredients
 WHERE production_plan_id IN (
   SELECT id FROM production_plans WHERE name LIKE 'TEST %'
 );
 
--- 6. production_plan_products for TEST plans, or referencing TEST recipes.
+-- 9. production_plan_products for TEST plans, or referencing TEST recipes.
 DELETE FROM production_plan_products
 WHERE production_plan_id IN (
   SELECT id FROM production_plans WHERE name LIKE 'TEST %'
@@ -134,11 +267,11 @@ OR recipe_id IN (
   SELECT id FROM recipes WHERE name LIKE 'TEST %'
 );
 
--- 7. TEST production plans (now unreferenced by their own children).
+-- 10. TEST production plans (now unreferenced by their own children).
 DELETE FROM production_plans
 WHERE name LIKE 'TEST %';
 
--- 8. TEST sales -- identified via a sale_lines row selling a TEST-named
+-- 11. TEST sales -- identified via a sale_lines row selling a TEST-named
 --    recipe (the only way to find them; see note above). Must run while
 --    "recipes" still has the TEST rows this subquery joins through.
 --    Cascades sale_lines automatically.
@@ -151,16 +284,16 @@ WHERE id IN (
   )
 );
 
--- 9. sale_lines selling a TEST recipe (defensive redundant pass -- catches
+-- 12. sale_lines selling a TEST recipe (defensive redundant pass -- catches
 --    a TEST-product line that ended up on a non-TEST-named sale header,
---    which step 8 above would not find). Ordinarily a no-op: step 8's
+--    which step 11 above would not find). Ordinarily a no-op: step 11's
 --    cascade already removed these.
 DELETE FROM sale_lines
 WHERE product_id IN (
   SELECT id FROM recipes WHERE name LIKE 'TEST %'
 );
 
--- 10. recipe_components linking a TEST assembly and/or TEST component
+-- 13. recipe_components linking a TEST assembly and/or TEST component
 --     recipe -- must run before recipes (component_recipe_id is NOT
 --     cascading).
 DELETE FROM recipe_components
@@ -171,7 +304,7 @@ OR component_recipe_id IN (
   SELECT id FROM recipes WHERE name LIKE 'TEST %'
 );
 
--- 11. recipe_items for TEST recipes, or referencing TEST ingredients.
+-- 14. recipe_items for TEST recipes, or referencing TEST ingredients.
 DELETE FROM recipe_items
 WHERE recipe_id IN (
   SELECT id FROM recipes WHERE name LIKE 'TEST %'
@@ -180,15 +313,16 @@ OR ingredient_id IN (
   SELECT id FROM ingredients WHERE name LIKE 'TEST %'
 );
 
--- 12. TEST recipes (now unreferenced by production_batches/
+-- 15. TEST recipes (now unreferenced by production_batches/
 --     production_plan_products/sale_lines/recipe_components/recipe_items).
 DELETE FROM recipes
 WHERE name LIKE 'TEST %';
 
--- 13. TEST ingredients (now unreferenced by purchase_items/recipe_items).
+-- 16. TEST ingredients (now unreferenced by purchase_items/recipe_items/
+--     stock_movements/inventory_adjustments).
 DELETE FROM ingredients
 WHERE name LIKE 'TEST %';
 
--- 14. TEST suppliers (now unreferenced by purchases).
+-- 17. TEST suppliers (now unreferenced by purchases).
 DELETE FROM suppliers
 WHERE name LIKE 'TEST %';

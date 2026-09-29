@@ -11,7 +11,8 @@
  * this is a thin orchestration layer over productionService (plan
  * persistence) and productionSessionService (session links) — it does not
  * mutate inventory, create batches, or touch Supabase directly. Tests below
- * mock both dependency services and cover: the ready_to_produce filter,
+ * mock both dependency services and cover: the queue using
+ * getReadyToProducePlans (not getProductionPlans / readiness RPC),
  * the "not ready for execution" rejection, error propagation from each of
  * the three underlying calls, and the merged plan-detail shape.
  */
@@ -26,6 +27,7 @@ const { productionServiceMock, productionSessionServiceMock } = vi.hoisted(
   () => ({
     productionServiceMock: {
       getProductionPlans: vi.fn(),
+      getReadyToProducePlans: vi.fn(),
       getProductionPlanById: vi.fn(),
     },
     productionSessionServiceMock: {
@@ -105,12 +107,10 @@ describe("productionExecutionService", () => {
   });
 
   describe("getExecutablePlans", () => {
-    it("keeps only ready_to_produce plans", async () => {
-      productionServiceMock.getProductionPlans.mockResolvedValue({
+    it("loads the SQL-filtered ready list instead of getProductionPlans", async () => {
+      productionServiceMock.getReadyToProducePlans.mockResolvedValue({
         data: [
-          planListItem({ id: "a", status: "draft" }),
           planListItem({ id: "b", status: "ready_to_produce" }),
-          planListItem({ id: "c", status: "completed" }),
           planListItem({ id: "d", status: "ready_to_produce" }),
         ],
         error: null,
@@ -120,11 +120,15 @@ describe("productionExecutionService", () => {
 
       expect(result.error).toBeNull();
       expect(result.data?.map((plan) => plan.id)).toEqual(["b", "d"]);
+      expect(productionServiceMock.getReadyToProducePlans).toHaveBeenCalledTimes(
+        1,
+      );
+      expect(productionServiceMock.getProductionPlans).not.toHaveBeenCalled();
     });
 
     it("returns an empty list (not an error) when no plan is ready", async () => {
-      productionServiceMock.getProductionPlans.mockResolvedValue({
-        data: [planListItem({ status: "draft" })],
+      productionServiceMock.getReadyToProducePlans.mockResolvedValue({
+        data: [],
         error: null,
       });
 
@@ -132,10 +136,26 @@ describe("productionExecutionService", () => {
 
       expect(result.error).toBeNull();
       expect(result.data).toEqual([]);
+      expect(productionServiceMock.getProductionPlans).not.toHaveBeenCalled();
+    });
+
+    it("drops any non-ready row the SQL filter should not have returned", async () => {
+      productionServiceMock.getReadyToProducePlans.mockResolvedValue({
+        data: [
+          planListItem({ id: "ready", status: "ready_to_produce" }),
+          planListItem({ id: "planned", status: "planned" }),
+        ],
+        error: null,
+      });
+
+      const result = await productionExecutionService.getExecutablePlans();
+
+      expect(result.error).toBeNull();
+      expect(result.data?.map((plan) => plan.id)).toEqual(["ready"]);
     });
 
     it("propagates the error when loading production plans fails", async () => {
-      productionServiceMock.getProductionPlans.mockResolvedValue({
+      productionServiceMock.getReadyToProducePlans.mockResolvedValue({
         data: null,
         error: "Failed to load production plans from the database",
       });
@@ -149,7 +169,7 @@ describe("productionExecutionService", () => {
     });
 
     it("falls back to a generic message when data is null without an explicit error", async () => {
-      productionServiceMock.getProductionPlans.mockResolvedValue({
+      productionServiceMock.getReadyToProducePlans.mockResolvedValue({
         data: null,
         error: null,
       });
@@ -161,7 +181,7 @@ describe("productionExecutionService", () => {
     });
 
     it("maps a thrown exception to a fallback message", async () => {
-      productionServiceMock.getProductionPlans.mockRejectedValue(
+      productionServiceMock.getReadyToProducePlans.mockRejectedValue(
         new Error("boom"),
       );
 

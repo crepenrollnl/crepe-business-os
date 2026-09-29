@@ -1068,6 +1068,113 @@ export const productionService = {
     }
   },
 
+  /**
+   * Production Execution queue list. SQL-filters to ready_to_produce and
+   * never calls check_production_plan_readiness — stuck planned /
+   * waiting_for_purchases plans are not promoted from this path.
+   * Promotion still happens in getProductionPlans (Planning) and
+   * getProductionPlanById (plan detail).
+   */
+  async getReadyToProducePlans(): Promise<
+    ServiceResult<ProductionPlanListItem[]>
+  > {
+    try {
+      const { data, error } = await supabase
+        .from("production_plans")
+        .select("*")
+        .eq("status", "ready_to_produce")
+        .order("planning_date", { ascending: false });
+
+      if (error) {
+        return {
+          data: null,
+          error: toUserError(error, "Failed to load production plans"),
+        };
+      }
+
+      const plans = ((data ?? []) as ProductionPlanRow[]).map(mapPlan);
+      const planIds = plans.map((plan) => plan.id);
+
+      const [productsResult, ingredientsResult, purchasesResult] =
+        await Promise.all([
+          planIds.length === 0
+            ? Promise.resolve({ data: [], error: null })
+            : supabase
+                .from("production_plan_products")
+                .select("production_plan_id")
+                .in("production_plan_id", planIds),
+          planIds.length === 0
+            ? Promise.resolve({ data: [], error: null })
+            : supabase
+                .from("production_plan_ingredients")
+                .select("production_plan_id, missing_quantity")
+                .in("production_plan_id", planIds),
+          fetchLinkedPurchases(planIds),
+        ]);
+
+      if (productsResult.error) {
+        return {
+          data: null,
+          error: toUserError(productsResult.error, "Failed to load plan products"),
+        };
+      }
+
+      if (ingredientsResult.error) {
+        return {
+          data: null,
+          error: toUserError(
+            ingredientsResult.error,
+            "Failed to load plan ingredients",
+          ),
+        };
+      }
+
+      if (purchasesResult.error || !purchasesResult.data) {
+        return {
+          data: null,
+          error: purchasesResult.error ?? "Failed to load linked purchases",
+        };
+      }
+
+      const productCountMap = new Map<string, number>();
+      for (const row of productsResult.data ?? []) {
+        const planId = row.production_plan_id as string;
+        productCountMap.set(planId, (productCountMap.get(planId) ?? 0) + 1);
+      }
+
+      const missingCountMap = new Map<string, number>();
+      for (const row of ingredientsResult.data ?? []) {
+        const planId = row.production_plan_id as string;
+        const missing = toNumber(row.missing_quantity as number | string);
+        if (missing > 0) {
+          missingCountMap.set(planId, (missingCountMap.get(planId) ?? 0) + 1);
+        }
+      }
+
+      const listItems: ProductionPlanListItem[] = plans.map((plan) => {
+        const linkedPurchase = purchasesResult.data.get(plan.id) ?? null;
+
+        return {
+          ...plan,
+          product_count: productCountMap.get(plan.id) ?? 0,
+          missing_ingredient_lines: missingCountMap.get(plan.id) ?? 0,
+          shopping_list_status: shoppingListStatus(
+            plan.shopping_list_generated_at,
+          ),
+          purchase_draft_status: purchaseDraftStatus(linkedPurchase),
+          linked_purchase: linkedPurchase,
+        };
+      });
+
+      return { data: listItems, error: null };
+    } catch (error) {
+      return {
+        data: null,
+        error: toUserError(error, "Failed to load production plans"),
+      };
+    }
+  },
+
   async getProductionPlanById(
     id: string,
   ): Promise<ServiceResult<ProductionPlanWithRelations>> {
