@@ -136,6 +136,54 @@ describe("writeOffService.recordWriteOff", () => {
     expect(result.error).toContain("Insufficient stock");
     expect(result.data).toBeNull();
   });
+
+  it("surfaces a zero-cost ingredient RAISE from the RPC verbatim", async () => {
+    supabaseMock.rpc.mockResolvedValue({
+      data: null,
+      error: {
+        message:
+          'Cannot record write-off. Ingredient "X" has no unit cost set. Set Cost per unit in Inventory and try again.',
+      },
+    });
+
+    const result = await writeOffService.recordWriteOff({
+      itemType: "ingredient",
+      ingredientId: "ing-x",
+      productId: null,
+      quantity: 1,
+      reason: "spoilage",
+      note: null,
+    });
+
+    expect(result.error).toBe(
+      'Cannot record write-off. Ingredient "X" has no unit cost set. Set Cost per unit in Inventory and try again.',
+    );
+    expect(result.data).toBeNull();
+  });
+
+  it("surfaces a zero-cost finished-good FIFO RAISE from the RPC verbatim", async () => {
+    supabaseMock.rpc.mockResolvedValue({
+      data: null,
+      error: {
+        message:
+          'Cannot record write-off. Product "Y" was allocated from a batch with no unit cost. This cannot be fixed in Inventory — produce a new batch with a valid cost, or resolve the existing batch cost separately.',
+      },
+    });
+
+    const result = await writeOffService.recordWriteOff({
+      itemType: "finished_good",
+      ingredientId: null,
+      productId: "recipe-y",
+      quantity: 1,
+      reason: "spoilage",
+      note: null,
+    });
+
+    expect(result.error).toBe(
+      'Cannot record write-off. Product "Y" was allocated from a batch with no unit cost. This cannot be fixed in Inventory — produce a new batch with a valid cost, or resolve the existing batch cost separately.',
+    );
+    expect(result.data).toBeNull();
+  });
 });
 
 function fgRow(
