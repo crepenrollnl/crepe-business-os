@@ -31,9 +31,21 @@ export const navItems: NavItem[] = [
     href: "/accounting/profit-and-loss",
     roles: ["owner", "partner"],
   },
-  { label: "Expenses", href: "/expenses" },
-  { label: "Fixed Assets", href: "/fixed-assets" },
-  { label: "BTW Report", href: "/reports/btw" },
+  {
+    label: "Expenses",
+    href: "/expenses",
+    roles: ["owner", "partner"],
+  },
+  {
+    label: "Fixed Assets",
+    href: "/fixed-assets",
+    roles: ["owner", "partner"],
+  },
+  {
+    label: "BTW Report",
+    href: "/reports/btw",
+    roles: ["owner", "partner"],
+  },
   {
     label: "Posting Failures",
     href: "/reports/posting-failures",
