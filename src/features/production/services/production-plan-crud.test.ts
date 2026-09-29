@@ -431,6 +431,122 @@ describe("productionService (plan + product CRUD)", () => {
     });
   });
 
+  describe("getReadyToProducePlans", () => {
+    it("filters production_plans to ready_to_produce in SQL and never calls check_production_plan_readiness", async () => {
+      let plansBuilder: ReturnType<typeof makeBuilder> | undefined;
+      const tables: Record<string, QueryResult> = {
+        production_plans: {
+          data: [planRow({ status: "ready_to_produce" })],
+          error: null,
+        },
+        production_plan_products: { data: [], error: null },
+        production_plan_ingredients: { data: [], error: null },
+        purchases: { data: [], error: null },
+      };
+
+      supabaseMock.from.mockImplementation((table: string) => {
+        const configured = tables[table];
+        const result = configured ?? { data: [], error: null };
+        const builder = makeBuilder(result);
+        if (table === "production_plans") {
+          plansBuilder = builder;
+        }
+        return builder;
+      });
+      supabaseMock.rpc.mockResolvedValue({
+        data: planRow({ status: "ready_to_produce" }),
+        error: null,
+      });
+
+      const result = await productionService.getReadyToProducePlans();
+
+      expect(result.error).toBeNull();
+      expect(result.data).toHaveLength(1);
+      expect(result.data?.[0]?.status).toBe("ready_to_produce");
+      expect(plansBuilder?.eq).toHaveBeenCalledWith(
+        "status",
+        "ready_to_produce",
+      );
+      expect(supabaseMock.rpc).not.toHaveBeenCalled();
+      expect(supabaseMock.rpc).not.toHaveBeenCalledWith(
+        "check_production_plan_readiness",
+        expect.anything(),
+      );
+    });
+
+    it("does not call the readiness RPC even when a planned row is present in the mock result", async () => {
+      mockTables({
+        production_plans: {
+          data: [
+            planRow({ status: "planned" }),
+            planRow({
+              id: "44444444-4444-4444-8444-444444444444",
+              status: "ready_to_produce",
+            }),
+          ],
+          error: null,
+        },
+        production_plan_products: { data: [], error: null },
+        production_plan_ingredients: { data: [], error: null },
+        purchases: { data: [], error: null },
+      });
+      supabaseMock.rpc.mockResolvedValue({
+        data: planRow({ status: "ready_to_produce" }),
+        error: null,
+      });
+
+      await productionService.getReadyToProducePlans();
+
+      expect(supabaseMock.rpc).not.toHaveBeenCalled();
+    });
+
+    it("aggregates product_count for ready plans without a readiness round-trip", async () => {
+      mockTables({
+        production_plans: {
+          data: [planRow({ status: "ready_to_produce" })],
+          error: null,
+        },
+        production_plan_products: {
+          data: [
+            { production_plan_id: PLAN_ID },
+            { production_plan_id: PLAN_ID },
+          ],
+          error: null,
+        },
+        production_plan_ingredients: {
+          data: [{ production_plan_id: PLAN_ID, missing_quantity: 0 }],
+          error: null,
+        },
+        purchases: { data: [], error: null },
+      });
+
+      const result = await productionService.getReadyToProducePlans();
+
+      expect(result.error).toBeNull();
+      expect(result.data?.[0]).toMatchObject({
+        product_count: 2,
+        missing_ingredient_lines: 0,
+      });
+      expect(supabaseMock.rpc).not.toHaveBeenCalled();
+    });
+
+    it("returns an empty list without querying product/ingredient tables when there are no ready plans", async () => {
+      mockTables({
+        production_plans: { data: [], error: null },
+        purchases: { data: [], error: null },
+      });
+
+      const result = await productionService.getReadyToProducePlans();
+
+      expect(result.error).toBeNull();
+      expect(result.data).toEqual([]);
+      expect(supabaseMock.from).not.toHaveBeenCalledWith(
+        "production_plan_products",
+      );
+      expect(supabaseMock.rpc).not.toHaveBeenCalled();
+    });
+  });
+
   describe("createProductionPlan", () => {
     const validInput: CreateProductionPlanInput = {
       name: "New Batch",

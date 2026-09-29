@@ -19,14 +19,20 @@ import { filterExecutablePlans } from "../utils/is-executable-plan";
 
 export const productionExecutionService = {
   /**
-   * Returns Production Plans with status ready_to_produce
+   * Returns Production Plans already in ready_to_produce
    * ("Ready for Production" in this workspace).
+   *
+   * Uses getReadyToProducePlans (SQL status filter). Does not call
+   * getProductionPlans, so this path never runs
+   * check_production_plan_readiness or auto-promotes planned /
+   * waiting_for_purchases plans. That promotion still happens on
+   * Production Planning list load and plan detail.
    */
   async getExecutablePlans(): Promise<
     ServiceResult<ExecutableProductionPlan[]>
   > {
     try {
-      const result = await productionService.getProductionPlans();
+      const result = await productionService.getReadyToProducePlans();
 
       if (result.error || !result.data) {
         return {
