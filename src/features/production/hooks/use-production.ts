@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { productionService } from "../services/production-service";
+import { isProductionPlanVisible } from "../utils/filter-production-plans";
 import type {
   ProductionPlanFormValues,
   ProductionPlanListItem,
@@ -140,8 +141,7 @@ export function useProduction() {
     const normalizedSearch = search.trim().toLowerCase();
 
     const filtered = items.filter((item) => {
-      const matchesStatus =
-        statusFilter.length === 0 || item.status === statusFilter;
+      const matchesStatus = isProductionPlanVisible(item.status, statusFilter);
 
       if (!matchesStatus) {
         return false;

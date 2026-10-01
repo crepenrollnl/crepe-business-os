@@ -122,3 +122,49 @@ describe("productionService.confirmProductionPlan", () => {
     getByIdSpy.mockRestore();
   });
 });
+
+describe("productionService.cancelProductionPlan", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("cancels the plan via RPC and reloads it", async () => {
+    supabaseMock.rpc.mockResolvedValue({ data: { id: PLAN_ID }, error: null });
+    const reloaded = plan({ status: "cancelled" });
+    const getByIdSpy = vi
+      .spyOn(productionService, "getProductionPlanById")
+      .mockResolvedValue({ data: reloaded, error: null });
+
+    const result = await productionService.cancelProductionPlan(PLAN_ID);
+
+    expect(supabaseMock.rpc).toHaveBeenCalledWith("cancel_production_plan", {
+      p_plan_id: PLAN_ID,
+    });
+    expect(getByIdSpy).toHaveBeenCalledWith(PLAN_ID);
+    expect(result.error).toBeNull();
+    expect(result.data?.status).toBe("cancelled");
+
+    getByIdSpy.mockRestore();
+  });
+
+  it("surfaces the RPC error verbatim and does not reload", async () => {
+    supabaseMock.rpc.mockResolvedValue({
+      data: null,
+      error: {
+        message:
+          "Production has already started for this plan. It cannot be cancelled.",
+      },
+    });
+    const getByIdSpy = vi.spyOn(productionService, "getProductionPlanById");
+
+    const result = await productionService.cancelProductionPlan(PLAN_ID);
+
+    expect(result.data).toBeNull();
+    expect(result.error).toBe(
+      "Production has already started for this plan. It cannot be cancelled.",
+    );
+    expect(getByIdSpy).not.toHaveBeenCalled();
+
+    getByIdSpy.mockRestore();
+  });
+});

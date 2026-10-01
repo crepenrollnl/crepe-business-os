@@ -1,10 +1,22 @@
+import { useState } from "react";
 import Link from "next/link";
-import type { ProductionPlanWithRelations } from "../types/production";
+import type {
+  ProductionPlanStatus,
+  ProductionPlanWithRelations,
+} from "../types/production";
+import { CancelPlanDialog } from "./cancel-plan-dialog";
 import {
   formatProductionPlanDate,
   formatProductionPlanStatus,
   getProductionPlanStatusBadgeClass,
 } from "../utils/format-production-plan";
+
+const CANCELLABLE_PLAN_STATUSES: readonly ProductionPlanStatus[] = [
+  "draft",
+  "planned",
+  "waiting_for_purchases",
+  "ready_to_produce",
+];
 
 type ProductionPlanDetailHeaderProps = {
   plan: ProductionPlanWithRelations;
@@ -14,6 +26,9 @@ type ProductionPlanDetailHeaderProps = {
   canConfirm: boolean;
   isConfirming: boolean;
   onConfirm: () => void;
+  isCancelling: boolean;
+  cancelError: string | null;
+  onCancel: () => Promise<boolean>;
 };
 
 export function ProductionPlanDetailHeader({
@@ -24,7 +39,13 @@ export function ProductionPlanDetailHeader({
   canConfirm,
   isConfirming,
   onConfirm,
+  isCancelling,
+  cancelError,
+  onCancel,
 }: ProductionPlanDetailHeaderProps) {
+  const [isCancelDialogOpen, setIsCancelDialogOpen] = useState(false);
+  const canCancel = CANCELLABLE_PLAN_STATUSES.includes(plan.status);
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -106,8 +127,35 @@ export function ProductionPlanDetailHeader({
               {isConfirming ? "Confirming..." : "Confirm Plan"}
             </button>
           ) : null}
+          {canCancel ? (
+            <button
+              type="button"
+              onClick={() => setIsCancelDialogOpen(true)}
+              className="inline-flex items-center justify-center rounded-lg border border-red-300 bg-white px-5 py-2.5 text-sm font-semibold text-red-700 shadow-sm transition-colors hover:bg-red-50"
+            >
+              Cancel plan
+            </button>
+          ) : null}
         </div>
       </div>
+
+      <CancelPlanDialog
+        isOpen={isCancelDialogOpen}
+        isCancelling={isCancelling}
+        error={cancelError}
+        onClose={() => {
+          if (!isCancelling) {
+            setIsCancelDialogOpen(false);
+          }
+        }}
+        onConfirm={async () => {
+          const cancelled = await onCancel();
+          if (cancelled) {
+            setIsCancelDialogOpen(false);
+          }
+          return cancelled;
+        }}
+      />
     </div>
   );
 }

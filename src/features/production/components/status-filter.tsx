@@ -9,7 +9,7 @@ const STATUS_OPTIONS: Array<{
   value: ProductionPlanStatus | "";
   label: string;
 }> = [
-  { value: "", label: "All statuses" },
+  { value: "", label: "Open plans" },
   { value: "draft", label: "Draft" },
   { value: "planned", label: "Planned" },
   { value: "waiting_for_purchases", label: "Waiting for Purchases" },

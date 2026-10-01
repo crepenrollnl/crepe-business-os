@@ -1704,6 +1704,34 @@ export const productionService = {
   },
 
   /**
+   * Cancels a plan that has not started production. The RPC sets status to
+   * cancelled and does not change stock, shopping items, or purchases.
+   */
+  async cancelProductionPlan(
+    planId: string,
+  ): Promise<ServiceResult<ProductionPlanWithRelations>> {
+    try {
+      const { error } = await supabase.rpc("cancel_production_plan", {
+        p_plan_id: planId,
+      });
+
+      if (error) {
+        return {
+          data: null,
+          error: toUserError(error, "Failed to cancel production plan"),
+        };
+      }
+
+      return this.getProductionPlanById(planId);
+    } catch (error) {
+      return {
+        data: null,
+        error: toUserError(error, "Failed to cancel production plan"),
+      };
+    }
+  },
+
+  /**
    * Transfers calculated Purchase Draft lines into Purchases as a Draft.
    * Reuses Purchases persistence — Planning never owns purchase documents.
    * Does not receive goods or change inventory.
