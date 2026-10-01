@@ -37,6 +37,8 @@ export function useProductionPlanDetail(planId: string) {
   const [transferError, setTransferError] = useState<string | null>(null);
   const [isConfirming, setIsConfirming] = useState(false);
   const [confirmError, setConfirmError] = useState<string | null>(null);
+  const [isCancelling, setIsCancelling] = useState(false);
+  const [cancelError, setCancelError] = useState<string | null>(null);
 
   const clearCalculation = useCallback(() => {
     setCalculationResult(null);
@@ -286,6 +288,28 @@ export function useProductionPlanDetail(planId: string) {
     return true;
   }, [clearCalculation, isConfirming, plan, planId]);
 
+  const cancelPlan = useCallback(async () => {
+    if (isCancelling) {
+      return false;
+    }
+
+    setIsCancelling(true);
+    setCancelError(null);
+
+    const result = await productionService.cancelProductionPlan(planId);
+
+    if (result.error || !result.data) {
+      setCancelError(result.error ?? "Failed to cancel production plan");
+      setIsCancelling(false);
+      return false;
+    }
+
+    setPlan(result.data);
+    clearCalculation();
+    setIsCancelling(false);
+    return true;
+  }, [clearCalculation, isCancelling, planId]);
+
   const sendToPurchases = useCallback(async () => {
     if (
       !plan ||
@@ -358,6 +382,8 @@ export function useProductionPlanDetail(planId: string) {
     transferError,
     isConfirming,
     confirmError,
+    isCancelling,
+    cancelError,
     openAddModal,
     closeAddModal,
     openEditQuantity,
@@ -369,6 +395,7 @@ export function useProductionPlanDetail(planId: string) {
     removeProduct,
     calculateRequirements,
     confirmPlan,
+    cancelPlan,
     sendToPurchases,
     retry: () => loadPlan(),
   };

@@ -47,6 +47,9 @@ export function ProductionPlanDetailPage({
     removeProduct,
     calculateRequirements,
     confirmPlan,
+    cancelPlan,
+    isCancelling,
+    cancelError,
     sendToPurchases,
     retry,
   } = useProductionPlanDetail(planId);
@@ -95,6 +98,9 @@ export function ProductionPlanDetailPage({
               onConfirm={() => {
                 void confirmPlan();
               }}
+              isCancelling={isCancelling}
+              cancelError={cancelError}
+              onCancel={cancelPlan}
             />
 
             {confirmError ? (
