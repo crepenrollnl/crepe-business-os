@@ -193,4 +193,20 @@ describe("productionSessionService.startSession (DEV-018)", () => {
     );
     expect(insertMock).not.toHaveBeenCalled();
   });
+
+  it("returns the live-stock refusal from start_production_session verbatim", async () => {
+    const message =
+      'Cannot start production. Not enough "Salted salmon brine" in stock for the current recipe (need 2.510, have 1.000). Open the plan to recalculate.';
+    mockSessionLoad();
+    supabaseMock.rpc.mockResolvedValue({
+      data: null,
+      error: { message },
+    });
+
+    const result = await productionSessionService.startSession("plan-1");
+
+    expect(result.data).toBeNull();
+    expect(result.error).toBe(message);
+    expect(insertMock).not.toHaveBeenCalled();
+  });
 });

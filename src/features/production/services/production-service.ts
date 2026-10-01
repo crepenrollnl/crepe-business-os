@@ -712,6 +712,14 @@ async function fetchLinkedPurchases(
   return { data: map, error: null };
 }
 
+function fetchPlanIngredientRows(planId: string) {
+  return supabase
+    .from("production_plan_ingredients")
+    .select("*")
+    .eq("production_plan_id", planId)
+    .order("ingredient_name");
+}
+
 async function loadPlanRelations(
   planId: string,
 ): Promise<
@@ -729,11 +737,7 @@ async function loadPlanRelations(
         .select("*")
         .eq("production_plan_id", planId)
         .order("sort_order"),
-      supabase
-        .from("production_plan_ingredients")
-        .select("*")
-        .eq("production_plan_id", planId)
-        .order("ingredient_name"),
+      fetchPlanIngredientRows(planId),
       supabase
         .from("production_plan_shopping_items")
         .select("*")
@@ -831,18 +835,19 @@ function enrichPlan(
 }
 
 /**
- * Checks live ingredient sufficiency and transitions the plan to
- * ready_to_produce atomically on the server (check_production_plan_readiness).
- * Requirements and current stock are read fresh inside that RPC, under a
- * row lock on the plan, instead of relying on client-loaded snapshots.
+ * Resyncs ingredient requirements and reconciles plan status on the server
+ * (check_production_plan_readiness). Runs for planned, waiting_for_purchases,
+ * and ready_to_produce so a plan can be promoted or demoted. Draft, completed,
+ * and cancelled plans are left untouched. The RPC no-ops when a session is
+ * already in progress or completed.
  */
 async function maybeMarkReadyToProduce(
   plan: ProductionPlan,
 ): Promise<ServiceResult<ProductionPlan>> {
   if (
+    plan.status === "draft" ||
     plan.status === "completed" ||
-    plan.status === "cancelled" ||
-    plan.status === "ready_to_produce"
+    plan.status === "cancelled"
   ) {
     return { data: plan, error: null };
   }
@@ -974,37 +979,20 @@ export const productionService = {
       const plans = ((data ?? []) as ProductionPlanRow[]).map(mapPlan);
       const planIds = plans.map((plan) => plan.id);
 
-      const [productsResult, ingredientsResult, purchasesResult] =
-        await Promise.all([
-          planIds.length === 0
-            ? Promise.resolve({ data: [], error: null })
-            : supabase
-                .from("production_plan_products")
-                .select("production_plan_id")
-                .in("production_plan_id", planIds),
-          planIds.length === 0
-            ? Promise.resolve({ data: [], error: null })
-            : supabase
-                .from("production_plan_ingredients")
-                .select("production_plan_id, missing_quantity")
-                .in("production_plan_id", planIds),
-          fetchLinkedPurchases(planIds),
-        ]);
+      const [productsResult, purchasesResult] = await Promise.all([
+        planIds.length === 0
+          ? Promise.resolve({ data: [], error: null })
+          : supabase
+              .from("production_plan_products")
+              .select("production_plan_id")
+              .in("production_plan_id", planIds),
+        fetchLinkedPurchases(planIds),
+      ]);
 
       if (productsResult.error) {
         return {
           data: null,
           error: toUserError(productsResult.error, "Failed to load plan products"),
-        };
-      }
-
-      if (ingredientsResult.error) {
-        return {
-          data: null,
-          error: toUserError(
-            ingredientsResult.error,
-            "Failed to load plan ingredients",
-          ),
         };
       }
 
@@ -1021,6 +1009,57 @@ export const productionService = {
         productCountMap.set(planId, (productCountMap.get(planId) ?? 0) + 1);
       }
 
+      const pending: {
+        currentPlan: ProductionPlan;
+        linkedPurchase: ProductionPlanLinkedPurchase | null;
+      }[] = [];
+
+      for (const plan of plans) {
+        let currentPlan = plan;
+        const linkedPurchase = purchasesResult.data.get(plan.id) ?? null;
+
+        if (
+          plan.status === "planned" ||
+          plan.status === "waiting_for_purchases" ||
+          plan.status === "ready_to_produce"
+        ) {
+          const readiness = await maybeMarkReadyToProduce(plan);
+
+          if (readiness.error || !readiness.data) {
+            console.error(
+              "Production plan readiness check failed",
+              plan.id,
+              readiness.error ?? "Failed to update production plan status",
+            );
+          } else {
+            currentPlan = readiness.data;
+          }
+        }
+
+        pending.push({ currentPlan, linkedPurchase });
+      }
+
+      // One select after readiness. Resync can change missing_quantity, and
+      // plans that skip the RPC are unchanged, so a second pre-loop read
+      // would only duplicate this round trip.
+      const ingredientsResult =
+        planIds.length === 0
+          ? { data: [], error: null }
+          : await supabase
+              .from("production_plan_ingredients")
+              .select("production_plan_id, missing_quantity")
+              .in("production_plan_id", planIds);
+
+      if (ingredientsResult.error) {
+        return {
+          data: null,
+          error: toUserError(
+            ingredientsResult.error,
+            "Failed to load plan ingredients",
+          ),
+        };
+      }
+
       const missingCountMap = new Map<string, number>();
       for (const row of ingredientsResult.data ?? []) {
         const planId = row.production_plan_id as string;
@@ -1030,34 +1069,18 @@ export const productionService = {
         }
       }
 
-      const listItems: ProductionPlanListItem[] = [];
-
-      for (const plan of plans) {
-        let currentPlan = plan;
-        const linkedPurchase = purchasesResult.data.get(plan.id) ?? null;
-
-        if (
-          plan.status === "planned" ||
-          plan.status === "waiting_for_purchases"
-        ) {
-          const readiness = await maybeMarkReadyToProduce(plan);
-
-          if (readiness.data) {
-            currentPlan = readiness.data;
-          }
-        }
-
-        listItems.push({
+      const listItems: ProductionPlanListItem[] = pending.map(
+        ({ currentPlan, linkedPurchase }) => ({
           ...currentPlan,
-          product_count: productCountMap.get(plan.id) ?? 0,
-          missing_ingredient_lines: missingCountMap.get(plan.id) ?? 0,
+          product_count: productCountMap.get(currentPlan.id) ?? 0,
+          missing_ingredient_lines: missingCountMap.get(currentPlan.id) ?? 0,
           shopping_list_status: shoppingListStatus(
             currentPlan.shopping_list_generated_at,
           ),
           purchase_draft_status: purchaseDraftStatus(linkedPurchase),
           linked_purchase: linkedPurchase,
-        });
-      }
+        }),
+      );
 
       return { data: listItems, error: null };
     } catch (error) {
@@ -1072,8 +1095,9 @@ export const productionService = {
    * Production Execution queue list. SQL-filters to ready_to_produce and
    * never calls check_production_plan_readiness — stuck planned /
    * waiting_for_purchases plans are not promoted from this path.
-   * Promotion still happens in getProductionPlans (Planning) and
-   * getProductionPlanById (plan detail).
+   * Promotion and demotion still happen in getProductionPlans (Planning)
+   * and getProductionPlanById (plan detail). Starting a session re-checks
+   * live stock inside start_production_session.
    */
   async getReadyToProducePlans(): Promise<
     ServiceResult<ProductionPlanListItem[]>
@@ -1202,9 +1226,12 @@ export const productionService = {
         };
       }
 
+      let relations = relationsResult.data;
+
       if (
         plan.status === "planned" ||
-        plan.status === "waiting_for_purchases"
+        plan.status === "waiting_for_purchases" ||
+        plan.status === "ready_to_produce"
       ) {
         const readiness = await maybeMarkReadyToProduce(plan);
 
@@ -1216,10 +1243,29 @@ export const productionService = {
         }
 
         plan = readiness.data;
+
+        const refreshedIngredients = await fetchPlanIngredientRows(id);
+
+        if (refreshedIngredients.error) {
+          return {
+            data: null,
+            error: toUserError(
+              refreshedIngredients.error,
+              "Failed to load plan ingredients",
+            ),
+          };
+        }
+
+        relations = {
+          ...relations,
+          ingredients: (
+            (refreshedIngredients.data ?? []) as ProductionPlanIngredientRow[]
+          ).map(mapIngredient),
+        };
       }
 
       return {
-        data: enrichPlan(plan, relationsResult.data),
+        data: enrichPlan(plan, relations),
         error: null,
       };
     } catch (error) {

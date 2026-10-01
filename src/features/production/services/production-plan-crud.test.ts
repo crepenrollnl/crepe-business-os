@@ -9,8 +9,8 @@
  * This file covers Plan CRUD + product-line CRUD, the "reference module"
  * portion of the original Фаза 3 audit description:
  *   - getProductionPlans / getProductionPlanById (including the
- *     "planned"/"waiting_for_purchases" -> auto readiness-check side
- *     effect via the check_production_plan_readiness RPC)
+ *     planned / waiting_for_purchases / ready_to_produce readiness-check
+ *     side effect via the check_production_plan_readiness RPC)
  *   - createProductionPlan
  *   - addProductToPlan / updatePlanProductQuantity / removeProductFromPlan
  *
@@ -300,13 +300,93 @@ describe("productionService (plan + product CRUD)", () => {
       expect(supabaseMock.rpc).toHaveBeenCalledTimes(1);
     });
 
-    it("does not call the readiness RPC for draft/ready_to_produce/completed/cancelled plans", async () => {
-      for (const status of [
-        "draft",
-        "ready_to_produce",
-        "completed",
-        "cancelled",
-      ] as const) {
+    it("returns ingredient rows reloaded after the readiness RPC", async () => {
+      mockTables({
+        production_plans: { data: planRow({ status: "planned" }), error: null },
+        production_plan_products: { data: [], error: null },
+        production_plan_ingredients: [
+          {
+            data: [
+              {
+                id: "ing-1",
+                production_plan_id: PLAN_ID,
+                ingredient_id: "flour-id",
+                ingredient_name: "Flour",
+                unit: "kg",
+                required_quantity: 10,
+                inventory_quantity_at_planning: 5,
+                missing_quantity: 5,
+              },
+            ],
+            error: null,
+          },
+          {
+            data: [
+              {
+                id: "ing-1",
+                production_plan_id: PLAN_ID,
+                ingredient_id: "flour-id",
+                ingredient_name: "Flour",
+                unit: "kg",
+                required_quantity: 4,
+                inventory_quantity_at_planning: 5,
+                missing_quantity: 0,
+              },
+            ],
+            error: null,
+          },
+        ],
+        production_plan_shopping_items: { data: [], error: null },
+        purchases: { data: [], error: null },
+      });
+      supabaseMock.rpc.mockResolvedValue({
+        data: planRow({ status: "ready_to_produce" }),
+        error: null,
+      });
+
+      const result = await productionService.getProductionPlanById(PLAN_ID);
+
+      expect(result.error).toBeNull();
+      expect(result.data?.status).toBe("ready_to_produce");
+      expect(result.data?.ingredients).toEqual([
+        expect.objectContaining({
+          ingredient_id: "flour-id",
+          required_quantity: 4,
+          inventory_quantity_at_planning: 5,
+          missing_quantity: 0,
+        }),
+      ]);
+      expect(result.data?.summary.missing_ingredient_lines).toBe(0);
+    });
+
+    it("runs the readiness check for a ready_to_produce plan so it can be demoted", async () => {
+      mockTables({
+        production_plans: {
+          data: planRow({ status: "ready_to_produce" }),
+          error: null,
+        },
+        production_plan_products: { data: [], error: null },
+        production_plan_ingredients: { data: [], error: null },
+        production_plan_shopping_items: { data: [], error: null },
+        purchases: { data: [], error: null },
+      });
+      supabaseMock.rpc.mockResolvedValue({
+        data: planRow({ status: "planned" }),
+        error: null,
+      });
+
+      const result = await productionService.getProductionPlanById(PLAN_ID);
+
+      expect(supabaseMock.rpc).toHaveBeenCalledWith(
+        "check_production_plan_readiness",
+        { p_plan_id: PLAN_ID },
+      );
+      expect(result.error).toBeNull();
+      expect(result.data?.status).toBe("planned");
+    });
+
+    it("does not call the readiness RPC for draft/completed/cancelled plans", async () => {
+      for (const status of ["draft", "completed", "cancelled"] as const) {
         vi.clearAllMocks();
         mockTables({
           production_plans: { data: planRow({ status }), error: null },
@@ -398,25 +478,133 @@ describe("productionService (plan + product CRUD)", () => {
       });
     });
 
-    it("runs the readiness check for each planned/waiting_for_purchases plan in the list", async () => {
+    it("runs the readiness check for each planned, waiting_for_purchases, and ready_to_produce plan in the list", async () => {
+      const readyPlanId = "55555555-5555-4555-8555-555555555555";
       mockTables({
         production_plans: {
-          data: [planRow({ status: "planned" }), planRow({ status: "draft" })],
+          data: [
+            planRow({ status: "planned" }),
+            planRow({ status: "draft" }),
+            planRow({ id: readyPlanId, status: "ready_to_produce" }),
+          ],
           error: null,
         },
         production_plan_products: { data: [], error: null },
         production_plan_ingredients: { data: [], error: null },
         purchases: { data: [], error: null },
       });
-      supabaseMock.rpc.mockResolvedValue({
-        data: planRow({ status: "ready_to_produce" }),
-        error: null,
-      });
+      supabaseMock.rpc.mockImplementation(
+        async (_fn: string, args: { p_plan_id: string }) => ({
+          data: planRow({
+            id: args.p_plan_id,
+            status: "ready_to_produce",
+          }),
+          error: null,
+        }),
+      );
 
       await productionService.getProductionPlans();
 
-      // Only the "planned" plan should trigger the RPC, not the "draft" one.
-      expect(supabaseMock.rpc).toHaveBeenCalledTimes(1);
+      expect(supabaseMock.rpc).toHaveBeenCalledTimes(2);
+      expect(supabaseMock.rpc).toHaveBeenCalledWith(
+        "check_production_plan_readiness",
+        { p_plan_id: PLAN_ID },
+      );
+      expect(supabaseMock.rpc).toHaveBeenCalledWith(
+        "check_production_plan_readiness",
+        { p_plan_id: readyPlanId },
+      );
+    });
+
+    it("counts missing ingredient lines from rows loaded after the readiness RPC", async () => {
+      let readinessFinished = false;
+      mockTables({
+        production_plans: {
+          data: [planRow({ status: "planned" })],
+          error: null,
+        },
+        production_plan_products: { data: [], error: null },
+        purchases: { data: [], error: null },
+      });
+      supabaseMock.rpc.mockImplementation(async () => {
+        readinessFinished = true;
+        return {
+          data: planRow({ status: "ready_to_produce" }),
+          error: null,
+        };
+      });
+      const tablesFrom = supabaseMock.from.getMockImplementation();
+      supabaseMock.from.mockImplementation((table: string) => {
+        if (table === "production_plan_ingredients") {
+          return makeBuilder({
+            data: readinessFinished
+              ? [
+                  { production_plan_id: PLAN_ID, missing_quantity: 1 },
+                  { production_plan_id: PLAN_ID, missing_quantity: 2 },
+                ]
+              : [{ production_plan_id: PLAN_ID, missing_quantity: 0 }],
+            error: null,
+          });
+        }
+        return tablesFrom?.(table);
+      });
+
+      const result = await productionService.getProductionPlans();
+
+      expect(result.error).toBeNull();
+      expect(result.data?.[0]).toMatchObject({
+        id: PLAN_ID,
+        status: "ready_to_produce",
+        missing_ingredient_lines: 2,
+      });
+    });
+
+    it("keeps a plan's stored status and continues the list when one readiness RPC fails", async () => {
+      const failingPlanId = "66666666-6666-4666-8666-666666666666";
+      const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+      mockTables({
+        production_plans: {
+          data: [
+            planRow({ status: "planned" }),
+            planRow({ id: failingPlanId, status: "planned" }),
+          ],
+          error: null,
+        },
+        production_plan_products: { data: [], error: null },
+        production_plan_ingredients: { data: [], error: null },
+        purchases: { data: [], error: null },
+      });
+      supabaseMock.rpc.mockImplementation(
+        async (_fn: string, args: { p_plan_id: string }) => {
+          if (args.p_plan_id === failingPlanId) {
+            return {
+              data: null,
+              error: { message: "readiness check failed" },
+            };
+          }
+          return {
+            data: planRow({ id: args.p_plan_id, status: "ready_to_produce" }),
+            error: null,
+          };
+        },
+      );
+
+      const result = await productionService.getProductionPlans();
+
+      expect(result.error).toBeNull();
+      expect(result.data).toEqual([
+        expect.objectContaining({ id: PLAN_ID, status: "ready_to_produce" }),
+        expect.objectContaining({
+          id: failingPlanId,
+          status: "planned",
+        }),
+      ]);
+      expect(consoleError).toHaveBeenCalledWith(
+        "Production plan readiness check failed",
+        failingPlanId,
+        "readiness check failed",
+      );
+      consoleError.mockRestore();
     });
 
     it("propagates an error from the plans query", async () => {
