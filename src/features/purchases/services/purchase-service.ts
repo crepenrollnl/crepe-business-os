@@ -25,6 +25,10 @@ import {
   DEFAULT_COMPANY_ID,
   DEFAULT_TAX_COUNTRY,
 } from "../utils/build-purchase-tax-document";
+import type {
+  LastPurchaseLineLookup,
+  LastPurchaseLineSnapshot,
+} from "../utils/apply-last-purchase-prefill";
 import { toNetPurchaseLines } from "../utils/to-net-purchase-lines";
 import { reportPostingFailure } from "@/features/accounting/utils/report-posting-failure";
 import { purchaseAccountingService } from "./purchase-accounting-service";
@@ -116,6 +120,64 @@ function mapPurchase(row: PurchaseRow): Purchase {
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
+}
+
+function mapLastPurchaseSnapshot(
+  value: unknown,
+): LastPurchaseLineSnapshot | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const row = value as Record<string, unknown>;
+  const unitCost = toNullableNumber(
+    row.unit_cost as number | string | null | undefined,
+  );
+  if (unitCost === null) {
+    return null;
+  }
+
+  const priceMode = row.price_mode;
+  const purchasedAt = row.purchased_at;
+
+  return {
+    enteredUnitPrice: toNullableNumber(
+      row.entered_unit_price as number | string | null | undefined,
+    ),
+    unitCost,
+    priceMode:
+      priceMode === "inclusive" || priceMode === "exclusive" ? priceMode : null,
+    taxCategory:
+      typeof row.tax_category === "string" ? row.tax_category : null,
+    taxRegime: typeof row.tax_regime === "string" ? row.tax_regime : null,
+    purchasedAt: typeof purchasedAt === "string" ? purchasedAt : "",
+    supplierId: typeof row.supplier_id === "string" ? row.supplier_id : null,
+    supplierName:
+      typeof row.supplier_name === "string" ? row.supplier_name : null,
+  };
+}
+
+function mapLastPurchaseLines(data: unknown): LastPurchaseLineLookup[] {
+  if (!Array.isArray(data)) {
+    return [];
+  }
+
+  return data.flatMap((entry) => {
+    if (!entry || typeof entry !== "object") {
+      return [];
+    }
+    const row = entry as Record<string, unknown>;
+    if (typeof row.ingredient_id !== "string") {
+      return [];
+    }
+    return [
+      {
+        ingredientId: row.ingredient_id,
+        supplierLine: mapLastPurchaseSnapshot(row.supplier_line),
+        anyLine: mapLastPurchaseSnapshot(row.any_line),
+      },
+    ];
+  });
 }
 
 function mapPurchaseItem(row: PurchaseItemRow): PurchaseItem {
@@ -658,6 +720,44 @@ export const purchaseService = {
 
   async getIngredients(): Promise<ServiceResult<PurchaseIngredientOption[]>> {
     return fetchIngredients();
+  },
+
+  /**
+   * Latest received purchase line per ingredient. Read-only hint for the
+   * document form. Does not save, receive, or post.
+   */
+  async getLastPurchaseLines(
+    ingredientIds: string[],
+    supplierId: string | null,
+  ): Promise<ServiceResult<LastPurchaseLineLookup[]>> {
+    try {
+      const ids = [
+        ...new Set(ingredientIds.map((id) => id.trim()).filter((id) => id.length > 0)),
+      ];
+      if (ids.length === 0) {
+        return { data: [], error: null };
+      }
+
+      const { data, error } = await supabase.rpc("get_last_purchase_lines", {
+        p_ingredient_ids: ids,
+        p_supplier_id:
+          supplierId && supplierId.trim().length > 0 ? supplierId.trim() : null,
+      });
+
+      if (error) {
+        return {
+          data: null,
+          error: toUserError(error, "Failed to load last purchase prices"),
+        };
+      }
+
+      return { data: mapLastPurchaseLines(data), error: null };
+    } catch (error) {
+      return {
+        data: null,
+        error: toUserError(error, "Failed to load last purchase prices"),
+      };
+    }
   },
 
   async saveDraft(

@@ -1,6 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
 import {
   NumericInput,
   formatNumericInput,
@@ -8,6 +15,7 @@ import {
 } from "@/components/ui/numeric-input";
 import { formatMoney, formatUnitCost } from "@/lib/money";
 import { PurchaseAccountingPreview } from "./purchase-accounting-preview";
+import { purchaseService } from "../services/purchase-service";
 import { purchaseTaxService } from "../services/purchase-tax-service";
 import type {
   PurchaseFormValues,
@@ -39,6 +47,18 @@ import {
   shouldRunLineTotalProbe,
   unitCostAfterLineTotalProbe,
 } from "../utils/line-total-probe-apply";
+import {
+  fillLastPricesNote,
+  formatLastPurchaseHint,
+  isEmptyOrZeroUnitPrice,
+  planAutomaticPrefill,
+  planFillLastPrices,
+  planUseLastPurchase,
+  resolveLastPurchaseSource,
+  type LastPurchaseFieldPatch,
+  type LastPurchaseLineLookup,
+  type PrefillTouchState,
+} from "../utils/apply-last-purchase-prefill";
 
 /** Debounce delay before re-requesting the tax preview RPC after an edit. */
 const TAX_PREVIEW_DEBOUNCE_MS = 400;
@@ -85,6 +105,126 @@ export type LineDraft = Omit<
   tax_category: string;
   tax_regime: string;
   price_mode: "" | "exclusive" | "inclusive";
+  loaded_from_database?: boolean;
+  loaded_ingredient_id?: string;
+  ingredient_changed?: boolean;
+  touched_unit_cost?: boolean;
+  touched_price_mode?: boolean;
+  touched_tax_category?: boolean;
+  touched_tax_regime?: boolean;
+  helper_unit_cost?: boolean;
+  helper_price_mode?: boolean;
+  helper_tax_category?: boolean;
+  helper_tax_regime?: boolean;
+};
+
+function lineTouchState(line: LineDraft): PrefillTouchState {
+  return {
+    unitCost: line.touched_unit_cost === true,
+    priceMode: line.touched_price_mode === true,
+    taxCategory: line.touched_tax_category === true,
+    taxRegime: line.touched_tax_regime === true,
+  };
+}
+
+function lineHelperState(line: LineDraft): PrefillTouchState {
+  return {
+    unitCost: line.helper_unit_cost === true,
+    priceMode: line.helper_price_mode === true,
+    taxCategory: line.helper_tax_category === true,
+    taxRegime: line.helper_tax_regime === true,
+  };
+}
+
+function markPrefillField(
+  line: LineDraft,
+  field: "unit_cost" | "price_mode" | "tax_category" | "tax_regime",
+  origin: "user" | "helper",
+): LineDraft {
+  const touched = origin === "user";
+  if (field === "unit_cost") {
+    return {
+      ...line,
+      touched_unit_cost: touched,
+      helper_unit_cost: !touched,
+    };
+  }
+  if (field === "price_mode") {
+    return {
+      ...line,
+      touched_price_mode: touched,
+      helper_price_mode: !touched,
+    };
+  }
+  if (field === "tax_category") {
+    return {
+      ...line,
+      touched_tax_category: touched,
+      helper_tax_category: !touched,
+    };
+  }
+  return {
+    ...line,
+    touched_tax_regime: touched,
+    helper_tax_regime: !touched,
+  };
+}
+
+function prefillPatchApplied(
+  line: LineDraft,
+  patch: LastPurchaseFieldPatch,
+): boolean {
+  if (
+    patch.unitPrice !== undefined &&
+    parseNumericInput(line.unit_cost) !== patch.unitPrice
+  ) {
+    return false;
+  }
+  if (patch.priceMode !== undefined && line.price_mode !== patch.priceMode) {
+    return false;
+  }
+  if (
+    patch.taxCategory !== undefined &&
+    line.tax_category !== patch.taxCategory
+  ) {
+    return false;
+  }
+  if (patch.taxRegime !== undefined && line.tax_regime !== patch.taxRegime) {
+    return false;
+  }
+  return true;
+}
+
+const blankPrefillFlags = {
+  loaded_from_database: false,
+  loaded_ingredient_id: "",
+  ingredient_changed: false,
+  touched_unit_cost: false,
+  touched_price_mode: false,
+  touched_tax_category: false,
+  touched_tax_regime: false,
+  helper_unit_cost: false,
+  helper_price_mode: false,
+  helper_tax_category: false,
+  helper_tax_regime: false,
+};
+
+/** Tax identity of a new line. Helper-owned fields return here when the ingredient changes. */
+const NEW_LINE_TAX_SEED = {
+  price_mode: "inclusive" as const,
+  tax_category: "food",
+  tax_regime: "reduced_vat",
+};
+
+interface LastPurchaseLookupCache {
+  /** Supplier id the rows were fetched for. Null when the fetch had no supplier. */
+  supplierId: string | null;
+  lines: LastPurchaseLineLookup[];
+}
+
+const emptyLastPurchaseLookup: LastPurchaseLookupCache = {
+  supplierId: null,
+  lines: [],
 };
 
 export type FormDraft = Omit<PurchaseFormValues, "lines"> & {
@@ -146,6 +286,17 @@ function valuesToDraft(
         line.price_mode === "inclusive" || line.price_mode === "exclusive"
           ? line.price_mode
           : "",
+      loaded_from_database: !options?.emptyNumericDefaults,
+      loaded_ingredient_id: line.ingredient_id,
+      ingredient_changed: false,
+      touched_unit_cost: false,
+      touched_price_mode: false,
+      touched_tax_category: false,
+      touched_tax_regime: false,
+      helper_unit_cost: false,
+      helper_price_mode: false,
+      helper_tax_category: false,
+      helper_tax_regime: false,
     })),
   };
 }
@@ -285,6 +436,9 @@ function PurchaseDocumentForm({
     Record<number, { loading: boolean; error: string | null }>
   >({});
   const appliedLineTotalProbeKeysRef = useRef<Record<number, string>>({});
+  const [lastPurchaseLookup, setLastPurchaseLookup] =
+    useState<LastPurchaseLookupCache>(emptyLastPurchaseLookup);
+  const [fillNote, setFillNote] = useState<string | null>(null);
 
   // The RPC preview only applies once the draft has enough content to price
   // (matches validateDraft's own requirements) — that check is pure
@@ -574,34 +728,61 @@ function PurchaseDocumentForm({
     }));
   };
 
-  const updateLineUnitCost = (index: number, value: string) => {
-    delete appliedLineTotalProbeKeysRef.current[index];
+  const updateLineUnitCost = useCallback((
+    index: number,
+    value: string,
+    origin: "user" | "helper" = "user",
+    options?: { fillDespiteTouch?: boolean },
+  ) => {
     setFormValues((current) => ({
       ...current,
       lines: current.lines.map((line, lineIndex) => {
         if (lineIndex !== index) {
           return line;
         }
+        if (
+          origin === "helper" &&
+          line.touched_unit_cost === true &&
+          !options?.fillDespiteTouch
+        ) {
+          return line;
+        }
+        delete appliedLineTotalProbeKeysRef.current[index];
         const quantity = parseNumericInput(line.quantity);
         const newUnitCost = parseNumericInput(value);
-        if (quantity !== null && quantity > 0 && newUnitCost !== null) {
-          return {
+        const priced = markPrefillField(
+          {
             ...line,
             unit_cost: value,
             last_edited_field: "unit_cost",
+          },
+          "unit_cost",
+          origin,
+        );
+        if (value.trim() === "") {
+          return {
+            ...priced,
+            unit_cost: "",
+            line_total: "",
+            last_edited_field: null,
+          };
+        }
+        if (quantity !== null && quantity > 0 && newUnitCost !== null) {
+          return {
+            ...priced,
             line_total: formatNumericInput(
               roundMoney(quantity * newUnitCost),
             ),
           };
         }
-        return { ...line, unit_cost: value, last_edited_field: "unit_cost" };
+        return priced;
       }),
     }));
     setLineTotalDeriveByIndex((current) => ({
       ...current,
       [index]: { loading: false, error: null },
     }));
-  };
+  }, []);
 
   const updateLinePriceMode = (
     index: number,
@@ -620,7 +801,9 @@ function PurchaseDocumentForm({
       return {
         ...current,
         lines: current.lines.map((line, lineIndex) =>
-          lineIndex === index ? { ...line, price_mode: value } : line,
+          lineIndex === index
+            ? markPrefillField({ ...line, price_mode: value }, "price_mode", "user")
+            : line,
         ),
       };
     });
@@ -667,14 +850,22 @@ function PurchaseDocumentForm({
       ...current,
       lines: current.lines.map((line, lineIndex) =>
         lineIndex === index
-          ? {
-              ...line,
-              tax_category: category,
-              tax_regime:
-                DEFAULT_TAX_REGIME_BY_CATEGORY[
-                  category as PurchaseTaxCategoryCode
-                ] ?? (category ? line.tax_regime : ""),
-            }
+          ? markPrefillField(
+              markPrefillField(
+                {
+                  ...line,
+                  tax_category: category,
+                  tax_regime:
+                    DEFAULT_TAX_REGIME_BY_CATEGORY[
+                      category as PurchaseTaxCategoryCode
+                    ] ?? (category ? line.tax_regime : ""),
+                },
+                "tax_category",
+                "user",
+              ),
+              "tax_regime",
+              "user",
+            )
           : line,
       ),
     }));
@@ -692,9 +883,8 @@ function PurchaseDocumentForm({
           line_total: "",
           last_edited_field: null,
           discount: "",
-          tax_category: "food",
-          tax_regime: "reduced_vat",
-          price_mode: "inclusive",
+          ...NEW_LINE_TAX_SEED,
+          ...blankPrefillFlags,
         },
       ],
     }));
@@ -705,6 +895,188 @@ function PurchaseDocumentForm({
       ...current,
       lines: current.lines.filter((_, lineIndex) => lineIndex !== index),
     }));
+  };
+
+  const lookupByIngredient = useMemo(() => {
+    return new Map(
+      lastPurchaseLookup.lines.map((row) => [row.ingredientId, row]),
+    );
+  }, [lastPurchaseLookup.lines]);
+
+  const documentSupplierId = formValues.supplier_id.trim() || null;
+
+  const sourceForLine = (line: LineDraft) =>
+    resolveLastPurchaseSource(
+      lookupByIngredient.get(line.ingredient_id) ?? null,
+      documentSupplierId,
+      lastPurchaseLookup.supplierId,
+    );
+
+  const applyLastPricePatch = useCallback((
+    index: number,
+    patch: LastPurchaseFieldPatch,
+    origin: "user" | "helper",
+    options?: { fillDespiteTouch?: boolean },
+  ) => {
+    if (patch.unitPrice !== undefined) {
+      updateLineUnitCost(
+        index,
+        formatNumericInput(patch.unitPrice),
+        origin,
+        options,
+      );
+    }
+    if (
+      patch.priceMode === undefined &&
+      patch.taxCategory === undefined &&
+      patch.taxRegime === undefined
+    ) {
+      return;
+    }
+    setFormValues((current) => ({
+      ...current,
+      lines: current.lines.map((line, lineIndex) => {
+        if (lineIndex !== index) {
+          return line;
+        }
+        let next = line;
+        if (
+          patch.priceMode &&
+          !(origin === "helper" && line.touched_price_mode === true)
+        ) {
+          next = markPrefillField(
+            { ...next, price_mode: patch.priceMode },
+            "price_mode",
+            origin,
+          );
+        }
+        if (
+          patch.taxCategory &&
+          !(origin === "helper" && line.touched_tax_category === true)
+        ) {
+          next = markPrefillField(
+            { ...next, tax_category: patch.taxCategory },
+            "tax_category",
+            origin,
+          );
+        }
+        if (
+          patch.taxRegime &&
+          !(origin === "helper" && line.touched_tax_regime === true)
+        ) {
+          next = markPrefillField(
+            { ...next, tax_regime: patch.taxRegime },
+            "tax_regime",
+            origin,
+          );
+        }
+        return next;
+      }),
+    }));
+  }, [updateLineUnitCost]);
+
+  const ingredientIdsKey = formValues.lines
+    .map((line) => line.ingredient_id)
+    .filter((id) => id.length > 0)
+    .sort()
+    .filter((id, index, ids) => ids.indexOf(id) === index)
+    .join(",");
+
+  useEffect(() => {
+    if (isReadOnly) {
+      return;
+    }
+    const ids =
+      ingredientIdsKey.length > 0 ? ingredientIdsKey.split(",") : [];
+    if (ids.length === 0) {
+      return;
+    }
+    let cancelled = false;
+    const requestedSupplierId = formValues.supplier_id.trim() || null;
+    void purchaseService
+      .getLastPurchaseLines(ids, requestedSupplierId)
+      .then((result) => {
+        if (cancelled) {
+          return;
+        }
+        if (result.error || !result.data) {
+          setLastPurchaseLookup(emptyLastPurchaseLookup);
+          return;
+        }
+        setLastPurchaseLookup({
+          supplierId: requestedSupplierId,
+          lines: result.data,
+        });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [ingredientIdsKey, formValues.supplier_id, isReadOnly]);
+
+  useEffect(() => {
+    if (isReadOnly) {
+      return;
+    }
+    formValues.lines.forEach((line, index) => {
+      const source = resolveLastPurchaseSource(
+        lookupByIngredient.get(line.ingredient_id) ?? null,
+        documentSupplierId,
+        lastPurchaseLookup.supplierId,
+      );
+      const patch = planAutomaticPrefill(source, {
+        readOnly: false,
+        loadedFromDatabase: line.loaded_from_database === true,
+        ingredientChanged: line.ingredient_changed === true,
+        touched: lineTouchState(line),
+        helperOwned: lineHelperState(line),
+      });
+      if (!patch || prefillPatchApplied(line, patch)) {
+        return;
+      }
+      applyLastPricePatch(index, patch, "helper");
+    });
+  }, [
+    applyLastPricePatch,
+    documentSupplierId,
+    formValues,
+    isReadOnly,
+    lastPurchaseLookup.supplierId,
+    lookupByIngredient,
+  ]);
+
+  const fillCandidateCount = formValues.lines.filter(
+    (line) =>
+      isEmptyOrZeroUnitPrice(line.unit_cost) && sourceForLine(line) !== null,
+  ).length;
+
+  const fillLastPrices = () => {
+    const plan = planFillLastPrices(
+      formValues.lines.map((line) => ({
+        unitPrice: line.unit_cost,
+        source: sourceForLine(line),
+        touched: lineTouchState(line),
+      })),
+      isReadOnly,
+    );
+    plan.patches.forEach((patch, index) => {
+      if (!patch) {
+        return;
+      }
+      applyLastPricePatch(index, patch, "helper", { fillDespiteTouch: true });
+    });
+    setFillNote(fillLastPricesNote(plan.filled, plan.candidates));
+  };
+
+  const acceptLastPrice = (index: number) => {
+    const line = formValues.lines[index];
+    if (!line) {
+      return;
+    }
+    const patch = planUseLastPurchase(sourceForLine(line));
+    if (!patch) {
+      return;
+    }
+    applyLastPricePatch(index, patch, "user");
   };
 
   const handleAction = async (
@@ -951,20 +1323,35 @@ function PurchaseDocumentForm({
           <div className="flex items-center justify-between gap-3">
             <h3 className="text-sm font-semibold text-zinc-900">Lines</h3>
             {!isReadOnly && (
-              <button
-                type="button"
-                onClick={addLine}
-                disabled={isSaving}
-                className="rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                + Add line
-              </button>
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                {fillCandidateCount > 0 ? (
+                  <button
+                    type="button"
+                    onClick={fillLastPrices}
+                    disabled={isSaving}
+                    className="rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    Fill last prices
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={addLine}
+                  disabled={isSaving}
+                  className="rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  + Add line
+                </button>
+              </div>
             )}
           </div>
 
           {hasAttemptedSubmit && fieldErrors.lines && (
             <p className="text-sm text-red-600">{fieldErrors.lines}</p>
           )}
+          {fillNote ? (
+            <p className="text-sm text-zinc-600">{fillNote}</p>
+          ) : null}
 
           <div className="overflow-hidden rounded-xl border border-zinc-200">
             <div className="overflow-x-auto">
@@ -1044,9 +1431,50 @@ function PurchaseDocumentForm({
                         <td className="px-3 py-3 align-top">
                           <select
                             value={line.ingredient_id}
-                            onChange={(event) =>
-                              updateLine(index, "ingredient_id", event.target.value)
-                            }
+                            onChange={(event) => {
+                              const nextId = event.target.value;
+                              const currentLine = formValues.lines[index];
+                              if (!currentLine || nextId === currentLine.ingredient_id) {
+                                return;
+                              }
+                              const resetHelperUnitCost =
+                                currentLine.helper_unit_cost === true;
+                              if (resetHelperUnitCost) {
+                                updateLineUnitCost(index, "", "helper");
+                              }
+                              setFormValues((current) => ({
+                                ...current,
+                                lines: current.lines.map((row, lineIndex) => {
+                                  if (lineIndex !== index) {
+                                    return row;
+                                  }
+                                  const next: LineDraft = {
+                                    ...row,
+                                    ingredient_id: nextId,
+                                    ingredient_changed:
+                                      row.ingredient_changed ||
+                                      (row.loaded_from_database === true &&
+                                        nextId !== row.loaded_ingredient_id),
+                                  };
+                                  if (resetHelperUnitCost) {
+                                    next.helper_unit_cost = false;
+                                  }
+                                  if (row.helper_price_mode === true) {
+                                    next.price_mode = NEW_LINE_TAX_SEED.price_mode;
+                                    next.helper_price_mode = false;
+                                  }
+                                  if (row.helper_tax_category === true) {
+                                    next.tax_category = NEW_LINE_TAX_SEED.tax_category;
+                                    next.helper_tax_category = false;
+                                  }
+                                  if (row.helper_tax_regime === true) {
+                                    next.tax_regime = NEW_LINE_TAX_SEED.tax_regime;
+                                    next.helper_tax_regime = false;
+                                  }
+                                  return next;
+                                }),
+                              }));
+                            }}
                             disabled={isReadOnly || isSaving}
                             className={inputClassName}
                             aria-invalid={Boolean(
@@ -1107,6 +1535,7 @@ function PurchaseDocumentForm({
                             }
                             className="text-right"
                             placeholder="0.00"
+                            aria-label="Unit price"
                             aria-invalid={Boolean(
                               hasAttemptedSubmit && lineError?.unit_cost,
                             )}
@@ -1126,6 +1555,20 @@ function PurchaseDocumentForm({
                               {lineError.unit_cost}
                             </p>
                           )}
+                          {!isReadOnly && sourceForLine(line) ? (
+                            <button
+                              type="button"
+                              onClick={() => acceptLastPrice(index)}
+                              disabled={isSaving}
+                              className="mt-1 block text-left text-xs text-zinc-500 underline decoration-zinc-300 underline-offset-2 hover:text-zinc-800 disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              {formatLastPurchaseHint(
+                                sourceForLine(line)!,
+                                selectedIngredient?.unit ?? "",
+                              )}{" "}
+                              Use
+                            </button>
+                          ) : null}
                           {showNetUnitCost && (
                             <p className="mt-1 text-xs text-zinc-500">
                               Net {formatUnitCost(netUnitCost)}
@@ -1206,9 +1649,21 @@ function PurchaseDocumentForm({
                           ) : (
                             <select
                               value={line.tax_regime}
-                              onChange={(event) =>
-                                updateLine(index, "tax_regime", event.target.value)
-                              }
+                              onChange={(event) => {
+                                const regime = event.target.value;
+                                setFormValues((current) => ({
+                                  ...current,
+                                  lines: current.lines.map((row, lineIndex) =>
+                                    lineIndex === index
+                                      ? markPrefillField(
+                                          { ...row, tax_regime: regime },
+                                          "tax_regime",
+                                          "user",
+                                        )
+                                      : row,
+                                  ),
+                                }));
+                              }}
                               disabled={isReadOnly || isSaving}
                               className={inputClassName}
                             >

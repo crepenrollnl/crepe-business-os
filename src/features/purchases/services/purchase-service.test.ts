@@ -677,3 +677,65 @@ describe("purchaseService.createDraftFromProductionPlan — tax defaults", () =>
     expect(itemInserts).toHaveLength(0);
   });
 });
+
+describe("purchaseService.getLastPurchaseLines", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("loads last lines in one RPC and does not write", async () => {
+    supabaseMock.rpc.mockResolvedValue({
+      data: [
+        {
+          ingredient_id: INGREDIENT_A,
+          supplier_line: {
+            entered_unit_price: 14.68,
+            unit_cost: 13.47,
+            price_mode: "inclusive",
+            tax_category: "food",
+            tax_regime: "reduced_vat",
+            purchased_at: "2026-09-26T12:00:00.000Z",
+            supplier_id: "supplier-makro",
+            supplier_name: "Makro",
+          },
+          any_line: null,
+        },
+      ],
+      error: null,
+    });
+
+    const result = await purchaseService.getLastPurchaseLines(
+      [INGREDIENT_A, INGREDIENT_A],
+      "supplier-makro",
+    );
+
+    expect(supabaseMock.rpc).toHaveBeenCalledTimes(1);
+    expect(supabaseMock.rpc).toHaveBeenCalledWith("get_last_purchase_lines", {
+      p_ingredient_ids: [INGREDIENT_A],
+      p_supplier_id: "supplier-makro",
+    });
+    expect(supabaseMock.from).not.toHaveBeenCalled();
+    expect(result.error).toBeNull();
+    expect(result.data?.[0]).toMatchObject({
+      ingredientId: INGREDIENT_A,
+      supplierLine: { enteredUnitPrice: 14.68, supplierName: "Makro" },
+      anyLine: null,
+    });
+  });
+
+  it("surfaces the RPC error verbatim", async () => {
+    supabaseMock.rpc.mockResolvedValue({
+      data: null,
+      error: { message: "At most 100 ingredient ids are allowed." },
+    });
+
+    const result = await purchaseService.getLastPurchaseLines(
+      [INGREDIENT_A],
+      null,
+    );
+
+    expect(result.data).toBeNull();
+    expect(result.error).toBe("At most 100 ingredient ids are allowed.");
+    expect(supabaseMock.from).not.toHaveBeenCalled();
+  });
+});
