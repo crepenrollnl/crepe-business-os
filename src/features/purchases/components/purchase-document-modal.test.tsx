@@ -111,13 +111,18 @@ function draftPurchase(): PurchaseWithRelations {
   };
 }
 
-function renderModal(purchase: PurchaseWithRelations | null) {
+function renderModal(
+  purchase: PurchaseWithRelations | null,
+  overrides?: { ingredientId?: string; unitCost?: number },
+) {
+  const ingredientId = overrides?.ingredientId ?? INGREDIENT_ID;
+  const unitCost = overrides?.unitCost ?? 0;
   const initialLines = purchase
     ? [
         {
-          ingredient_id: INGREDIENT_ID,
+          ingredient_id: ingredientId,
           quantity: 2,
-          unit_cost: 0,
+          unit_cost: unitCost,
           discount: 0,
           tax_category: "food",
           tax_regime: "reduced_vat",
@@ -126,9 +131,9 @@ function renderModal(purchase: PurchaseWithRelations | null) {
       ]
     : [
         {
-          ingredient_id: INGREDIENT_ID,
+          ingredient_id: ingredientId,
           quantity: 1,
-          unit_cost: 0,
+          unit_cost: unitCost,
           discount: 0,
           tax_category: "food",
           tax_regime: "reduced_vat",
@@ -210,6 +215,66 @@ describe("PurchaseDocumentModal last price", () => {
       "14.68",
     );
     expect(screen.getByText("Filled 1 of 1 lines")).toBeInTheDocument();
+  });
+
+  function oilAndCucumberHistory() {
+    getLastPurchaseLines.mockImplementation(async (ids: string[]) => ({
+      data: ids.map((id) => ({
+        ingredientId: id,
+        supplierLine: null,
+        anyLine: snapshot({
+          enteredUnitPrice: id === INGREDIENT_B ? 1.29 : 1.725,
+          priceMode: "inclusive",
+          taxCategory: "food",
+          taxRegime: "reduced_vat",
+          supplierId: SUPPLIER_B,
+          supplierName: "Aldi",
+        }),
+      })),
+      error: null,
+    }));
+  }
+
+  it("replaces a prefilled price after quantity and focusing the price field", async () => {
+    oilAndCucumberHistory();
+    renderModal(null);
+
+    const unitPrice = await screen.findByRole("textbox", { name: "Unit price" });
+    await waitFor(() => {
+      expect(unitPrice).toHaveValue("1.725");
+    });
+    fireEvent.change(screen.getByPlaceholderText("0"), { target: { value: "1" } });
+    expect(screen.getByRole("textbox", { name: "Line total" })).toHaveValue("1.73");
+    fireEvent.focus(unitPrice);
+    fireEvent.blur(unitPrice);
+    fireEvent.change(ingredientSelect(), { target: { value: INGREDIENT_B } });
+
+    await waitFor(() => {
+      expect(unitPrice).toHaveValue("1.29");
+    });
+    expect(screen.getByRole("textbox", { name: "Line total" })).toHaveValue("1.29");
+    expect(screen.getByRole("button", { name: /Use$/ })).toHaveTextContent(
+      /other supplier: Aldi/,
+    );
+  });
+
+  it("replaces a price after the hint is clicked and the ingredient changes", async () => {
+    oilAndCucumberHistory();
+    renderModal(null);
+
+    const unitPrice = await screen.findByRole("textbox", { name: "Unit price" });
+    await waitFor(() => {
+      expect(unitPrice).toHaveValue("1.725");
+    });
+    fireEvent.change(screen.getByPlaceholderText("0"), { target: { value: "1" } });
+    fireEvent.click(await screen.findByRole("button", { name: /Use$/ }));
+    fireEvent.change(ingredientSelect(), { target: { value: INGREDIENT_B } });
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /Use$/ })).toHaveTextContent(/1\.29/);
+    });
+    expect(unitPrice).toHaveValue("1.29");
+    expect(screen.getByRole("textbox", { name: "Line total" })).toHaveValue("1.29");
   });
 
   it("fills a price the user typed and then cleared", async () => {
@@ -327,7 +392,7 @@ describe("PurchaseDocumentModal last price", () => {
     expect(taxSelect("reduced_vat").value).toBe("standard_vat");
   });
 
-  it("keeps a price the user typed when the ingredient changes", async () => {
+  it("replaces a price the user typed when the ingredient changes", async () => {
     getLastPurchaseLines.mockImplementation(async (ids: string[]) => ({
       data: ids.map((id) => ({
         ingredientId: id,
@@ -350,14 +415,101 @@ describe("PurchaseDocumentModal last price", () => {
       expect(unitPrice).toHaveValue("14.68");
     });
     fireEvent.change(unitPrice, { target: { value: "3" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Discount" }), {
+      target: { value: "2" },
+    });
     fireEvent.change(ingredientSelect(), { target: { value: INGREDIENT_B } });
-
     await waitFor(() => {
       expect(screen.getByRole("button", { name: /Use$/ })).toHaveTextContent(
         /20/,
       );
     });
+    expect(screen.getByRole("textbox", { name: "Unit price" })).toHaveValue("20");
+    expect(screen.getByRole("textbox", { name: "Discount" })).toHaveValue("2");
+  });
+
+  it("clears a typed price and user tax when the next ingredient has no history", async () => {
+    getLastPurchaseLines.mockImplementation(async (ids: string[]) => ({
+      data: ids.map((id) =>
+        id === INGREDIENT_ID
+          ? {
+              ingredientId: id,
+              supplierLine: snapshot({
+                enteredUnitPrice: 14.68,
+                priceMode: "exclusive",
+                taxCategory: "goods",
+                taxRegime: "standard_vat",
+                supplierId: SUPPLIER_ID,
+                supplierName: "Makro",
+              }),
+              anyLine: null,
+            }
+          : { ingredientId: id, supplierLine: null, anyLine: null },
+      ),
+      error: null,
+    }));
+    renderModal(null);
+
+    await waitFor(() => {
+      expect(screen.getByRole("textbox", { name: "Unit price" })).toHaveValue(
+        "14.68",
+      );
+    });
+    fireEvent.change(screen.getByRole("textbox", { name: "Unit price" }), {
+      target: { value: "3" },
+    });
+    fireEvent.change(taxSelect("goods"), { target: { value: "alcohol" } });
+    fireEvent.change(ingredientSelect(), { target: { value: INGREDIENT_B } });
+
+    await waitFor(() => {
+      expect(screen.getByRole("textbox", { name: "Unit price" })).toHaveValue("");
+    });
+    expect(screen.getByRole("checkbox", { name: "Includes tax" })).toBeChecked();
+    expect(taxSelect("food").value).toBe("food");
+    expect(taxSelect("reduced_vat").value).toBe("reduced_vat");
+  });
+
+  it("keeps a price typed before the first ingredient is picked", async () => {
+    getLastPurchaseLines.mockResolvedValue(lastLineResponse());
+    renderModal(null, { ingredientId: "" });
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Unit price" }), {
+      target: { value: "3" },
+    });
+    fireEvent.change(ingredientSelect(), { target: { value: INGREDIENT_ID } });
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /Use$/ })).toBeInTheDocument();
+    });
     expect(screen.getByRole("textbox", { name: "Unit price" })).toHaveValue("3");
+  });
+
+  it("replaces a loaded line's price when its ingredient changes", async () => {
+    getLastPurchaseLines.mockImplementation(async (ids: string[]) => ({
+      data: ids.map((id) => ({
+        ingredientId: id,
+        supplierLine: snapshot({
+          enteredUnitPrice: id === INGREDIENT_B ? 1.29 : 5,
+          priceMode: "inclusive",
+          taxCategory: "food",
+          taxRegime: "reduced_vat",
+          supplierId: SUPPLIER_ID,
+          supplierName: "Makro",
+        }),
+        anyLine: null,
+      })),
+      error: null,
+    }));
+    renderModal(draftPurchase(), { unitCost: 5 });
+
+    expect(screen.getByRole("textbox", { name: "Unit price" })).toHaveValue("5");
+    fireEvent.change(ingredientSelect(), { target: { value: INGREDIENT_B } });
+
+    await waitFor(() => {
+      expect(screen.getByRole("textbox", { name: "Unit price" })).toHaveValue(
+        "1.29",
+      );
+    });
   });
 
   it("does not apply a supplier line fetched for the previous supplier", async () => {
