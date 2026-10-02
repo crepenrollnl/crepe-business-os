@@ -136,6 +136,26 @@ function lineHelperState(line: LineDraft): PrefillTouchState {
   };
 }
 
+type UnitCostWriteOptions = {
+  fillDespiteTouch?: boolean;
+  /** Explicit Use of the current number still counts as the user's price. */
+  commitSameValue?: boolean;
+};
+
+function withoutPrefillFlags(line: LineDraft): LineDraft {
+  return {
+    ...line,
+    touched_unit_cost: false,
+    touched_price_mode: false,
+    touched_tax_category: false,
+    touched_tax_regime: false,
+    helper_unit_cost: false,
+    helper_price_mode: false,
+    helper_tax_category: false,
+    helper_tax_regime: false,
+  };
+}
+
 function markPrefillField(
   line: LineDraft,
   field: "unit_cost" | "price_mode" | "tax_category" | "tax_regime",
@@ -209,7 +229,7 @@ const blankPrefillFlags = {
   helper_tax_regime: false,
 };
 
-/** Tax identity of a new line. Helper-owned fields return here when the ingredient changes. */
+/** Tax identity of a new line, and of a line whose ingredient was switched. */
 const NEW_LINE_TAX_SEED = {
   price_mode: "inclusive" as const,
   tax_category: "food",
@@ -731,13 +751,20 @@ function PurchaseDocumentForm({
   const updateLineUnitCost = useCallback((
     index: number,
     value: string,
-    origin: "user" | "helper" = "user",
-    options?: { fillDespiteTouch?: boolean },
+    origin: "user" | "helper",
+    options?: UnitCostWriteOptions,
   ) => {
     setFormValues((current) => ({
       ...current,
       lines: current.lines.map((line, lineIndex) => {
         if (lineIndex !== index) {
+          return line;
+        }
+        if (
+          origin === "user" &&
+          line.unit_cost === value &&
+          !options?.commitSameValue
+        ) {
           return line;
         }
         if (
@@ -916,14 +943,14 @@ function PurchaseDocumentForm({
     index: number,
     patch: LastPurchaseFieldPatch,
     origin: "user" | "helper",
-    options?: { fillDespiteTouch?: boolean },
+    options?: UnitCostWriteOptions,
   ) => {
     if (patch.unitPrice !== undefined) {
       updateLineUnitCost(
         index,
         formatNumericInput(patch.unitPrice),
         origin,
-        options,
+        origin === "user" ? { ...options, commitSameValue: true } : options,
       );
     }
     if (
@@ -1437,10 +1464,20 @@ function PurchaseDocumentForm({
                               if (!currentLine || nextId === currentLine.ingredient_id) {
                                 return;
                               }
+                              const switchingIngredient =
+                                currentLine.ingredient_id.trim().length > 0 &&
+                                nextId.trim().length > 0;
                               const resetHelperUnitCost =
                                 currentLine.helper_unit_cost === true;
-                              if (resetHelperUnitCost) {
-                                updateLineUnitCost(index, "", "helper");
+                              if (switchingIngredient || resetHelperUnitCost) {
+                                updateLineUnitCost(
+                                  index,
+                                  "",
+                                  "helper",
+                                  switchingIngredient
+                                    ? { fillDespiteTouch: true }
+                                    : undefined,
+                                );
                               }
                               setFormValues((current) => ({
                                 ...current,
@@ -1456,6 +1493,12 @@ function PurchaseDocumentForm({
                                       (row.loaded_from_database === true &&
                                         nextId !== row.loaded_ingredient_id),
                                   };
+                                  if (switchingIngredient) {
+                                    return withoutPrefillFlags({
+                                      ...next,
+                                      ...NEW_LINE_TAX_SEED,
+                                    });
+                                  }
                                   if (resetHelperUnitCost) {
                                     next.helper_unit_cost = false;
                                   }
@@ -1526,7 +1569,7 @@ function PurchaseDocumentForm({
                           <NumericInput
                             value={line.unit_cost}
                             onChange={(value) =>
-                              updateLineUnitCost(index, value)
+                              updateLineUnitCost(index, value, "user")
                             }
                             disabled={
                               isReadOnly ||
