@@ -217,6 +217,31 @@ function canAutoWrite(
   return false;
 }
 
+/**
+ * Identity of one automatic-prefill event for a line.
+ * Ingredient, which side of the lookup was used, and the price facts.
+ * Null until that ingredient has a source. Unrelated field edits do not change it.
+ */
+export function automaticPrefillEventKey(
+  ingredientId: string,
+  source: LastPurchaseSource | null,
+): string | null {
+  const id = ingredientId.trim();
+  if (!id || !source) {
+    return null;
+  }
+  return [
+    id,
+    source.kind,
+    source.line.supplierId ?? "",
+    source.line.purchasedAt,
+    String(source.unitPrice),
+    source.priceMode,
+    source.taxCategory ?? "",
+    source.taxRegime ?? "",
+  ].join("|");
+}
+
 /** Fields automatic prefill may copy. Null when this line must be left alone. */
 export function planAutomaticPrefill(
   source: LastPurchaseSource | null,

@@ -5,6 +5,7 @@ import {
   fillLastPricesNote,
   formatLastPurchaseHint,
   formatLastPurchaseHintDate,
+  automaticPrefillEventKey,
   planAutomaticPrefill,
   planFillLastPrices,
   planUseLastPurchase,
@@ -372,5 +373,28 @@ describe("planFillLastPrices", () => {
     );
     expect(plan.filled).toBe(0);
     expect(plan.patches[0]).toBeNull();
+  });
+});
+
+describe("automaticPrefillEventKey", () => {
+  const source = resolveLastPurchaseSource(lookup(), "supplier-makro");
+
+  it("is null until the ingredient has a source", () => {
+    expect(automaticPrefillEventKey("", source)).toBeNull();
+    expect(automaticPrefillEventKey("flour", null)).toBeNull();
+  });
+
+  it("changes when the ingredient or the source identity changes", () => {
+    const key = automaticPrefillEventKey("flour", source);
+    expect(key).toContain("flour");
+    expect(automaticPrefillEventKey("milk", source)).not.toBe(key);
+
+    const otherPrice = resolveLastPurchaseSource(
+      lookup({
+        supplierLine: snapshot({ enteredUnitPrice: 9 }),
+      }),
+      "supplier-makro",
+    );
+    expect(automaticPrefillEventKey("flour", otherPrice)).not.toBe(key);
   });
 });
