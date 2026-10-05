@@ -272,8 +272,13 @@ describe("PurchaseDocumentModal last price", () => {
 
     await waitFor(() => {
       expect(screen.getByRole("button", { name: /Use$/ })).toHaveTextContent(/1\.29/);
+      expect(screen.getByRole("textbox", { name: "Unit price" })).toHaveValue(
+        "1.29",
+      );
     });
-    expect(unitPrice).toHaveValue("1.29");
+    expect(screen.getByRole("textbox", { name: "Unit price" })).toHaveValue(
+      "1.29",
+    );
     expect(screen.getByRole("textbox", { name: "Line total" })).toHaveValue("1.29");
   });
 
@@ -422,6 +427,9 @@ describe("PurchaseDocumentModal last price", () => {
     await waitFor(() => {
       expect(screen.getByRole("button", { name: /Use$/ })).toHaveTextContent(
         /20/,
+      );
+      expect(screen.getByRole("textbox", { name: "Unit price" })).toHaveValue(
+        "20",
       );
     });
     expect(screen.getByRole("textbox", { name: "Unit price" })).toHaveValue("20");
@@ -642,6 +650,250 @@ describe("PurchaseDocumentModal last price", () => {
         screen.queryByRole("button", { name: /Use$/ }),
       ).not.toBeInTheDocument();
     });
+  });
+
+  async function settlePastLineTotalProbe() {
+    await new Promise((resolve) => setTimeout(resolve, 700));
+  }
+
+  it("keeps a typed line total and the unit price derived from it", async () => {
+    getLastPurchaseLines.mockResolvedValue(lastLineResponse());
+    renderModal(null, { ingredientId: "" });
+
+    fireEvent.change(ingredientSelect(), { target: { value: INGREDIENT_ID } });
+    await waitFor(() => {
+      expect(screen.getByRole("textbox", { name: "Unit price" })).toHaveValue(
+        "14.68",
+      );
+    });
+    fireEvent.change(screen.getByPlaceholderText("0"), {
+      target: { value: "2" },
+    });
+    fireEvent.change(screen.getByRole("textbox", { name: "Line total" }), {
+      target: { value: "10" },
+    });
+
+    await settlePastLineTotalProbe();
+
+    expect(screen.getByRole("textbox", { name: "Line total" })).toHaveValue("10");
+    expect(screen.getByRole("textbox", { name: "Unit price" })).toHaveValue("5");
+  });
+
+  it("keeps a cleared line total empty", async () => {
+    getLastPurchaseLines.mockResolvedValue(lastLineResponse());
+    renderModal(null, { ingredientId: "" });
+
+    fireEvent.change(ingredientSelect(), { target: { value: INGREDIENT_ID } });
+    await waitFor(() => {
+      expect(screen.getByRole("textbox", { name: "Unit price" })).toHaveValue(
+        "14.68",
+      );
+    });
+    fireEvent.change(screen.getByPlaceholderText("0"), {
+      target: { value: "2" },
+    });
+    fireEvent.change(screen.getByRole("textbox", { name: "Line total" }), {
+      target: { value: "" },
+    });
+
+    await settlePastLineTotalProbe();
+
+    expect(screen.getByRole("textbox", { name: "Line total" })).toHaveValue("");
+  });
+
+  it("keeps a line total edited after Fill last prices", async () => {
+    getLastPurchaseLines.mockResolvedValue(lastLineResponse());
+    renderModal(draftPurchase());
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Fill last prices" }),
+    );
+    await waitFor(() => {
+      expect(screen.getByRole("textbox", { name: "Unit price" })).toHaveValue(
+        "14.68",
+      );
+    });
+    fireEvent.change(screen.getByRole("textbox", { name: "Line total" }), {
+      target: { value: "10" },
+    });
+
+    await settlePastLineTotalProbe();
+
+    expect(screen.getByRole("textbox", { name: "Line total" })).toHaveValue("10");
+    expect(screen.getByRole("textbox", { name: "Unit price" })).toHaveValue("5");
+  });
+
+  it("keeps a line total edited after a loaded line's ingredient change", async () => {
+    getLastPurchaseLines.mockImplementation(async (ids: string[]) => ({
+      data: ids.map((id) => ({
+        ingredientId: id,
+        supplierLine: snapshot({
+          enteredUnitPrice: id === INGREDIENT_B ? 1.29 : 14.68,
+          priceMode: "inclusive",
+          taxCategory: "food",
+          taxRegime: "reduced_vat",
+          supplierId: SUPPLIER_ID,
+          supplierName: "Makro",
+        }),
+        anyLine: null,
+      })),
+      error: null,
+    }));
+    renderModal(draftPurchase());
+
+    fireEvent.change(ingredientSelect(), { target: { value: INGREDIENT_B } });
+    await waitFor(() => {
+      expect(screen.getByRole("textbox", { name: "Unit price" })).toHaveValue(
+        "1.29",
+      );
+    });
+    fireEvent.change(screen.getByRole("textbox", { name: "Line total" }), {
+      target: { value: "10" },
+    });
+
+    await settlePastLineTotalProbe();
+
+    expect(screen.getByRole("textbox", { name: "Line total" })).toHaveValue("10");
+    expect(screen.getByRole("textbox", { name: "Unit price" })).toHaveValue("5");
+  });
+
+  it("does not rewrite a line after an unrelated field edit", async () => {
+    getLastPurchaseLines.mockResolvedValue(lastLineResponse());
+    renderModal(null, { ingredientId: "" });
+
+    fireEvent.change(ingredientSelect(), { target: { value: INGREDIENT_ID } });
+    await waitFor(() => {
+      expect(screen.getByRole("textbox", { name: "Unit price" })).toHaveValue(
+        "14.68",
+      );
+    });
+    fireEvent.change(screen.getByPlaceholderText("0"), {
+      target: { value: "2" },
+    });
+    fireEvent.change(screen.getByRole("textbox", { name: "Line total" }), {
+      target: { value: "10" },
+    });
+    fireEvent.change(screen.getByRole("textbox", { name: "Discount" }), {
+      target: { value: "2" },
+    });
+    fireEvent.change(screen.getByLabelText("Notes"), {
+      target: { value: "delivery note" },
+    });
+
+    await settlePastLineTotalProbe();
+
+    expect(screen.getByRole("textbox", { name: "Line total" })).toHaveValue("10");
+    expect(screen.getByRole("textbox", { name: "Unit price" })).toHaveValue("5");
+    expect(screen.getByRole("textbox", { name: "Discount" })).toHaveValue("2");
+  });
+
+  it("keeps Includes tax after the user unchecks it", async () => {
+    getLastPurchaseLines.mockResolvedValue(lastLineResponse());
+    renderModal(null, { ingredientId: "" });
+
+    fireEvent.change(ingredientSelect(), { target: { value: INGREDIENT_ID } });
+    await waitFor(() => {
+      expect(screen.getByRole("checkbox", { name: "Includes tax" })).toBeChecked();
+    });
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Includes tax" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Discount" }), {
+      target: { value: "1" },
+    });
+
+    await settlePastLineTotalProbe();
+
+    expect(
+      screen.getByRole("checkbox", { name: "Includes tax" }),
+    ).not.toBeChecked();
+  });
+
+  it("keeps a tax category the user selected", async () => {
+    getLastPurchaseLines.mockResolvedValue(lastLineResponse());
+    renderModal(null, { ingredientId: "" });
+
+    fireEvent.change(ingredientSelect(), { target: { value: INGREDIENT_ID } });
+    await waitFor(() => {
+      expect(taxSelect("food").value).toBe("food");
+    });
+
+    fireEvent.change(taxSelect("alcohol"), { target: { value: "alcohol" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Discount" }), {
+      target: { value: "1" },
+    });
+
+    await settlePastLineTotalProbe();
+
+    expect(taxSelect("alcohol").value).toBe("alcohol");
+  });
+
+  it("keeps a tax regime the user selected", async () => {
+    getLastPurchaseLines.mockResolvedValue(lastLineResponse());
+    renderModal(null, { ingredientId: "" });
+
+    fireEvent.change(ingredientSelect(), { target: { value: INGREDIENT_ID } });
+    await waitFor(() => {
+      expect(taxSelect("reduced_vat").value).toBe("reduced_vat");
+    });
+
+    fireEvent.change(taxSelect("zero_rate"), { target: { value: "zero_rate" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Discount" }), {
+      target: { value: "1" },
+    });
+
+    await settlePastLineTotalProbe();
+
+    expect(taxSelect("zero_rate").value).toBe("zero_rate");
+  });
+
+  it("leaves a line-total price alone when the supplier changes", async () => {
+    getLastPurchaseLines
+      .mockResolvedValueOnce(lastLineResponse())
+      .mockResolvedValueOnce({
+        data: [
+          {
+            ingredientId: INGREDIENT_ID,
+            supplierLine: snapshot({
+              enteredUnitPrice: 9,
+              priceMode: "inclusive",
+              taxCategory: "food",
+              taxRegime: "reduced_vat",
+              supplierId: SUPPLIER_B,
+              supplierName: "Sligro",
+            }),
+            anyLine: null,
+          },
+        ],
+        error: null,
+      });
+    renderModal(null, { ingredientId: "" });
+
+    fireEvent.change(ingredientSelect(), { target: { value: INGREDIENT_ID } });
+    await waitFor(() => {
+      expect(screen.getByRole("textbox", { name: "Unit price" })).toHaveValue(
+        "14.68",
+      );
+    });
+    fireEvent.change(screen.getByPlaceholderText("0"), {
+      target: { value: "2" },
+    });
+    fireEvent.change(screen.getByRole("textbox", { name: "Line total" }), {
+      target: { value: "10" },
+    });
+
+    fireEvent.change(screen.getByLabelText("Supplier"), {
+      target: { value: SUPPLIER_B },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /Use$/ })).toHaveTextContent(
+        /Sligro/,
+      );
+    });
+    await settlePastLineTotalProbe();
+
+    expect(screen.getByRole("textbox", { name: "Line total" })).toHaveValue("10");
+    expect(screen.getByRole("textbox", { name: "Unit price" })).toHaveValue("5");
   });
 });
 

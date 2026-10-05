@@ -48,6 +48,7 @@ import {
   unitCostAfterLineTotalProbe,
 } from "../utils/line-total-probe-apply";
 import {
+  automaticPrefillEventKey,
   fillLastPricesNote,
   formatLastPurchaseHint,
   isEmptyOrZeroUnitPrice,
@@ -116,6 +117,8 @@ export type LineDraft = Omit<
   helper_price_mode?: boolean;
   helper_tax_category?: boolean;
   helper_tax_regime?: boolean;
+  /** Last automatic-prefill event applied or considered for this line. */
+  prefill_key?: string;
 };
 
 function lineTouchState(line: LineDraft): PrefillTouchState {
@@ -153,6 +156,7 @@ function withoutPrefillFlags(line: LineDraft): LineDraft {
     helper_price_mode: false,
     helper_tax_category: false,
     helper_tax_regime: false,
+    prefill_key: "",
   };
 }
 
@@ -227,6 +231,7 @@ const blankPrefillFlags = {
   helper_price_mode: false,
   helper_tax_category: false,
   helper_tax_regime: false,
+  prefill_key: "",
 };
 
 /** Tax identity of a new line, and of a line whose ingredient was switched. */
@@ -317,6 +322,7 @@ function valuesToDraft(
       helper_price_mode: false,
       helper_tax_category: false,
       helper_tax_regime: false,
+      prefill_key: "",
     })),
   };
 }
@@ -635,18 +641,22 @@ function PurchaseDocumentForm({
               if (parseNumericInput(currentLine.line_total) !== lineTotal) {
                 return currentLine;
               }
-              return {
-                ...currentLine,
-                unit_cost: formatNumericInput(
-                  unitCostAfterLineTotalProbe({
-                    priceMode: currentLine.price_mode,
-                    probeNetUnitCost: result.data.unitCost,
-                    pinnedGross: lineTotal,
-                    quantity:
-                      parseNumericInput(currentLine.quantity) ?? quantity,
-                  }),
-                ),
-              };
+              return markPrefillField(
+                {
+                  ...currentLine,
+                  unit_cost: formatNumericInput(
+                    unitCostAfterLineTotalProbe({
+                      priceMode: currentLine.price_mode,
+                      probeNetUnitCost: result.data.unitCost,
+                      pinnedGross: lineTotal,
+                      quantity:
+                        parseNumericInput(currentLine.quantity) ?? quantity,
+                    }),
+                  ),
+                },
+                "unit_cost",
+                "user",
+              );
             }),
           }));
         });
@@ -845,24 +855,22 @@ function PurchaseDocumentForm({
         }
         const quantity = parseNumericInput(line.quantity);
         const newTotal = parseNumericInput(value);
-        if (
-          line.price_mode !== "inclusive" ||
-          quantity === null ||
-          quantity <= 0 ||
-          newTotal === null
-        ) {
-          return {
-            ...line,
-            line_total: value,
-            last_edited_field: "line_total",
-          };
-        }
-        return {
+        const priced: LineDraft = {
           ...line,
           line_total: value,
           last_edited_field: "line_total",
-          unit_cost: formatNumericInput(roundUnitCost(newTotal / quantity)),
         };
+        if (
+          line.price_mode === "inclusive" &&
+          quantity !== null &&
+          quantity > 0 &&
+          newTotal !== null
+        ) {
+          priced.unit_cost = formatNumericInput(
+            roundUnitCost(newTotal / quantity),
+          );
+        }
+        return markPrefillField(priced, "unit_cost", "user");
       }),
     }));
     setLineTotalDeriveByIndex((current) => ({
@@ -1050,6 +1058,10 @@ function PurchaseDocumentForm({
         documentSupplierId,
         lastPurchaseLookup.supplierId,
       );
+      const key = automaticPrefillEventKey(line.ingredient_id, source);
+      if (!key || line.prefill_key === key) {
+        return;
+      }
       const patch = planAutomaticPrefill(source, {
         readOnly: false,
         loadedFromDatabase: line.loaded_from_database === true,
@@ -1057,10 +1069,15 @@ function PurchaseDocumentForm({
         touched: lineTouchState(line),
         helperOwned: lineHelperState(line),
       });
-      if (!patch || prefillPatchApplied(line, patch)) {
-        return;
+      if (patch && !prefillPatchApplied(line, patch)) {
+        applyLastPricePatch(index, patch, "helper");
       }
-      applyLastPricePatch(index, patch, "helper");
+      setFormValues((current) => ({
+        ...current,
+        lines: current.lines.map((row, lineIndex) =>
+          lineIndex === index ? { ...row, prefill_key: key } : row,
+        ),
+      }));
     });
   }, [
     applyLastPricePatch,
