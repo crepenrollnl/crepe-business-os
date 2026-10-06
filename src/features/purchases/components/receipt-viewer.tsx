@@ -99,7 +99,8 @@ export function ReceiptViewer({
         <p className="text-base font-semibold">{formatReceiptDisplayDate(receipt.receiptDate)}</p>
         <span className="w-16" />
       </header>
-      <div className="min-h-0 flex-1 space-y-4 overflow-y-auto bg-zinc-50 px-4 py-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
+      <div className="min-h-0 flex-1 overflow-y-auto bg-zinc-50">
+        <div className="mx-auto w-full max-w-2xl space-y-4 px-4 py-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
         {receipt.purchaseId ? (
           <p className="text-sm font-medium text-zinc-700">Linked to a purchase.</p>
         ) : null}
@@ -121,13 +122,22 @@ export function ReceiptViewer({
           ) : null}
           {!photosLoading && !error
             ? pageUrls.map((url, index) => (
-                // eslint-disable-next-line @next/next/no-img-element -- private signed URL, browser pinch zoom
-                <img
-                  key={url}
-                  src={url}
-                  alt={`Page ${index + 1}`}
-                  className="w-full rounded-xl bg-white"
-                />
+                <div key={url} className="space-y-1">
+                  {/* eslint-disable-next-line @next/next/no-img-element -- private signed URL, browser pinch zoom */}
+                  <img
+                    src={url}
+                    alt={`Page ${index + 1}`}
+                    className="mx-auto block h-auto w-auto max-w-full rounded-xl bg-white"
+                  />
+                  <a
+                    href={url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="block text-center text-sm text-zinc-600 underline"
+                  >
+                    Open full size
+                  </a>
+                </div>
               ))
             : null}
         </div>
@@ -199,6 +209,7 @@ export function ReceiptViewer({
             Discard
           </button>
         ) : null}
+        </div>
       </div>
       <ReceiptDiscardDialog
         open={discardOpen}

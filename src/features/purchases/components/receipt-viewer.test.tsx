@@ -48,4 +48,30 @@ describe("ReceiptViewer photos", () => {
     await userEvent.click(screen.getByRole("button", { name: "Retry" }));
     expect(onRetryPhotos).toHaveBeenCalledTimes(1);
   });
+
+  it("offers an Open full size link for each page", () => {
+    render(
+      <ReceiptViewer
+        receipt={receipt(null)}
+        pageUrls={["https://example.com/a.jpg", "https://example.com/b.jpg"]}
+        suppliers={[]}
+        isSaving={false}
+        photosLoading={false}
+        error={null}
+        onClose={vi.fn()}
+        onSave={vi.fn()}
+        onDiscard={vi.fn()}
+        onRetryPhotos={vi.fn()}
+      />,
+    );
+
+    const links = screen.getAllByRole("link", { name: "Open full size" });
+    expect(links).toHaveLength(2);
+    expect(links[0]).toHaveAttribute("href", "https://example.com/a.jpg");
+    expect(links[0]).toHaveAttribute("rel", "noopener noreferrer");
+    expect(links[1]).toHaveAttribute("href", "https://example.com/b.jpg");
+    expect(links[1]).toHaveAttribute("rel", "noopener noreferrer");
+    expect(screen.getByRole("img", { name: "Page 1" }).closest("a")).toBeNull();
+    expect(screen.getByRole("img", { name: "Page 2" }).closest("a")).toBeNull();
+  });
 });
