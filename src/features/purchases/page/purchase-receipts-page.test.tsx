@@ -4,10 +4,13 @@ import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
 
-const { getMyRoleMock, usePurchaseReceiptsMock } = vi.hoisted(() => ({
-  getMyRoleMock: vi.fn(),
-  usePurchaseReceiptsMock: vi.fn(),
-}));
+const { getMyRoleMock, usePurchaseReceiptsMock, getPurchaseReceiptAccessToken, requestDriveReceiptSync } =
+  vi.hoisted(() => ({
+    getMyRoleMock: vi.fn(),
+    usePurchaseReceiptsMock: vi.fn(),
+    getPurchaseReceiptAccessToken: vi.fn(),
+    requestDriveReceiptSync: vi.fn(),
+  }));
 
 vi.mock("next/link", () => ({
   default: ({ href, children }: { href: string; children: ReactNode }) => (
@@ -19,6 +22,14 @@ vi.mock("@/features/auth/services/auth-service", () => ({
   authService: {
     getMyRole: () => getMyRoleMock(),
   },
+}));
+
+vi.mock("../utils/purchase-receipt-access-token", () => ({
+  getPurchaseReceiptAccessToken: () => getPurchaseReceiptAccessToken(),
+}));
+
+vi.mock("../utils/request-drive-receipt-sync", () => ({
+  requestDriveReceiptSync: (...args: unknown[]) => requestDriveReceiptSync(...args),
 }));
 
 vi.mock("../hooks/use-purchase-receipts", () => ({
@@ -52,6 +63,10 @@ describe("PurchaseReceiptsPage role gate", () => {
     cleanup();
     getMyRoleMock.mockReset();
     usePurchaseReceiptsMock.mockReset();
+    getPurchaseReceiptAccessToken.mockReset();
+    getPurchaseReceiptAccessToken.mockResolvedValue(null);
+    requestDriveReceiptSync.mockReset();
+    requestDriveReceiptSync.mockResolvedValue(null);
   });
 
   it("does not show the receipt screen to a seller", async () => {
@@ -70,6 +85,7 @@ describe("PurchaseReceiptsPage role gate", () => {
     expect(screen.getByRole("link", { name: "Back to purchases" })).toBeInTheDocument();
     expect(screen.queryByText("Take photo")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Unassigned" })).not.toBeInTheDocument();
+    expect(getPurchaseReceiptAccessToken).not.toHaveBeenCalled();
   });
 
   it("shows a loading line and does not open the form while the role is loading", () => {
@@ -111,5 +127,47 @@ describe("PurchaseReceiptsPage role gate", () => {
     });
     expect(screen.getByText("Take photo")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Unassigned" })).toBeInTheDocument();
+    expect(
+      screen.queryByText(
+        "Google Drive is not reachable right now. Copies will resume automatically.",
+      ),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows the Drive notice only when the latest sync says Drive is unavailable", async () => {
+    getMyRoleMock.mockResolvedValue("owner");
+    usePurchaseReceiptsMock.mockReturnValue(idle);
+    requestDriveReceiptSync.mockResolvedValue({
+      configured: true,
+      available: false,
+      synced: 0,
+      failed: 1,
+      remaining: 1,
+    });
+
+    render(<PurchaseReceiptsPage />);
+
+    expect(
+      await screen.findByText(
+        "Google Drive is not reachable right now. Copies will resume automatically.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("shows nothing about Drive when the sync says it is not configured", async () => {
+    getMyRoleMock.mockResolvedValue("owner");
+    usePurchaseReceiptsMock.mockReturnValue(idle);
+    requestDriveReceiptSync.mockResolvedValue({ configured: false });
+
+    render(<PurchaseReceiptsPage />);
+
+    await waitFor(() => {
+      expect(usePurchaseReceiptsMock).toHaveBeenCalledWith(true);
+    });
+    expect(
+      screen.queryByText(
+        "Google Drive is not reachable right now. Copies will resume automatically.",
+      ),
+    ).not.toBeInTheDocument();
   });
 });

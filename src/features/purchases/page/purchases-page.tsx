@@ -5,6 +5,7 @@ import { PurchaseDocumentModal } from "../components/purchase-document-modal";
 import { PurchasesTable } from "../components/purchases-table";
 import { PurchasesToolbar } from "../components/purchases-toolbar";
 import { useCanManagePurchaseReceipts } from "../hooks/use-can-manage-purchase-receipts";
+import { useDriveReceiptSync } from "../hooks/use-drive-receipt-sync";
 import { usePurchases } from "../hooks/use-purchases";
 import { useUnassignedReceiptCount } from "../hooks/use-purchase-receipts";
 
@@ -43,6 +44,7 @@ export function PurchasesPage() {
   } = usePurchases();
   const access = useCanManagePurchaseReceipts();
   const showReceipts = access.status === "allowed";
+  const drive = useDriveReceiptSync(showReceipts);
   const { count: unassignedCount, refresh: refreshUnassignedCount } =
     useUnassignedReceiptCount(showReceipts);
 
@@ -102,6 +104,11 @@ export function PurchasesPage() {
           }}
           onSaveDraft={saveDraft}
           onReceiveGoods={receiveGoods}
+          driveConfigured={drive.configured === true}
+          driveUnavailable={drive.configured === true && drive.unavailable}
+          onRetryDrive={(fileIds) => {
+            void drive.retryFiles(fileIds);
+          }}
         />
       </div>
     </DashboardLayout>

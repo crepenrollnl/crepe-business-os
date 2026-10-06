@@ -84,6 +84,9 @@ type PurchaseDocumentModalProps = {
   onClose: () => void;
   onSaveDraft: (values: PurchaseFormValues) => Promise<boolean>;
   onReceiveGoods: (values: PurchaseFormValues) => Promise<boolean>;
+  driveConfigured?: boolean;
+  driveUnavailable?: boolean;
+  onRetryDrive?: (fileIds: string[]) => void;
 };
 
 type NumericLineField = "quantity" | "unit_cost";
@@ -439,6 +442,9 @@ function PurchaseDocumentForm({
   onClose,
   onSaveDraft,
   onReceiveGoods,
+  driveConfigured = false,
+  driveUnavailable = false,
+  onRetryDrive,
 }: PurchaseDocumentFormProps) {
   const [formValues, setFormValues] = useState<FormDraft>(() =>
     valuesToDraft(initialValues, {
@@ -1832,6 +1838,9 @@ function PurchaseDocumentForm({
           supplierId={formValues.supplier_id.trim() ? formValues.supplier_id.trim() : null}
           purchasedAt={formValues.purchased_at}
           grandTotal={grandTotal}
+          driveConfigured={driveConfigured}
+          driveUnavailable={driveUnavailable}
+          onRetryDrive={onRetryDrive}
         />
 
         <div className="flex flex-col-reverse justify-end gap-3 sm:flex-row">
@@ -1886,6 +1895,9 @@ export function PurchaseDocumentModal({
   onClose,
   onSaveDraft,
   onReceiveGoods,
+  driveConfigured = false,
+  driveUnavailable = false,
+  onRetryDrive,
 }: PurchaseDocumentModalProps) {
   if (!isOpen) {
     return null;
@@ -1915,6 +1927,9 @@ export function PurchaseDocumentModal({
         onClose={onClose}
         onSaveDraft={onSaveDraft}
         onReceiveGoods={onReceiveGoods}
+        driveConfigured={driveConfigured}
+        driveUnavailable={driveUnavailable}
+        onRetryDrive={onRetryDrive}
       />
     </div>
   );

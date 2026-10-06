@@ -17,6 +17,7 @@ function receipt(purchaseId: string | null): PurchaseReceiptCard {
     pageCount: 1,
     pagePaths: ["a.jpg"],
     thumbnailUrl: null,
+    files: [],
   };
 }
 
@@ -73,5 +74,114 @@ describe("ReceiptViewer photos", () => {
     expect(links[1]).toHaveAttribute("rel", "noopener noreferrer");
     expect(screen.getByRole("img", { name: "Page 1" }).closest("a")).toBeNull();
     expect(screen.getByRole("img", { name: "Page 2" }).closest("a")).toBeNull();
+  });
+
+  it("shows the three drive states and retries unsynced pages", async () => {
+    const onRetryDrive = vi.fn();
+    const { rerender } = render(
+      <ReceiptViewer
+        receipt={receipt(null)}
+        pageUrls={[]}
+        suppliers={[]}
+        isSaving={false}
+        photosLoading={false}
+        error={null}
+        onClose={vi.fn()}
+        onSave={vi.fn()}
+        onDiscard={vi.fn()}
+        onRetryPhotos={vi.fn()}
+        driveConfigured
+        onRetryDrive={onRetryDrive}
+      />,
+    );
+    expect(screen.queryByText("Drive copy pending")).not.toBeInTheDocument();
+
+    rerender(
+      <ReceiptViewer
+        receipt={{
+          ...receipt(null),
+          files: [{ id: "page-1", driveSyncedAt: null, driveError: null }],
+        }}
+        pageUrls={[]}
+        suppliers={[]}
+        isSaving={false}
+        photosLoading={false}
+        error={null}
+        onClose={vi.fn()}
+        onSave={vi.fn()}
+        onDiscard={vi.fn()}
+        onRetryPhotos={vi.fn()}
+        driveConfigured
+        onRetryDrive={onRetryDrive}
+      />,
+    );
+    expect(screen.getByText("Drive copy pending")).toBeInTheDocument();
+
+    rerender(
+      <ReceiptViewer
+        receipt={{
+          ...receipt(null),
+          files: [{ id: "page-1", driveSyncedAt: "2026-10-06T00:00:00.000Z", driveError: null }],
+        }}
+        pageUrls={[]}
+        suppliers={[]}
+        isSaving={false}
+        photosLoading={false}
+        error={null}
+        onClose={vi.fn()}
+        onSave={vi.fn()}
+        onDiscard={vi.fn()}
+        onRetryPhotos={vi.fn()}
+        driveConfigured
+        onRetryDrive={onRetryDrive}
+      />,
+    );
+    expect(screen.getByText("Copied to Drive")).toBeInTheDocument();
+
+    rerender(
+      <ReceiptViewer
+        receipt={{
+          ...receipt(null),
+          files: [{ id: "page-1", driveSyncedAt: null, driveError: "Could not reach Google Drive." }],
+        }}
+        pageUrls={[]}
+        suppliers={[]}
+        isSaving={false}
+        photosLoading={false}
+        error={null}
+        onClose={vi.fn()}
+        onSave={vi.fn()}
+        onDiscard={vi.fn()}
+        onRetryPhotos={vi.fn()}
+        driveConfigured
+        onRetryDrive={onRetryDrive}
+      />,
+    );
+    expect(screen.getByText("Drive copy failed")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(onRetryDrive).toHaveBeenCalledWith(["page-1"]);
+  });
+
+  it("shows nothing about Drive when it is not configured", () => {
+    render(
+      <ReceiptViewer
+        receipt={{
+          ...receipt(null),
+          files: [{ id: "page-1", driveSyncedAt: null, driveError: "Could not reach Google Drive." }],
+        }}
+        pageUrls={[]}
+        suppliers={[]}
+        isSaving={false}
+        photosLoading={false}
+        error={null}
+        onClose={vi.fn()}
+        onSave={vi.fn()}
+        onDiscard={vi.fn()}
+        onRetryPhotos={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByText("Drive copy failed")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
   });
 });

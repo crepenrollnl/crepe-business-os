@@ -10,6 +10,7 @@ import type {
   UpdatePurchaseReceiptInput,
 } from "../types/purchase-receipt";
 import { ReceiptDiscardDialog } from "./receipt-discard-dialog";
+import { ReceiptDriveStatus } from "./receipt-drive-status";
 
 interface ReceiptViewerProps {
   receipt: PurchaseReceiptCard;
@@ -22,6 +23,8 @@ interface ReceiptViewerProps {
   onSave: (input: UpdatePurchaseReceiptInput) => Promise<{ error: string | null }>;
   onDiscard: (receipt: PurchaseReceiptCard) => Promise<{ error: string | null }>;
   onRetryPhotos: () => void;
+  driveConfigured?: boolean;
+  onRetryDrive?: (fileIds: string[]) => void;
 }
 
 const fieldClassName =
@@ -40,6 +43,8 @@ export function ReceiptViewer({
   onSave,
   onDiscard,
   onRetryPhotos,
+  driveConfigured = false,
+  onRetryDrive,
 }: ReceiptViewerProps) {
   const [supplierId, setSupplierId] = useState(receipt.supplierId ?? "");
   const [receiptDate, setReceiptDate] = useState(receipt.receiptDate);
@@ -141,6 +146,12 @@ export function ReceiptViewer({
               ))
             : null}
         </div>
+
+        <ReceiptDriveStatus
+          configured={driveConfigured}
+          files={receipt.files}
+          onRetry={onRetryDrive ?? (() => undefined)}
+        />
 
         <label className="block space-y-1 text-sm font-medium text-zinc-700">
           Supplier

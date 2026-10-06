@@ -10,6 +10,7 @@ import {
   formatReceiptDisplayDate,
   linkedReceiptTotalMessage,
 } from "../utils/receipt-purchase-link";
+import { DriveUnavailableNotice, ReceiptDriveStatus } from "./receipt-drive-status";
 import { ReceiptViewer } from "./receipt-viewer";
 
 interface PurchaseReceiptsSectionProps {
@@ -18,6 +19,9 @@ interface PurchaseReceiptsSectionProps {
   supplierId: string | null;
   purchasedAt: string;
   grandTotal: number;
+  driveConfigured?: boolean;
+  driveUnavailable?: boolean;
+  onRetryDrive?: (fileIds: string[]) => void;
 }
 
 function pageCountLabel(count: number): string {
@@ -63,6 +67,9 @@ export function PurchaseReceiptsSection({
   supplierId,
   purchasedAt,
   grandTotal,
+  driveConfigured = false,
+  driveUnavailable = false,
+  onRetryDrive,
 }: PurchaseReceiptsSectionProps) {
   const access = useCanManagePurchaseReceipts();
   const allowed = access.status === "allowed";
@@ -73,13 +80,21 @@ export function PurchaseReceiptsSection({
     purchasedAt,
   });
 
+  function retryDrive(fileIds: string[]) {
+    void (async () => {
+      await onRetryDrive?.(fileIds);
+      await state.reload();
+    })();
+  }
+
   if (!allowed) {
     return null;
   }
 
   if (!purchaseId) {
     return (
-      <section className="rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3">
+      <section className="space-y-3 rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3">
+        {driveUnavailable ? <DriveUnavailableNotice /> : null}
         <p className="text-sm text-zinc-700">Save the draft to attach a receipt.</p>
       </section>
     );
@@ -91,6 +106,7 @@ export function PurchaseReceiptsSection({
 
   return (
     <section className="space-y-3 rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3">
+      {driveUnavailable ? <DriveUnavailableNotice /> : null}
       <div className="flex items-center justify-between gap-3">
         <h3 className="text-sm font-semibold text-zinc-900">Receipts</h3>
         {canAttach ? (
@@ -125,6 +141,12 @@ export function PurchaseReceiptsSection({
               >
                 <ReceiptSummary receipt={receipt} />
               </button>
+              <ReceiptDriveStatus
+                configured={driveConfigured}
+                files={receipt.files}
+                onRetry={retryDrive}
+                className="mt-3"
+              />
               {canUnlink ? (
                 <button
                   type="button"
@@ -203,6 +225,8 @@ export function PurchaseReceiptsSection({
               void state.openReceipt(state.selected);
             }
           }}
+          driveConfigured={driveConfigured}
+          onRetryDrive={retryDrive}
         />
       ) : null}
     </section>

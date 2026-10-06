@@ -5,6 +5,7 @@ import { formatMoney } from "@/lib/money";
 import type { PurchaseReceiptCard, PurchaseReceiptView } from "../types/purchase-receipt";
 import { formatReceiptDisplayDate } from "../utils/receipt-purchase-link";
 import { ReceiptDiscardDialog } from "./receipt-discard-dialog";
+import { ReceiptDriveStatus } from "./receipt-drive-status";
 
 interface ReceiptListProps {
   view: PurchaseReceiptView;
@@ -15,6 +16,8 @@ interface ReceiptListProps {
   onRetry: () => void;
   onOpen: (receipt: PurchaseReceiptCard) => void;
   onDiscard: (receipt: PurchaseReceiptCard) => Promise<{ error: string | null }>;
+  driveConfigured?: boolean;
+  onRetryDrive?: (fileIds: string[]) => void;
 }
 
 function receiptTotalLabel(value: number | null): string {
@@ -33,6 +36,8 @@ export function ReceiptList({
   onRetry,
   onOpen,
   onDiscard,
+  driveConfigured = false,
+  onRetryDrive,
 }: ReceiptListProps) {
   const [pending, setPending] = useState<PurchaseReceiptCard | null>(null);
   const [discardError, setDiscardError] = useState<string | null>(null);
@@ -143,6 +148,12 @@ export function ReceiptList({
                 ) : null}
               </span>
             </button>
+            <ReceiptDriveStatus
+              configured={driveConfigured}
+              files={receipt.files}
+              onRetry={onRetryDrive ?? (() => undefined)}
+              className="mt-3"
+            />
             {receipt.purchaseId === null ? (
               <button
                 type="button"
