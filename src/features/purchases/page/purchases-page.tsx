@@ -4,7 +4,9 @@ import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { PurchaseDocumentModal } from "../components/purchase-document-modal";
 import { PurchasesTable } from "../components/purchases-table";
 import { PurchasesToolbar } from "../components/purchases-toolbar";
+import { useCanManagePurchaseReceipts } from "../hooks/use-can-manage-purchase-receipts";
 import { usePurchases } from "../hooks/use-purchases";
+import { useUnassignedReceiptCount } from "../hooks/use-purchase-receipts";
 
 export function PurchasesPage() {
   const {
@@ -39,6 +41,9 @@ export function PurchasesPage() {
     receiveGoods,
     retry,
   } = usePurchases();
+  const access = useCanManagePurchaseReceipts();
+  const showReceipts = access.status === "allowed";
+  const { count: unassignedCount } = useUnassignedReceiptCount(showReceipts);
 
   return (
     <DashboardLayout activePath="/purchases">
@@ -61,6 +66,8 @@ export function PurchasesPage() {
           onStatusFilterChange={setStatusFilter}
           suppliers={suppliers}
           onCreateClick={openCreateModal}
+          showReceipts={showReceipts}
+          unassignedCount={unassignedCount}
         />
 
         <PurchasesTable
