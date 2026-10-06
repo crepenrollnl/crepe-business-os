@@ -10,6 +10,7 @@ import type {
   SavePurchaseReceiptInput,
   UpdatePurchaseReceiptInput,
 } from "../types/purchase-receipt";
+import { missingSignedPage } from "../utils/receipt-purchase-link";
 
 export function usePurchaseReceipts(enabled: boolean) {
   const [view, setView] = useState<PurchaseReceiptView>("unassigned");
@@ -91,8 +92,12 @@ export function usePurchaseReceipts(enabled: boolean) {
       return;
     }
     setPhotosLoading(false);
-    if (signed.error || !signed.data) {
-      setViewerError(signed.error ?? "Could not open the photo.");
+    if (
+      signed.error ||
+      !signed.data ||
+      missingSignedPage(receipt.pagePaths, signed.data)
+    ) {
+      setViewerError("Could not open the photo.");
       return;
     }
     setPageUrls(
@@ -173,7 +178,10 @@ export function usePurchaseReceipts(enabled: boolean) {
   };
 }
 
-export function useUnassignedReceiptCount(enabled: boolean): { count: number } {
+export function useUnassignedReceiptCount(enabled: boolean): {
+  count: number;
+  refresh: () => Promise<void>;
+} {
   const [count, setCount] = useState(0);
 
   const load = useCallback(async () => {
@@ -189,5 +197,5 @@ export function useUnassignedReceiptCount(enabled: boolean): { count: number } {
     void load();
   }, [load]);
 
-  return { count };
+  return { count, refresh: load };
 }

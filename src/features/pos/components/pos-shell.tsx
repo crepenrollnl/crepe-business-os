@@ -3,6 +3,7 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { LogoutButton } from "@/components/logout-button";
+import { useCanOpenPurchaseReceipts } from "../hooks/use-can-open-purchase-receipts";
 import { PosTabNav, type PosTab } from "./pos-tab-nav";
 
 type PosShellProps = {
@@ -18,6 +19,8 @@ export function PosShell({
   queueCount = 0,
   children,
 }: PosShellProps) {
+  const receiptsAccess = useCanOpenPurchaseReceipts();
+
   return (
     <div className="flex h-dvh flex-col bg-zinc-50">
       <header className="flex shrink-0 items-center justify-between gap-3 border-b border-zinc-200 bg-white px-4 py-3">
@@ -25,12 +28,22 @@ export function PosShell({
           <p className="text-lg font-semibold tracking-tight text-zinc-900">
             POS
           </p>
-          <Link
-            href="/"
-            className="text-sm font-medium text-amber-700 hover:text-amber-800"
-          >
-            Back to OS
-          </Link>
+          <div className="flex flex-wrap items-center gap-x-3">
+            <Link
+              href="/"
+              className="text-sm font-medium text-amber-700 hover:text-amber-800"
+            >
+              Back to OS
+            </Link>
+            {receiptsAccess.status === "allowed" ? (
+              <Link
+                href="/purchases/receipts"
+                className="text-sm font-medium text-amber-700 hover:text-amber-800"
+              >
+                Receipts
+              </Link>
+            ) : null}
+          </div>
         </div>
 
         <LogoutButton />

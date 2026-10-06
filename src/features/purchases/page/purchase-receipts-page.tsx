@@ -89,6 +89,11 @@ export function PurchaseReceiptsPage() {
           onClose={state.closeReceipt}
           onSave={state.updateReceipt}
           onDiscard={state.discardReceipt}
+          onRetryPhotos={() => {
+            if (state.selected) {
+              void state.openReceipt(state.selected);
+            }
+          }}
         />
       ) : null}
     </div>

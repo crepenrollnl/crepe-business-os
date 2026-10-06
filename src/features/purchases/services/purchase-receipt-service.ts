@@ -8,6 +8,7 @@ import {
   type SavePurchaseReceiptInput,
   type UpdatePurchaseReceiptInput,
 } from "../types/purchase-receipt";
+import { RECEIPT_NO_LONGER_UNASSIGNED } from "../utils/receipt-purchase-link";
 import { addCalendarDays, amsterdamToday } from "../utils/amsterdam-date";
 
 const SIGNED_URL_SECONDS = 60 * 60;
@@ -195,6 +196,32 @@ export const purchaseReceiptService = {
     }
   },
 
+  async listForPurchase(
+    purchaseId: string,
+  ): Promise<ServiceResult<PurchaseReceiptCard[]>> {
+    try {
+      const { data, error } = await supabase
+        .from("purchase_receipts")
+        .select(RECEIPT_SELECT)
+        .eq("purchase_id", purchaseId)
+        .is("discarded_at", null)
+        .order("receipt_date", { ascending: false })
+        .order("created_at", { ascending: false })
+        .order("page_number", {
+          foreignTable: "purchase_receipt_files",
+          ascending: true,
+        });
+
+      if (error) {
+        return fail(toUserError(error, "Failed to load receipts"));
+      }
+
+      return loadCards(data);
+    } catch (error) {
+      return fail(toUserError(error, "Failed to load receipts"));
+    }
+  },
+
   async listUnassigned(): Promise<ServiceResult<PurchaseReceiptCard[]>> {
     try {
       const { data, error } = await supabase
@@ -373,6 +400,66 @@ export const purchaseReceiptService = {
       return ok(true);
     } catch (error) {
       return fail(toUserError(error, "Could not discard the receipt."));
+    }
+  },
+
+  async linkToPurchase(
+    receiptId: string,
+    purchaseId: string,
+  ): Promise<ServiceResult<true>> {
+    const payload = { purchase_id: purchaseId };
+
+    try {
+      const { data, error } = await supabase
+        .from("purchase_receipts")
+        .update(payload)
+        .eq("id", receiptId)
+        .is("purchase_id", null)
+        .is("discarded_at", null)
+        .select("id")
+        .maybeSingle();
+
+      if (error) {
+        return fail(toUserError(error, "Could not attach the receipt."));
+      }
+
+      if (!data || typeof data !== "object" || !("id" in data)) {
+        return fail(RECEIPT_NO_LONGER_UNASSIGNED);
+      }
+
+      return ok(true);
+    } catch (error) {
+      return fail(toUserError(error, "Could not attach the receipt."));
+    }
+  },
+
+  async unlinkFromPurchase(
+    receiptId: string,
+    purchaseId: string,
+  ): Promise<ServiceResult<true>> {
+    const payload = { purchase_id: null };
+
+    try {
+      const { data, error } = await supabase
+        .from("purchase_receipts")
+        .update(payload)
+        .eq("id", receiptId)
+        .eq("purchase_id", purchaseId)
+        .is("discarded_at", null)
+        .select("id")
+        .maybeSingle();
+
+      if (error) {
+        return fail(toUserError(error, "Could not unlink the receipt."));
+      }
+
+      if (!data || typeof data !== "object" || !("id" in data)) {
+        return fail("This receipt is no longer linked to this purchase.");
+      }
+
+      return ok(true);
+    } catch (error) {
+      return fail(toUserError(error, "Could not unlink the receipt."));
     }
   },
 };

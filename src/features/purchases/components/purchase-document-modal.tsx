@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/numeric-input";
 import { formatMoney, formatUnitCost } from "@/lib/money";
 import { PurchaseAccountingPreview } from "./purchase-accounting-preview";
+import { PurchaseReceiptsSection } from "./purchase-receipts-section";
 import { purchaseService } from "../services/purchase-service";
 import { purchaseTaxService } from "../services/purchase-tax-service";
 import type {
@@ -1824,6 +1825,14 @@ function PurchaseDocumentForm({
             </p>
           </div>
         </div>
+
+        <PurchaseReceiptsSection
+          purchaseId={purchase?.id ?? null}
+          status={purchase?.status ?? "draft"}
+          supplierId={formValues.supplier_id.trim() ? formValues.supplier_id.trim() : null}
+          purchasedAt={formValues.purchased_at}
+          grandTotal={grandTotal}
+        />
 
         <div className="flex flex-col-reverse justify-end gap-3 sm:flex-row">
           <button

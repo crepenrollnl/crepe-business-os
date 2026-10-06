@@ -307,4 +307,37 @@ describe("purchaseReceiptService", () => {
     expect(payload).not.toHaveProperty("created_by");
     expect(payload).not.toHaveProperty("storage_path");
   });
+
+  it("links and unlinks with a payload of only purchase_id", async () => {
+    const api = chain({ data: { id: RECEIPT_ID }, error: null });
+    supabaseMock.from.mockReturnValue(api);
+
+    const linked = await purchaseReceiptService.linkToPurchase(RECEIPT_ID, "purchase-1");
+
+    expect(linked).toEqual({ data: true, error: null });
+    const linkPayload = api.update.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(Object.keys(linkPayload)).toEqual(["purchase_id"]);
+    expect(linkPayload.purchase_id).toBe("purchase-1");
+    expect(api.is).toHaveBeenCalledWith("purchase_id", null);
+    expect(api.is).toHaveBeenCalledWith("discarded_at", null);
+
+    const unlinkApi = chain({ data: { id: RECEIPT_ID }, error: null });
+    supabaseMock.from.mockReturnValue(unlinkApi);
+    const unlinked = await purchaseReceiptService.unlinkFromPurchase(RECEIPT_ID, "purchase-1");
+
+    expect(unlinked).toEqual({ data: true, error: null });
+    const unlinkPayload = unlinkApi.update.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(Object.keys(unlinkPayload)).toEqual(["purchase_id"]);
+    expect(unlinkPayload.purchase_id).toBeNull();
+    expect(unlinkApi.eq).toHaveBeenCalledWith("purchase_id", "purchase-1");
+  });
+
+  it("returns the unassigned message when the link updates zero rows", async () => {
+    const api = chain({ data: null, error: null });
+    supabaseMock.from.mockReturnValue(api);
+
+    const result = await purchaseReceiptService.linkToPurchase(RECEIPT_ID, "purchase-1");
+
+    expect(result.error).toBe("This receipt is no longer unassigned.");
+  });
 });

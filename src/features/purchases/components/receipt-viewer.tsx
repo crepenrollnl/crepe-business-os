@@ -1,8 +1,9 @@
 "use client";
 
 import { useState } from "react";
+import { createPortal } from "react-dom";
 import { parseNumericInput, sanitizeNumericInput } from "@/components/ui/numeric-input";
-import { formatLastPurchaseHintDate } from "../utils/apply-last-purchase-prefill";
+import { formatReceiptDisplayDate } from "../utils/receipt-purchase-link";
 import type {
   PurchaseReceiptCard,
   PurchaseReceiptSupplierOption,
@@ -20,10 +21,13 @@ interface ReceiptViewerProps {
   onClose: () => void;
   onSave: (input: UpdatePurchaseReceiptInput) => Promise<{ error: string | null }>;
   onDiscard: (receipt: PurchaseReceiptCard) => Promise<{ error: string | null }>;
+  onRetryPhotos: () => void;
 }
 
 const fieldClassName =
   "block w-full rounded-lg border border-zinc-300 bg-white px-3 py-3 text-base text-zinc-900";
+
+const dateFieldClassName = `${fieldClassName} min-w-0 max-w-full appearance-none`;
 
 export function ReceiptViewer({
   receipt,
@@ -35,6 +39,7 @@ export function ReceiptViewer({
   onClose,
   onSave,
   onDiscard,
+  onRetryPhotos,
 }: ReceiptViewerProps) {
   const [supplierId, setSupplierId] = useState(receipt.supplierId ?? "");
   const [receiptDate, setReceiptDate] = useState(receipt.receiptDate);
@@ -85,35 +90,46 @@ export function ReceiptViewer({
     setDiscardOpen(false);
   }
 
-  const shownError = localError ?? error;
-
-  return (
-    <div className="fixed inset-0 z-40 flex flex-col bg-zinc-950">
+  const viewer = (
+    <div className="fixed inset-0 z-[60] flex flex-col bg-zinc-950">
       <header className="flex items-center justify-between gap-3 px-4 pt-[max(0.75rem,env(safe-area-inset-top))] pb-3 text-white">
         <button type="button" onClick={onClose} className="min-h-12 px-2 text-base font-semibold">
           Close
         </button>
-        <p className="text-base font-semibold">
-          {formatLastPurchaseHintDate(
-            receipt.receiptDate.includes("T")
-              ? receipt.receiptDate
-              : `${receipt.receiptDate}T12:00:00`,
-          )}
-        </p>
+        <p className="text-base font-semibold">{formatReceiptDisplayDate(receipt.receiptDate)}</p>
         <span className="w-16" />
       </header>
       <div className="min-h-0 flex-1 space-y-4 overflow-y-auto bg-zinc-50 px-4 py-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
+        {receipt.purchaseId ? (
+          <p className="text-sm font-medium text-zinc-700">Linked to a purchase.</p>
+        ) : null}
         <div className="space-y-3">
           {photosLoading ? <p className="text-sm text-zinc-600">Loading photo…</p> : null}
-          {pageUrls.map((url, index) => (
-            // eslint-disable-next-line @next/next/no-img-element -- private signed URL, browser pinch zoom
-            <img
-              key={url}
-              src={url}
-              alt={`Page ${index + 1}`}
-              className="w-full rounded-xl bg-white"
-            />
-          ))}
+          {!photosLoading && error ? (
+            <div className="space-y-3">
+              <p role="alert" className="text-sm text-red-700">
+                {error}
+              </p>
+              <button
+                type="button"
+                onClick={onRetryPhotos}
+                className="min-h-12 rounded-lg bg-white px-4 text-base font-semibold text-zinc-900"
+              >
+                Retry
+              </button>
+            </div>
+          ) : null}
+          {!photosLoading && !error
+            ? pageUrls.map((url, index) => (
+                // eslint-disable-next-line @next/next/no-img-element -- private signed URL, browser pinch zoom
+                <img
+                  key={url}
+                  src={url}
+                  alt={`Page ${index + 1}`}
+                  className="w-full rounded-xl bg-white"
+                />
+              ))
+            : null}
         </div>
 
         <label className="block space-y-1 text-sm font-medium text-zinc-700">
@@ -131,13 +147,13 @@ export function ReceiptViewer({
             ))}
           </select>
         </label>
-        <label className="block space-y-1 text-sm font-medium text-zinc-700">
+        <label className="block min-w-0 w-full space-y-1 text-sm font-medium text-zinc-700">
           Receipt date
           <input
             type="date"
             value={receiptDate}
             onChange={(event) => setReceiptDate(event.target.value)}
-            className={fieldClassName}
+            className={dateFieldClassName}
           />
         </label>
         <label className="block space-y-1 text-sm font-medium text-zinc-700">
@@ -158,9 +174,9 @@ export function ReceiptViewer({
             className={fieldClassName}
           />
         </label>
-        {shownError ? (
+        {localError ? (
           <p role="alert" className="text-sm text-red-700">
-            {shownError}
+            {localError}
           </p>
         ) : null}
         <button
@@ -193,4 +209,10 @@ export function ReceiptViewer({
       />
     </div>
   );
+
+  if (typeof document === "undefined") {
+    return null;
+  }
+
+  return createPortal(viewer, document.body);
 }

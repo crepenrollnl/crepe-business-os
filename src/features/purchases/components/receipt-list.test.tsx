@@ -130,4 +130,41 @@ describe("ReceiptList", () => {
     await userEvent.click(screen.getByRole("button", { name: "Discard receipt" }));
     expect(onDiscard).toHaveBeenCalledWith(expect.objectContaining({ id: "open" }));
   });
+
+  it("shows Linked only in All recent for a linked receipt", () => {
+    const linked = card({
+      id: "linked",
+      purchaseId: "purchase-1",
+      supplierName: "Sligro",
+    });
+    const { rerender } = render(
+      <ReceiptList
+        view="unassigned"
+        receipts={[linked]}
+        loading={false}
+        error={null}
+        onViewChange={vi.fn()}
+        onRetry={vi.fn()}
+        onOpen={vi.fn()}
+        onDiscard={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByText("Linked")).not.toBeInTheDocument();
+
+    rerender(
+      <ReceiptList
+        view="recent"
+        receipts={[linked]}
+        loading={false}
+        error={null}
+        onViewChange={vi.fn()}
+        onRetry={vi.fn()}
+        onOpen={vi.fn()}
+        onDiscard={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("Linked")).toBeInTheDocument();
+  });
 });
