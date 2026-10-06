@@ -43,7 +43,8 @@ export function PurchasesPage() {
   } = usePurchases();
   const access = useCanManagePurchaseReceipts();
   const showReceipts = access.status === "allowed";
-  const { count: unassignedCount } = useUnassignedReceiptCount(showReceipts);
+  const { count: unassignedCount, refresh: refreshUnassignedCount } =
+    useUnassignedReceiptCount(showReceipts);
 
   return (
     <DashboardLayout activePath="/purchases">
@@ -95,7 +96,10 @@ export function PurchasesPage() {
           error={actionError}
           accountingPreview={accountingPreview}
           postingError={postingError}
-          onClose={closeModal}
+          onClose={() => {
+            closeModal();
+            void refreshUnassignedCount();
+          }}
           onSaveDraft={saveDraft}
           onReceiveGoods={receiveGoods}
         />

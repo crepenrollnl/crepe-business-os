@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { formatMoney } from "@/lib/money";
 import type { PurchaseReceiptCard, PurchaseReceiptView } from "../types/purchase-receipt";
-import { formatLastPurchaseHintDate } from "../utils/apply-last-purchase-prefill";
+import { formatReceiptDisplayDate } from "../utils/receipt-purchase-link";
 import { ReceiptDiscardDialog } from "./receipt-discard-dialog";
 
 interface ReceiptListProps {
@@ -15,11 +15,6 @@ interface ReceiptListProps {
   onRetry: () => void;
   onOpen: (receipt: PurchaseReceiptCard) => void;
   onDiscard: (receipt: PurchaseReceiptCard) => Promise<{ error: string | null }>;
-}
-
-function receiptDateLabel(isoDate: string): string {
-  const value = isoDate.includes("T") ? isoDate : `${isoDate}T12:00:00`;
-  return formatLastPurchaseHintDate(value);
 }
 
 function receiptTotalLabel(value: number | null): string {
@@ -132,8 +127,13 @@ export function ReceiptList({
               )}
               <span className="min-w-0 space-y-1">
                 <span className="block text-base font-semibold text-zinc-900">
-                  {receiptDateLabel(receipt.receiptDate)}
+                  {formatReceiptDisplayDate(receipt.receiptDate)}
                 </span>
+                {view === "recent" && receipt.purchaseId ? (
+                  <span className="inline-flex rounded-full bg-zinc-200 px-2 py-0.5 text-xs font-semibold text-zinc-700">
+                    Linked
+                  </span>
+                ) : null}
                 <span className="block truncate text-sm text-zinc-600">
                   {receipt.supplierName ?? "No supplier"}
                 </span>

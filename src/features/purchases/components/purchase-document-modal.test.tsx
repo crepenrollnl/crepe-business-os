@@ -25,6 +25,28 @@ vi.mock("../services/purchase-tax-service", () => ({
   },
 }));
 
+vi.mock("@/features/auth/services/auth-service", () => ({
+  authService: {
+    getMyRole: () => Promise.resolve("seller"),
+  },
+}));
+
+vi.mock("../services/purchase-receipt-service", () => ({
+  purchaseReceiptService: {
+    listForPurchase: vi.fn(),
+    listUnassigned: vi.fn(),
+    listActiveSuppliers: vi.fn(),
+    linkToPurchase: vi.fn(),
+    unlinkFromPurchase: vi.fn(),
+    signStoragePaths: vi.fn(),
+    update: vi.fn(),
+    discard: vi.fn(),
+    save: vi.fn(),
+    countUnassigned: vi.fn(),
+    listRecent: vi.fn(),
+  },
+}));
+
 const INGREDIENT_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const INGREDIENT_B = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 const SUPPLIER_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";

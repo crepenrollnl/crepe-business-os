@@ -35,6 +35,8 @@ interface ReceiptCaptureFormProps {
 const fieldClassName =
   "block w-full rounded-lg border border-zinc-300 bg-white px-3 py-3 text-base text-zinc-900 shadow-sm outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20";
 
+const dateFieldClassName = `${fieldClassName} min-w-0 max-w-full appearance-none`;
+
 export function ReceiptCaptureForm({
   suppliers,
   isSaving,
@@ -188,7 +190,7 @@ export function ReceiptCaptureForm({
   }
 
   return (
-    <section className="space-y-4 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
+    <section className="min-w-0 space-y-4 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <label className="inline-flex min-h-12 cursor-pointer items-center justify-center rounded-lg bg-amber-500 px-4 text-base font-semibold text-white hover:bg-amber-600">
           {cameraLabel}
@@ -270,7 +272,7 @@ export function ReceiptCaptureForm({
         </select>
       </label>
 
-      <label className="block space-y-1 text-sm font-medium text-zinc-700">
+      <label className="block min-w-0 w-full space-y-1 text-sm font-medium text-zinc-700">
         Receipt date
         <input
           type="date"
@@ -281,7 +283,7 @@ export function ReceiptCaptureForm({
             markEdited();
             setReceiptDate(event.target.value);
           }}
-          className={fieldClassName}
+          className={dateFieldClassName}
         />
       </label>
 
