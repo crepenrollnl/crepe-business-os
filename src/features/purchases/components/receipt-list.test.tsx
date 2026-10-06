@@ -19,6 +19,7 @@ function card(overrides: Partial<PurchaseReceiptCard>): PurchaseReceiptCard {
     pageCount: 1,
     pagePaths: [],
     thumbnailUrl: null,
+    files: [],
     ...overrides,
   };
 }
@@ -166,5 +167,68 @@ describe("ReceiptList", () => {
     );
 
     expect(screen.getByText("Linked")).toBeInTheDocument();
+  });
+
+  it("shows copied, pending, and failed drive states, and retries unsynced pages", async () => {
+    const onRetryDrive = vi.fn();
+    render(
+      <ReceiptList
+        view="unassigned"
+        receipts={[
+          card({
+            id: "copied",
+            files: [{ id: "copied-file", driveSyncedAt: "2026-10-06T00:00:00.000Z", driveError: null }],
+          }),
+          card({
+            id: "pending",
+            files: [{ id: "pending-file", driveSyncedAt: null, driveError: null }],
+          }),
+          card({
+            id: "failed",
+            files: [
+              { id: "failed-file", driveSyncedAt: null, driveError: "Could not reach Google Drive." },
+              { id: "synced-file", driveSyncedAt: "2026-10-06T00:00:00.000Z", driveError: null },
+            ],
+          }),
+        ]}
+        loading={false}
+        error={null}
+        onViewChange={vi.fn()}
+        onRetry={vi.fn()}
+        onOpen={vi.fn()}
+        onDiscard={vi.fn()}
+        driveConfigured
+        onRetryDrive={onRetryDrive}
+      />,
+    );
+
+    expect(screen.getByText("Copied to Drive")).toBeInTheDocument();
+    expect(screen.getByText("Drive copy pending")).toBeInTheDocument();
+    expect(screen.getByText("Drive copy failed")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(onRetryDrive).toHaveBeenCalledWith(["failed-file"]);
+  });
+
+  it("shows nothing about Drive when it is not configured", () => {
+    render(
+      <ReceiptList
+        view="unassigned"
+        receipts={[
+          card({
+            files: [{ id: "failed-file", driveSyncedAt: null, driveError: "Could not reach Google Drive." }],
+          }),
+        ]}
+        loading={false}
+        error={null}
+        onViewChange={vi.fn()}
+        onRetry={vi.fn()}
+        onOpen={vi.fn()}
+        onDiscard={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByText("Copied to Drive")).not.toBeInTheDocument();
+    expect(screen.queryByText("Drive copy pending")).not.toBeInTheDocument();
+    expect(screen.queryByText("Drive copy failed")).not.toBeInTheDocument();
   });
 });

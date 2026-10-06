@@ -23,6 +23,7 @@ function card(
     pageCount: 1,
     pagePaths: [],
     thumbnailUrl: null,
+    files: [],
   };
 }
 

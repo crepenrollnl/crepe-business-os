@@ -9,6 +9,18 @@ const { listUnassigned, listRecent, signStoragePaths, save } = vi.hoisted(() => 
   save: vi.fn(),
 }));
 
+const { requestDriveReceiptSync } = vi.hoisted(() => ({
+  requestDriveReceiptSync: vi.fn(),
+}));
+
+vi.mock("../utils/purchase-receipt-access-token", () => ({
+  getPurchaseReceiptAccessToken: () => Promise.resolve("token"),
+}));
+
+vi.mock("../utils/request-drive-receipt-sync", () => ({
+  requestDriveReceiptSync: (...args: unknown[]) => requestDriveReceiptSync(...args),
+}));
+
 vi.mock("../services/purchase-receipt-service", () => ({
   purchaseReceiptService: {
     listUnassigned: () => listUnassigned(),
@@ -36,6 +48,7 @@ function card(id: string, path: string): PurchaseReceiptCard {
     pageCount: 1,
     pagePaths: [path],
     thumbnailUrl: null,
+    files: [],
   };
 }
 
@@ -45,6 +58,8 @@ describe("usePurchaseReceipts stale responses", () => {
     listRecent.mockReset();
     signStoragePaths.mockReset();
     save.mockReset();
+    requestDriveReceiptSync.mockReset();
+    requestDriveReceiptSync.mockResolvedValue(null);
   });
 
   it("ignores a late list from the previous view", async () => {
@@ -173,5 +188,39 @@ describe("usePurchaseReceipts stale responses", () => {
       recentResolvers[0]?.({ data: [card("recent", "recent.jpg")], error: null });
     });
     expect(result.current.receipts.map((item) => item.id)).toEqual(["recent"]);
+  });
+
+  it("does not wait for the drive sync and still succeeds when that call fails", async () => {
+    let rejectSync: (reason: unknown) => void = () => undefined;
+    requestDriveReceiptSync.mockImplementation(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectSync = reject;
+        }),
+    );
+    listUnassigned.mockResolvedValue({ data: [], error: null });
+    save.mockResolvedValue({ data: "saved-id", error: null });
+
+    const { result } = renderHook(() => usePurchaseReceipts(true));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    let saveResult: { error: string | null } = { error: "pending" };
+    await act(async () => {
+      saveResult = await result.current.save({
+        receiptDate: "2026-10-05",
+        supplierId: null,
+        receiptTotal: null,
+        note: null,
+        pages: [],
+      });
+    });
+
+    expect(saveResult.error).toBeNull();
+    expect(requestDriveReceiptSync).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      rejectSync(new Error("drive sync failed"));
+    });
+    expect(saveResult.error).toBeNull();
+    expect(result.current.error).toBeNull();
   });
 });

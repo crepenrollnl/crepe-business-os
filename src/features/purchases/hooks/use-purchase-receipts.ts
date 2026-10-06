@@ -10,7 +10,9 @@ import type {
   SavePurchaseReceiptInput,
   UpdatePurchaseReceiptInput,
 } from "../types/purchase-receipt";
+import { getPurchaseReceiptAccessToken } from "../utils/purchase-receipt-access-token";
 import { missingSignedPage } from "../utils/receipt-purchase-link";
+import { requestDriveReceiptSync } from "../utils/request-drive-receipt-sync";
 
 export function usePurchaseReceipts(enabled: boolean) {
   const [view, setView] = useState<PurchaseReceiptView>("unassigned");
@@ -58,7 +60,14 @@ export function usePurchaseReceipts(enabled: boolean) {
       setLoading(false);
       return;
     }
-    setReceipts(listResult.data ?? []);
+    const next = listResult.data ?? [];
+    setReceipts(next);
+    setSelected((current) => {
+      if (!current) {
+        return current;
+      }
+      return next.find((item) => item.id === current.id) ?? current;
+    });
     setError(supplierResult.error);
     setLoading(false);
   }, [enabled, view, reloadKey]);
@@ -78,6 +87,14 @@ export function usePurchaseReceipts(enabled: boolean) {
     setView("unassigned");
     setReloadKey((current) => current + 1);
     setIsSaving(false);
+    void Promise.resolve()
+      .then(() => requestDriveReceiptSync(getPurchaseReceiptAccessToken))
+      .then((result) => {
+        if (result?.configured === true && result.synced > 0) {
+          setReloadKey((current) => current + 1);
+        }
+      })
+      .catch(() => undefined);
     return { error: null };
   }, []);
 

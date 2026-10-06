@@ -1,16 +1,21 @@
 "use client";
 
 import Link from "next/link";
+import { DriveUnavailableNotice } from "../components/receipt-drive-status";
 import { ReceiptCaptureForm } from "../components/receipt-capture-form";
 import { ReceiptList } from "../components/receipt-list";
 import { ReceiptViewer } from "../components/receipt-viewer";
 import { useCanManagePurchaseReceipts } from "../hooks/use-can-manage-purchase-receipts";
+import { useDriveReceiptSync } from "../hooks/use-drive-receipt-sync";
 import { usePurchaseReceipts } from "../hooks/use-purchase-receipts";
 
 export function PurchaseReceiptsPage() {
   const access = useCanManagePurchaseReceipts();
   const allowed = access.status === "allowed";
   const state = usePurchaseReceipts(allowed);
+  const drive = useDriveReceiptSync(allowed, () => {
+    void state.retry();
+  });
 
   return (
     <div className="flex h-dvh flex-col bg-zinc-50">
@@ -59,6 +64,7 @@ export function PurchaseReceiptsPage() {
               isSaving={state.isSaving}
               onSave={state.save}
             />
+            {drive.configured === true && drive.unavailable ? <DriveUnavailableNotice /> : null}
             <ReceiptList
               view={state.view}
               receipts={state.receipts}
@@ -72,6 +78,10 @@ export function PurchaseReceiptsPage() {
                 void state.openReceipt(receipt);
               }}
               onDiscard={state.discardReceipt}
+              driveConfigured={drive.configured === true}
+              onRetryDrive={(fileIds) => {
+                void drive.retryFiles(fileIds);
+              }}
             />
           </div>
         </main>
@@ -93,6 +103,10 @@ export function PurchaseReceiptsPage() {
             if (state.selected) {
               void state.openReceipt(state.selected);
             }
+          }}
+          driveConfigured={drive.configured === true}
+          onRetryDrive={(fileIds) => {
+            void drive.retryFiles(fileIds);
           }}
         />
       ) : null}

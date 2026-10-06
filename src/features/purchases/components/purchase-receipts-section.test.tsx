@@ -66,6 +66,7 @@ function card(overrides: Partial<PurchaseReceiptCard>): PurchaseReceiptCard {
     pageCount: 2,
     pagePaths: ["a.jpg"],
     thumbnailUrl: "https://signed.example/thumb",
+    files: [],
     ...overrides,
   };
 }
@@ -77,6 +78,7 @@ function renderSection(
     supplierId: string | null;
     purchasedAt: string;
     grandTotal: number;
+    driveUnavailable: boolean;
   }> = {},
 ) {
   return render(
@@ -337,5 +339,16 @@ describe("PurchaseReceiptsSection", () => {
     );
     await screen.findByText("No total");
     expect(screen.queryByText(/Receipt total/)).not.toBeInTheDocument();
+  });
+
+  it("shows the Drive notice in the receipts section only when Drive is unavailable", async () => {
+    const notice = "Google Drive is not reachable right now. Copies will resume automatically.";
+    renderSection();
+    expect(await screen.findByRole("heading", { name: "Receipts" })).toBeInTheDocument();
+    expect(screen.queryByText(notice)).not.toBeInTheDocument();
+
+    cleanup();
+    renderSection({ driveUnavailable: true });
+    expect(await screen.findByText(notice)).toBeInTheDocument();
   });
 });

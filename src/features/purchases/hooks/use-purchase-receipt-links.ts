@@ -74,7 +74,14 @@ export function usePurchaseReceiptLinks({
       setLoading(false);
       return;
     }
-    setLinked(listResult.data ?? []);
+    const next = listResult.data ?? [];
+    setLinked(next);
+    setSelected((current) => {
+      if (!current) {
+        return current;
+      }
+      return next.find((item) => item.id === current.id) ?? current;
+    });
     setError(null);
     setLoading(false);
   }, [enabled, purchaseId]);
@@ -242,6 +249,7 @@ export function usePurchaseReceiptLinks({
     unlink,
     openReceipt,
     closeReceipt,
+    reload: loadLinked,
     updateReceipt,
   };
 }

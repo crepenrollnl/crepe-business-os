@@ -34,6 +34,12 @@ export interface UpdatePurchaseReceiptInput {
   note: string | null;
 }
 
+export interface PurchaseReceiptFileDrive {
+  id: string;
+  driveSyncedAt: string | null;
+  driveError: string | null;
+}
+
 export interface PurchaseReceiptCard {
   id: string;
   purchaseId: string | null;
@@ -45,4 +51,5 @@ export interface PurchaseReceiptCard {
   pageCount: number;
   pagePaths: string[];
   thumbnailUrl: string | null;
+  files: PurchaseReceiptFileDrive[];
 }

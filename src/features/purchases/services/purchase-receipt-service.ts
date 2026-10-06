@@ -4,6 +4,7 @@ import { fail, ok, type ServiceResult } from "@/types/service";
 import {
   PURCHASE_RECEIPT_BUCKET,
   type PurchaseReceiptCard,
+  type PurchaseReceiptFileDrive,
   type PurchaseReceiptSupplierOption,
   type SavePurchaseReceiptInput,
   type UpdatePurchaseReceiptInput,
@@ -15,11 +16,14 @@ const SIGNED_URL_SECONDS = 60 * 60;
 const RECENT_RECEIPT_DAYS = 60;
 
 const RECEIPT_SELECT =
-  "id, purchase_id, supplier_id, receipt_date, receipt_total, note, created_at, suppliers(name), purchase_receipt_files(page_number, storage_path)";
+  "id, purchase_id, supplier_id, receipt_date, receipt_total, note, created_at, suppliers(name), purchase_receipt_files(id, page_number, storage_path, drive_synced_at, drive_error)";
 
 interface ReceiptFileRow {
   page_number: number;
   storage_path: string;
+  id?: unknown;
+  drive_synced_at?: unknown;
+  drive_error?: unknown;
 }
 
 interface ReceiptQueryRow {
@@ -70,6 +74,17 @@ function isReceiptQueryRow(value: unknown): value is ReceiptQueryRow {
   return typeof row.id === "string" && typeof row.receipt_date === "string";
 }
 
+function fileDrive(file: ReceiptFileRow): PurchaseReceiptFileDrive | null {
+  if (typeof file.id !== "string" || file.id.length === 0) {
+    return null;
+  }
+  return {
+    id: file.id,
+    driveSyncedAt: typeof file.drive_synced_at === "string" ? file.drive_synced_at : null,
+    driveError: typeof file.drive_error === "string" ? file.drive_error : null,
+  };
+}
+
 function cardFromRow(row: ReceiptQueryRow): PurchaseReceiptCard {
   const files = (row.purchase_receipt_files ?? [])
     .filter(isFileRow)
@@ -88,6 +103,10 @@ function cardFromRow(row: ReceiptQueryRow): PurchaseReceiptCard {
     pageCount: pagePaths.length,
     pagePaths,
     thumbnailUrl: null,
+    files: files.flatMap((file) => {
+      const drive = fileDrive(file);
+      return drive ? [drive] : [];
+    }),
   };
 }
 

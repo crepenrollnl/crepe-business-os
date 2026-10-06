@@ -340,4 +340,45 @@ describe("purchaseReceiptService", () => {
 
     expect(result.error).toBe("This receipt is no longer unassigned.");
   });
+
+  it("reads drive copy columns onto the card and still batches signed urls", async () => {
+    const api = chain({
+      data: [
+        {
+          id: RECEIPT_ID,
+          purchase_id: null,
+          supplier_id: null,
+          receipt_date: "2026-10-05",
+          receipt_total: null,
+          note: null,
+          created_at: "2026-10-05T10:00:00.000Z",
+          suppliers: null,
+          purchase_receipt_files: [
+            {
+              id: FILE_ID,
+              page_number: 1,
+              storage_path: "receipt/page.jpg",
+              drive_synced_at: null,
+              drive_error: "Could not reach Google Drive.",
+            },
+          ],
+        },
+      ],
+      error: null,
+    });
+    supabaseMock.from.mockReturnValue(api);
+
+    const result = await purchaseReceiptService.listUnassigned();
+
+    expect(result.data?.[0]?.files).toEqual([
+      {
+        id: FILE_ID,
+        driveSyncedAt: null,
+        driveError: "Could not reach Google Drive.",
+      },
+    ]);
+    expect(api.select).toHaveBeenCalledWith(expect.stringContaining("drive_synced_at"));
+    expect(api.select).toHaveBeenCalledWith(expect.stringContaining("drive_error"));
+    expect(createSignedUrlsMock).toHaveBeenCalledWith(["receipt/page.jpg"], 3600);
+  });
 });

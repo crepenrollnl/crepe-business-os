@@ -3,9 +3,10 @@ import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
 
-const { getMyRoleMock, useCountMock } = vi.hoisted(() => ({
+const { getMyRoleMock, useCountMock, getPurchaseReceiptAccessToken } = vi.hoisted(() => ({
   getMyRoleMock: vi.fn(),
   useCountMock: vi.fn(),
+  getPurchaseReceiptAccessToken: vi.fn(),
 }));
 
 vi.mock("@/components/layout/dashboard-layout", () => ({
@@ -30,6 +31,10 @@ vi.mock("@/features/auth/services/auth-service", () => ({
   authService: {
     getMyRole: () => getMyRoleMock(),
   },
+}));
+
+vi.mock("../utils/purchase-receipt-access-token", () => ({
+  getPurchaseReceiptAccessToken: () => getPurchaseReceiptAccessToken(),
 }));
 
 vi.mock("../hooks/use-purchases", () => ({
@@ -78,6 +83,8 @@ describe("PurchasesPage receipts entry", () => {
     cleanup();
     getMyRoleMock.mockReset();
     useCountMock.mockReset();
+    getPurchaseReceiptAccessToken.mockReset();
+    getPurchaseReceiptAccessToken.mockResolvedValue(null);
   });
 
   it("hides the Receipts button from a seller", async () => {
@@ -91,6 +98,7 @@ describe("PurchasesPage receipts entry", () => {
     });
     expect(useCountMock.mock.calls.every(([enabled]) => enabled === false)).toBe(true);
     expect(screen.queryByRole("link", { name: /Receipts/ })).not.toBeInTheDocument();
+    expect(getPurchaseReceiptAccessToken).not.toHaveBeenCalled();
   });
 
   it("shows the Receipts button and the unassigned count to an owner", async () => {
