@@ -428,7 +428,7 @@ const inputClassName =
   "block w-full rounded-lg border border-zinc-300 bg-white px-3 py-2.5 text-base text-zinc-900 shadow-sm outline-none transition-colors placeholder:text-zinc-400 focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20 disabled:cursor-not-allowed disabled:bg-zinc-50 disabled:text-zinc-500 sm:text-sm";
 
 const panelClassName =
-  "relative h-full max-h-none w-full max-w-6xl overflow-y-auto rounded-none border-0 bg-white p-4 shadow-xl sm:h-auto sm:max-h-[90vh] sm:rounded-xl sm:border sm:border-zinc-200 sm:p-6";
+  "relative h-full max-h-none w-full max-w-6xl overflow-y-auto rounded-none border-0 bg-white p-4 pb-0 shadow-xl sm:h-auto sm:max-h-[90vh] sm:rounded-xl sm:border sm:border-zinc-200 sm:p-6";
 
 const lineCellClassName = "p-0 align-top md:table-cell md:px-3 md:py-3";
 
