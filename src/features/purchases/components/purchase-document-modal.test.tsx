@@ -919,6 +919,155 @@ describe("PurchaseDocumentModal last price", () => {
   });
 });
 
+describe("PurchaseDocumentModal phone layout", () => {
+  afterEach(() => {
+    cleanup();
+    getLastPurchaseLines.mockReset();
+  });
+
+  function renderLines(
+    lines: Array<{
+      ingredient_id: string;
+      quantity: number;
+      unit_cost: number;
+      discount: number;
+      tax_category: string;
+      tax_regime: string;
+      price_mode: "inclusive" | "exclusive";
+    }>,
+    isSaving = false,
+  ) {
+    getLastPurchaseLines.mockResolvedValue({ data: [], error: null });
+    render(
+      <PurchaseDocumentModal
+        isOpen
+        purchase={null}
+        initialValues={{
+          supplier_id: SUPPLIER_ID,
+          invoice_number: "",
+          purchased_at: "2026-09-26",
+          notes: "",
+          supplier_country: "NL",
+          tax_country: "NL",
+          lines,
+        }}
+        suppliers={[{ id: SUPPLIER_ID, name: "Makro" }]}
+        ingredients={[
+          { id: INGREDIENT_ID, name: "Flour", unit: "kg" },
+          { id: INGREDIENT_B, name: "Milk", unit: "L" },
+        ]}
+        isLoading={false}
+        isSaving={isSaving}
+        error={null}
+        onClose={() => undefined}
+        onSaveDraft={async () => true}
+        onReceiveGoods={async () => true}
+      />,
+    );
+  }
+
+  function lineDraft(
+    ingredientId: string,
+    taxCategory = "food",
+  ) {
+    return {
+      ingredient_id: ingredientId,
+      quantity: 1,
+      unit_cost: 2,
+      discount: 0,
+      tax_category: taxCategory,
+      tax_regime: "reduced_vat",
+      price_mode: "exclusive" as const,
+    };
+  }
+
+  function discountCell(index: number): HTMLElement {
+    const input = screen.getAllByRole("textbox", { name: "Discount" })[index];
+    const cell = input?.closest("td");
+    if (!cell) {
+      throw new Error("discount cell missing");
+    }
+    return cell;
+  }
+
+  it("toggles tax cells on that line only", () => {
+    renderLines([lineDraft(INGREDIENT_ID), lineDraft(INGREDIENT_B)]);
+
+    const toggles = screen.getAllByRole("button", { name: "Tax and discount" });
+    expect(toggles[0]).toHaveAttribute("aria-expanded", "false");
+    expect(discountCell(0)).toHaveClass("hidden");
+    expect(discountCell(1)).toHaveClass("hidden");
+
+    fireEvent.click(toggles[0]!);
+
+    expect(toggles[0]).toHaveAttribute("aria-expanded", "true");
+    expect(discountCell(0)).not.toHaveClass("hidden");
+    expect(discountCell(1)).toHaveClass("hidden");
+  });
+
+  it("expands a line with a tax category error after a failed submit", () => {
+    renderLines([lineDraft(INGREDIENT_ID, "")]);
+
+    const cell = taxSelect("food").closest("td");
+    expect(cell).toHaveClass("hidden");
+
+    fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
+
+    expect(cell).not.toHaveClass("hidden");
+    expect(screen.getByText("Tax category is required")).toBeInTheDocument();
+  });
+
+  it("keeps the expanded state on the right line when an earlier line is removed", () => {
+    renderLines([
+      lineDraft(INGREDIENT_ID),
+      lineDraft(INGREDIENT_B),
+      lineDraft(INGREDIENT_ID),
+    ]);
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Tax and discount" })[2]!);
+    expect(discountCell(2)).not.toHaveClass("hidden");
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Remove" })[0]!);
+
+    expect(screen.getAllByRole("button", { name: "Tax and discount" })).toHaveLength(2);
+    expect(discountCell(0)).toHaveClass("hidden");
+    expect(discountCell(1)).not.toHaveClass("hidden");
+    expect(
+      screen.getAllByRole("button", { name: "Tax and discount" })[1],
+    ).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("adds a line from Add another line", () => {
+    renderLines([lineDraft(INGREDIENT_ID)]);
+
+    expect(screen.getAllByRole("button", { name: "Tax and discount" })).toHaveLength(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Add another line" }));
+
+    expect(screen.getAllByRole("button", { name: "Tax and discount" })).toHaveLength(2);
+  });
+
+  it("disables Add another line while saving", () => {
+    renderLines([lineDraft(INGREDIENT_ID)], true);
+
+    expect(screen.getByRole("button", { name: "Add another line" })).toBeDisabled();
+  });
+
+  it("toggles More details", () => {
+    renderLines([lineDraft(INGREDIENT_ID)]);
+
+    const more = screen.getByRole("button", { name: "More details" });
+    expect(more).toHaveAttribute("aria-expanded", "false");
+
+    fireEvent.click(more);
+
+    expect(screen.getByRole("button", { name: "Fewer details" })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+  });
+});
+
 function ingredientSelect(): HTMLSelectElement {
   const match = screen.getAllByRole("combobox").find((element) =>
     Array.from((element as HTMLSelectElement).options).some(

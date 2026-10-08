@@ -425,7 +425,26 @@ function getStatusBadgeClass(status: PurchaseStatus): string {
 }
 
 const inputClassName =
-  "block w-full rounded-lg border border-zinc-300 bg-white px-3 py-2.5 text-sm text-zinc-900 shadow-sm outline-none transition-colors placeholder:text-zinc-400 focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20 disabled:cursor-not-allowed disabled:bg-zinc-50 disabled:text-zinc-500";
+  "block w-full rounded-lg border border-zinc-300 bg-white px-3 py-2.5 text-base text-zinc-900 shadow-sm outline-none transition-colors placeholder:text-zinc-400 focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20 disabled:cursor-not-allowed disabled:bg-zinc-50 disabled:text-zinc-500 sm:text-sm";
+
+const panelClassName =
+  "relative h-full max-h-none w-full max-w-6xl overflow-y-auto rounded-none border-0 bg-white p-4 shadow-xl sm:h-auto sm:max-h-[90vh] sm:rounded-xl sm:border sm:border-zinc-200 sm:p-6";
+
+const lineCellClassName = "p-0 align-top md:table-cell md:px-3 md:py-3";
+
+function mobileFieldLabel(text: string) {
+  return (
+    <span className="mb-1 block text-xs font-medium text-zinc-600 md:hidden">
+      {text}
+    </span>
+  );
+}
+
+function taxCellClassName(expanded: boolean, extra?: string): string {
+  return [lineCellClassName, expanded ? null : "hidden", extra]
+    .filter((value): value is string => Boolean(value))
+    .join(" ");
+}
 
 type PurchaseDocumentFormProps = Omit<PurchaseDocumentModalProps, "isOpen">;
 
@@ -452,6 +471,10 @@ function PurchaseDocumentForm({
     }),
   );
   const [hasAttemptedSubmit, setHasAttemptedSubmit] = useState(false);
+  const [expandedTaxLines, setExpandedTaxLines] = useState<Set<number>>(
+    () => new Set(),
+  );
+  const [headerDetailsOpen, setHeaderDetailsOpen] = useState(false);
 
   const isReadOnly = purchase?.status === "received" || purchase?.status === "cancelled";
   const draftFieldErrors = validateDraft(formValues);
@@ -933,10 +956,32 @@ function PurchaseDocumentForm({
   };
 
   const removeLine = (index: number) => {
+    setExpandedTaxLines((current) => {
+      const next = new Set<number>();
+      for (const lineIndex of current) {
+        if (lineIndex === index) {
+          continue;
+        }
+        next.add(lineIndex > index ? lineIndex - 1 : lineIndex);
+      }
+      return next;
+    });
     setFormValues((current) => ({
       ...current,
       lines: current.lines.filter((_, lineIndex) => lineIndex !== index),
     }));
+  };
+
+  const toggleTaxLine = (index: number) => {
+    setExpandedTaxLines((current) => {
+      const next = new Set(current);
+      if (next.has(index)) {
+        next.delete(index);
+      } else {
+        next.add(index);
+      }
+      return next;
+    });
   };
 
   const lookupByIngredient = useMemo(() => {
@@ -1151,7 +1196,7 @@ function PurchaseDocumentForm({
 
   if (isLoading) {
     return (
-      <div className="relative max-h-[90vh] w-full max-w-6xl overflow-y-auto rounded-xl border border-zinc-200 bg-white p-6 shadow-xl">
+      <div className={panelClassName}>
         <div className="space-y-4">
           <div className="h-7 w-48 animate-pulse rounded bg-zinc-200" />
           <div className="h-4 w-72 animate-pulse rounded bg-zinc-200" />
@@ -1167,7 +1212,7 @@ function PurchaseDocumentForm({
   }
 
   return (
-    <div className="relative max-h-[90vh] w-full max-w-6xl overflow-y-auto rounded-xl border border-zinc-200 bg-white p-6 shadow-xl">
+    <div className={panelClassName}>
       <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h2 className="text-xl font-semibold text-zinc-900">
@@ -1237,24 +1282,26 @@ function PurchaseDocumentForm({
             )}
           </div>
 
-          <div className="space-y-2">
-            <label
-              htmlFor="invoice_number"
-              className="block text-sm font-medium text-zinc-700"
-            >
-              Invoice number
-            </label>
-            <input
-              id="invoice_number"
-              type="text"
-              value={formValues.invoice_number}
-              onChange={(event) =>
-                updateHeader("invoice_number", event.target.value)
-              }
-              disabled={isReadOnly || isSaving}
-              className={inputClassName}
-              placeholder="e.g. INV-1042"
-            />
+          <div className={headerDetailsOpen ? "contents" : "hidden md:contents"}>
+            <div className="space-y-2">
+              <label
+                htmlFor="invoice_number"
+                className="block text-sm font-medium text-zinc-700"
+              >
+                Invoice number
+              </label>
+              <input
+                id="invoice_number"
+                type="text"
+                value={formValues.invoice_number}
+                onChange={(event) =>
+                  updateHeader("invoice_number", event.target.value)
+                }
+                disabled={isReadOnly || isSaving}
+                className={inputClassName}
+                placeholder="e.g. INV-1042"
+              />
+            </div>
           </div>
 
           <div className="space-y-2">
@@ -1272,7 +1319,7 @@ function PurchaseDocumentForm({
                 updateHeader("purchased_at", event.target.value)
               }
               disabled={isReadOnly || isSaving}
-              className={inputClassName}
+              className={`${inputClassName} min-w-0 max-w-full appearance-none`}
               aria-invalid={Boolean(
                 hasAttemptedSubmit && fieldErrors.purchased_at,
               )}
@@ -1282,77 +1329,92 @@ function PurchaseDocumentForm({
             )}
           </div>
 
-          <div className="space-y-2">
-            <label
-              htmlFor="status_display"
-              className="block text-sm font-medium text-zinc-700"
-            >
-              Status
-            </label>
-            <input
-              id="status_display"
-              type="text"
-              value={formatStatus(purchase?.status ?? "draft")}
-              disabled
-              className={inputClassName}
-            />
+          <div className={headerDetailsOpen ? "contents" : "hidden md:contents"}>
+            <div className="space-y-2">
+              <label
+                htmlFor="status_display"
+                className="block text-sm font-medium text-zinc-700"
+              >
+                Status
+              </label>
+              <input
+                id="status_display"
+                type="text"
+                value={formatStatus(purchase?.status ?? "draft")}
+                disabled
+                className={inputClassName}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <label
+                htmlFor="supplier_country"
+                className="block text-sm font-medium text-zinc-700"
+              >
+                Supplier country
+              </label>
+              {isReadOnly && !formValues.supplier_country.trim() ? (
+                <p className="text-sm text-zinc-500">Not recorded</p>
+              ) : (
+                <input
+                  id="supplier_country"
+                  type="text"
+                  value={formValues.supplier_country}
+                  onChange={(event) =>
+                    updateHeader(
+                      "supplier_country",
+                      event.target.value.toUpperCase(),
+                    )
+                  }
+                  disabled={isReadOnly || isSaving}
+                  className={inputClassName}
+                  placeholder="NL"
+                  maxLength={2}
+                />
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <label
+                htmlFor="tax_country"
+                className="block text-sm font-medium text-zinc-700"
+              >
+                Tax country
+              </label>
+              {isReadOnly && !formValues.tax_country.trim() ? (
+                <p className="text-sm text-zinc-500">Not recorded</p>
+              ) : (
+                <input
+                  id="tax_country"
+                  type="text"
+                  value={formValues.tax_country}
+                  onChange={(event) =>
+                    updateHeader("tax_country", event.target.value.toUpperCase())
+                  }
+                  disabled={isReadOnly || isSaving}
+                  className={inputClassName}
+                  placeholder="NL"
+                  maxLength={2}
+                />
+              )}
+            </div>
           </div>
 
-          <div className="space-y-2">
-            <label
-              htmlFor="supplier_country"
-              className="block text-sm font-medium text-zinc-700"
-            >
-              Supplier country
-            </label>
-            {isReadOnly && !formValues.supplier_country.trim() ? (
-              <p className="text-sm text-zinc-500">Not recorded</p>
-            ) : (
-              <input
-                id="supplier_country"
-                type="text"
-                value={formValues.supplier_country}
-                onChange={(event) =>
-                  updateHeader(
-                    "supplier_country",
-                    event.target.value.toUpperCase(),
-                  )
-                }
-                disabled={isReadOnly || isSaving}
-                className={inputClassName}
-                placeholder="NL"
-                maxLength={2}
-              />
-            )}
-          </div>
-
-          <div className="space-y-2">
-            <label
-              htmlFor="tax_country"
-              className="block text-sm font-medium text-zinc-700"
-            >
-              Tax country
-            </label>
-            {isReadOnly && !formValues.tax_country.trim() ? (
-              <p className="text-sm text-zinc-500">Not recorded</p>
-            ) : (
-              <input
-                id="tax_country"
-                type="text"
-                value={formValues.tax_country}
-                onChange={(event) =>
-                  updateHeader("tax_country", event.target.value.toUpperCase())
-                }
-                disabled={isReadOnly || isSaving}
-                className={inputClassName}
-                placeholder="NL"
-                maxLength={2}
-              />
-            )}
-          </div>
+          <button
+            type="button"
+            aria-expanded={headerDetailsOpen}
+            onClick={() => setHeaderDetailsOpen((open) => !open)}
+            className="rounded-lg border border-zinc-300 bg-white px-3 py-2.5 text-sm font-medium text-zinc-700 sm:col-span-2 md:hidden"
+          >
+            {headerDetailsOpen ? "Fewer details" : "More details"}
+          </button>
         </div>
 
-        <div className="space-y-2">
+        <div
+          className={
+            headerDetailsOpen ? "space-y-2" : "hidden space-y-2 md:block"
+          }
+        >
           <label
             htmlFor="notes"
             className="block text-sm font-medium text-zinc-700"
@@ -1406,8 +1468,8 @@ function PurchaseDocumentForm({
 
           <div className="overflow-hidden rounded-xl border border-zinc-200">
             <div className="overflow-x-auto">
-              <table className="min-w-full">
-                <thead className="bg-zinc-50">
+              <table className="block min-w-full md:table">
+                <thead className="hidden bg-zinc-50 md:table-header-group">
                   <tr>
                     <th className="px-3 py-3 text-left text-sm font-semibold text-zinc-700">
                       Ingredient
@@ -1449,7 +1511,7 @@ function PurchaseDocumentForm({
                     )}
                   </tr>
                 </thead>
-                <tbody>
+                <tbody className="block md:table-row-group">
                   {formValues.lines.map((line, index) => {
                     const quantity = coerceNumericField(line.quantity);
                     const lineError = fieldErrors.lineErrors?.[index];
@@ -1476,10 +1538,26 @@ function PurchaseDocumentForm({
                       netUnitCost !== undefined &&
                       netUnitCost !== null;
                     const taxUnrecorded = isReadOnly && !line.price_mode;
+                    const taxExpanded =
+                      expandedTaxLines.has(index) ||
+                      Boolean(hasAttemptedSubmit && lineError?.tax_category);
+                    const discountValue = line.discount.trim();
+                    const taxSummary =
+                      taxLine &&
+                      taxLine.tax_rate_percent !== null &&
+                      taxLine.tax_rate_percent !== undefined
+                        ? `${taxLine.tax_rate_percent}% · tax ${formatMoney(taxLine.tax_amount)}${
+                            discountValue ? ` · discount ${discountValue}` : ""
+                          }`
+                        : null;
 
                     return (
-                      <tr key={index} className="border-t border-zinc-200">
-                        <td className="px-3 py-3 align-top">
+                      <tr
+                        key={index}
+                        className="grid grid-cols-2 gap-3 border-t border-zinc-200 p-3 md:table-row md:p-0"
+                      >
+                        <td className={`${lineCellClassName} order-1 col-span-2`}>
+                          {mobileFieldLabel("Ingredient")}
                           <select
                             value={line.ingredient_id}
                             onChange={(event) => {
@@ -1561,7 +1639,8 @@ function PurchaseDocumentForm({
                             </p>
                           )}
                         </td>
-                        <td className="px-3 py-3 align-top">
+                        <td className={`${lineCellClassName} order-2`}>
+                          {mobileFieldLabel("Quantity")}
                           <div className="flex items-center gap-2">
                             <div className="min-w-0 flex-1">
                               <NumericInput
@@ -1589,7 +1668,8 @@ function PurchaseDocumentForm({
                             </p>
                           )}
                         </td>
-                        <td className="px-3 py-3 align-top">
+                        <td className={`${lineCellClassName} order-4 col-span-2`}>
+                          {mobileFieldLabel("Unit price")}
                           <NumericInput
                             value={line.unit_cost}
                             onChange={(value) =>
@@ -1642,7 +1722,25 @@ function PurchaseDocumentForm({
                             </p>
                           )}
                         </td>
-                        <td className="px-3 py-3 align-top">
+                        <td className="order-5 col-span-2 p-0 md:hidden">
+                          <div className="flex items-center justify-between gap-3">
+                            <button
+                              type="button"
+                              aria-expanded={taxExpanded}
+                              onClick={() => toggleTaxLine(index)}
+                              className="text-sm font-medium text-zinc-800 underline decoration-zinc-300 underline-offset-2"
+                            >
+                              Tax and discount
+                            </button>
+                            {taxSummary ? (
+                              <span className="text-right text-xs text-zinc-600">
+                                {taxSummary}
+                              </span>
+                            ) : null}
+                          </div>
+                        </td>
+                        <td className={taxCellClassName(taxExpanded, "order-6 col-span-2")}>
+                          {mobileFieldLabel("Discount")}
                           {isReadOnly && !line.discount.trim() ? (
                             <p className="text-sm text-zinc-500">Not recorded</p>
                           ) : (
@@ -1658,7 +1756,8 @@ function PurchaseDocumentForm({
                             />
                           )}
                         </td>
-                        <td className="px-3 py-3 align-top">
+                        <td className={taxCellClassName(taxExpanded, "order-7 col-span-2")}>
+                          {mobileFieldLabel("Price includes tax")}
                           {taxUnrecorded ? (
                             <p className="text-sm text-zinc-500">Not recorded</p>
                           ) : (
@@ -1681,7 +1780,8 @@ function PurchaseDocumentForm({
                             </label>
                           )}
                         </td>
-                        <td className="px-3 py-3 align-top">
+                        <td className={taxCellClassName(taxExpanded, "order-8 col-span-2")}>
+                          {mobileFieldLabel("Tax category")}
                           {isReadOnly && !line.tax_category ? (
                             <p className="text-sm text-zinc-500">Not recorded</p>
                           ) : (
@@ -1710,7 +1810,8 @@ function PurchaseDocumentForm({
                             </p>
                           )}
                         </td>
-                        <td className="px-3 py-3 align-top">
+                        <td className={taxCellClassName(taxExpanded, "order-9 col-span-2")}>
+                          {mobileFieldLabel("Tax regime")}
                           {isReadOnly && !line.tax_regime ? (
                             <p className="text-sm text-zinc-500">Not recorded</p>
                           ) : (
@@ -1743,19 +1844,40 @@ function PurchaseDocumentForm({
                             </select>
                           )}
                         </td>
-                        <td className="px-3 py-3 align-top text-sm text-zinc-700">
+                        <td
+                          className={taxCellClassName(
+                            taxExpanded,
+                            "order-10 col-span-2 text-sm text-zinc-700",
+                          )}
+                        >
+                          {mobileFieldLabel("Tax code")}
                           {taxLine?.tax_code ?? "—"}
                         </td>
-                        <td className="px-3 py-3 text-right align-top text-sm text-zinc-700">
+                        <td
+                          className={taxCellClassName(
+                            taxExpanded,
+                            "order-11 col-span-2 text-sm text-zinc-700 md:text-right",
+                          )}
+                        >
+                          {mobileFieldLabel("Tax %")}
                           {taxLine?.tax_rate_percent !== null &&
                           taxLine?.tax_rate_percent !== undefined
                             ? `${taxLine.tax_rate_percent}%`
                             : "—"}
                         </td>
-                        <td className="px-3 py-3 text-right align-top text-sm text-zinc-700">
+                        <td
+                          className={taxCellClassName(
+                            taxExpanded,
+                            "order-12 col-span-2 text-sm text-zinc-700 md:text-right",
+                          )}
+                        >
+                          {mobileFieldLabel("Tax amount")}
                           {taxLine ? formatMoney(taxLine.tax_amount) : "—"}
                         </td>
-                        <td className="px-3 py-3 text-right align-top text-sm font-medium text-zinc-900">
+                        <td
+                          className={`${lineCellClassName} order-3 text-sm font-medium text-zinc-900 md:text-right`}
+                        >
+                          {mobileFieldLabel("Line total")}
                           {isReadOnly ? (
                             lineTotal === null ? (
                               "—"
@@ -1780,12 +1902,14 @@ function PurchaseDocumentForm({
                           )}
                         </td>
                         {!isReadOnly && (
-                          <td className="px-3 py-3 text-right align-top">
+                          <td
+                            className={`${lineCellClassName} order-last col-span-2 md:text-right`}
+                          >
                             <button
                               type="button"
                               onClick={() => removeLine(index)}
                               disabled={isSaving || formValues.lines.length === 1}
-                              className="rounded-lg px-3 py-1.5 text-sm font-medium text-red-600 transition-colors hover:bg-red-50 hover:text-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+                              className="w-full rounded-lg px-3 py-1.5 text-sm font-medium text-red-600 transition-colors hover:bg-red-50 hover:text-red-700 disabled:cursor-not-allowed disabled:opacity-50 md:w-auto"
                             >
                               Remove
                             </button>
@@ -1796,6 +1920,17 @@ function PurchaseDocumentForm({
                   })}
                 </tbody>
               </table>
+              {!isReadOnly ? (
+                <button
+                  type="button"
+                  onClick={addLine}
+                  disabled={isSaving}
+                  aria-label="Add another line"
+                  className="w-full border-t border-zinc-200 px-3 py-3 text-sm font-medium text-zinc-700 disabled:cursor-not-allowed disabled:opacity-60 md:hidden"
+                >
+                  + Add line
+                </button>
+              ) : null}
             </div>
           </div>
           {isTaxPreviewLoading && (
@@ -1843,12 +1978,17 @@ function PurchaseDocumentForm({
           onRetryDrive={onRetryDrive}
         />
 
-        <div className="flex flex-col-reverse justify-end gap-3 sm:flex-row">
+        <div className="sticky bottom-0 z-10 -mx-4 border-t border-zinc-200 bg-white px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:static sm:mx-0 sm:border-0 sm:bg-transparent sm:p-0">
+          <p className="mb-2 flex items-center justify-between text-sm font-medium text-zinc-900 sm:hidden">
+            <span>Total</span>
+            <span>{formatMoney(grandTotal)}</span>
+          </p>
+          <div className="flex flex-row gap-3 sm:justify-end">
           <button
             type="button"
             onClick={onClose}
             disabled={isSaving}
-            className="rounded-lg border border-zinc-300 bg-white px-4 py-2.5 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
+            className="flex-1 rounded-lg border border-zinc-300 bg-white px-2 py-2.5 sm:px-4 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60 sm:flex-none"
           >
             {isReadOnly ? "Close" : "Cancel"}
           </button>
@@ -1859,7 +1999,7 @@ function PurchaseDocumentForm({
                 type="button"
                 onClick={() => void handleAction(onSaveDraft)}
                 disabled={isSaving}
-                className="rounded-lg border border-zinc-300 bg-white px-4 py-2.5 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
+                className="flex-1 rounded-lg border border-zinc-300 bg-white px-2 py-2.5 sm:px-4 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60 sm:flex-none"
               >
                 {isSaving ? "Saving..." : "Save Draft"}
               </button>
@@ -1869,12 +2009,13 @@ function PurchaseDocumentForm({
                   void handleAction(onReceiveGoods, { requireSupplier: true })
                 }
                 disabled={isSaving}
-                className="rounded-lg bg-amber-500 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-amber-600 disabled:cursor-not-allowed disabled:opacity-60"
+                className="flex-1 rounded-lg bg-amber-500 px-2 py-2.5 sm:px-4 text-sm font-semibold text-white transition-colors hover:bg-amber-600 disabled:cursor-not-allowed disabled:opacity-60 sm:flex-none"
               >
                 {isSaving ? "Receiving..." : "Receive Goods"}
               </button>
             </>
           )}
+          </div>
         </div>
       </form>
     </div>
@@ -1904,7 +2045,7 @@ export function PurchaseDocumentModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-50 flex items-stretch justify-center p-0 sm:items-center sm:p-4">
       <button
         type="button"
         aria-label="Close modal"
