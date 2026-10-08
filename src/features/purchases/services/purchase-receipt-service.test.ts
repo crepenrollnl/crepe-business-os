@@ -381,4 +381,55 @@ describe("purchaseReceiptService", () => {
     expect(api.select).toHaveBeenCalledWith(expect.stringContaining("drive_error"));
     expect(createSignedUrlsMock).toHaveBeenCalledWith(["receipt/page.jpg"], 3600);
   });
+
+  it("gets one unassigned receipt as a card with a signed thumbnail", async () => {
+    const api = chain({
+      data: {
+        id: RECEIPT_ID,
+        purchase_id: null,
+        supplier_id: "supplier-1",
+        receipt_date: "2026-10-05",
+        receipt_total: "37.13",
+        note: null,
+        created_at: "2026-10-05T10:00:00.000Z",
+        suppliers: { name: "Sligro" },
+        purchase_receipt_files: [
+          { page_number: 2, storage_path: "receipt/page-2.jpg" },
+          { page_number: 1, storage_path: "receipt/page.jpg" },
+        ],
+      },
+      error: null,
+    });
+    supabaseMock.from.mockReturnValue(api);
+
+    const result = await purchaseReceiptService.getUnassigned(RECEIPT_ID);
+
+    expect(result.error).toBeNull();
+    expect(result.data).toMatchObject({
+      id: RECEIPT_ID,
+      purchaseId: null,
+      supplierId: "supplier-1",
+      supplierName: "Sligro",
+      receiptDate: "2026-10-05",
+      receiptTotal: 37.13,
+      pageCount: 2,
+      pagePaths: ["receipt/page.jpg", "receipt/page-2.jpg"],
+      thumbnailUrl: "https://signed.example/photo",
+    });
+    expect(api.eq).toHaveBeenCalledWith("id", RECEIPT_ID);
+    expect(api.is).toHaveBeenCalledWith("purchase_id", null);
+    expect(api.is).toHaveBeenCalledWith("discarded_at", null);
+    expect(createSignedUrlsMock).toHaveBeenCalledWith(["receipt/page.jpg"], 3600);
+  });
+
+  it("returns the unassigned message when the receipt is not found", async () => {
+    const api = chain({ data: null, error: null });
+    supabaseMock.from.mockReturnValue(api);
+
+    const result = await purchaseReceiptService.getUnassigned(RECEIPT_ID);
+
+    expect(result.data).toBeNull();
+    expect(result.error).toBe("This receipt is no longer unassigned.");
+    expect(createSignedUrlsMock).not.toHaveBeenCalled();
+  });
 });

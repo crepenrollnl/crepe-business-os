@@ -1,7 +1,11 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
+import { formatMoney } from "@/lib/money";
 import type { PurchaseWithRelations } from "../types/purchase";
+import type { PurchaseReceiptCard } from "../types/purchase-receipt";
+import { purchaseReceiptService } from "../services/purchase-receipt-service";
+import { formatReceiptDisplayDate } from "../utils/receipt-purchase-link";
 import { PurchaseDocumentModal } from "./purchase-document-modal";
 
 const getLastPurchaseLines = vi.fn();
@@ -1091,3 +1095,113 @@ function taxSelect(optionValue: string): HTMLSelectElement {
   }
   return match as HTMLSelectElement;
 }
+
+describe("PurchaseDocumentModal source receipt banner", () => {
+  afterEach(() => {
+    cleanup();
+    getLastPurchaseLines.mockReset();
+    vi.mocked(purchaseReceiptService.signStoragePaths).mockReset();
+  });
+
+  function sourceReceipt(): PurchaseReceiptCard {
+    return {
+      id: "receipt-1",
+      purchaseId: null,
+      supplierId: null,
+      supplierName: null,
+      receiptDate: "2026-10-05",
+      receiptTotal: null,
+      note: null,
+      pageCount: 1,
+      pagePaths: ["receipt/page.jpg"],
+      thumbnailUrl: null,
+      files: [],
+    };
+  }
+
+  function renderWithReceipt(
+    receipt: PurchaseReceiptCard,
+    purchase: PurchaseWithRelations | null = null,
+  ) {
+    getLastPurchaseLines.mockResolvedValue({ data: [], error: null });
+    render(
+      <PurchaseDocumentModal
+        isOpen
+        purchase={purchase}
+        initialValues={{
+          supplier_id: "",
+          invoice_number: "",
+          purchased_at: "2026-10-05",
+          notes: "",
+          supplier_country: "NL",
+          tax_country: "NL",
+          lines: [],
+        }}
+        suppliers={[{ id: SUPPLIER_ID, name: "Makro" }]}
+        ingredients={[{ id: INGREDIENT_ID, name: "Flour", unit: "kg" }]}
+        isLoading={false}
+        isSaving={false}
+        error={null}
+        onClose={() => undefined}
+        onSaveDraft={async () => true}
+        onReceiveGoods={async () => true}
+        sourceReceipt={receipt}
+      />,
+    );
+  }
+
+  it("describes the receipt and links the signed photo", async () => {
+    vi.mocked(purchaseReceiptService.signStoragePaths).mockResolvedValue({
+      data: ["https://signed.example/photo"],
+      error: null,
+    });
+    renderWithReceipt({
+      ...sourceReceipt(),
+      supplierName: "Sligro",
+      receiptTotal: 37.13,
+    });
+
+    expect(
+      screen.getByText(
+        `From receipt · Sligro · ${formatReceiptDisplayDate("2026-10-05")} · ${formatMoney(37.13)}`,
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByText("The receipt is attached when you save.")).toBeInTheDocument();
+    const link = await screen.findByRole("link", { name: "Open photo" });
+    expect(link).toHaveAttribute("href", "https://signed.example/photo");
+    expect(link).toHaveAttribute("target", "_blank");
+    expect(purchaseReceiptService.signStoragePaths).toHaveBeenCalledWith(["receipt/page.jpg"]);
+  });
+
+  it("falls back to No supplier and no total and hides Open photo when signing fails", async () => {
+    vi.mocked(purchaseReceiptService.signStoragePaths).mockResolvedValue({
+      data: null,
+      error: "Could not open the photo.",
+    });
+    renderWithReceipt(sourceReceipt());
+
+    expect(
+      screen.getByText(
+        `From receipt · No supplier · ${formatReceiptDisplayDate("2026-10-05")} · no total`,
+      ),
+    ).toBeInTheDocument();
+    await waitFor(() => {
+      expect(purchaseReceiptService.signStoragePaths).toHaveBeenCalledTimes(1);
+    });
+    expect(screen.queryByRole("link", { name: "Open photo" })).not.toBeInTheDocument();
+  });
+
+  it("does not show the banner on a saved purchase", () => {
+    vi.mocked(purchaseReceiptService.signStoragePaths).mockResolvedValue({
+      data: [null],
+      error: null,
+    });
+    vi.mocked(purchaseReceiptService.listForPurchase).mockResolvedValue({
+      data: [],
+      error: null,
+    });
+    renderWithReceipt(sourceReceipt(), draftPurchase());
+
+    expect(screen.queryByText(/From receipt/)).not.toBeInTheDocument();
+  });
+});

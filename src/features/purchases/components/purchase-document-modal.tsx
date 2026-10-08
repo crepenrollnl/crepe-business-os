@@ -14,6 +14,9 @@ import {
   parseNumericInput,
 } from "@/components/ui/numeric-input";
 import { formatMoney, formatUnitCost } from "@/lib/money";
+import type { PurchaseReceiptCard } from "../types/purchase-receipt";
+import { formatReceiptDisplayDate } from "../utils/receipt-purchase-link";
+import { purchaseReceiptService } from "../services/purchase-receipt-service";
 import { PurchaseAccountingPreview } from "./purchase-accounting-preview";
 import { PurchaseReceiptsSection } from "./purchase-receipts-section";
 import { purchaseService } from "../services/purchase-service";
@@ -87,6 +90,7 @@ type PurchaseDocumentModalProps = {
   driveConfigured?: boolean;
   driveUnavailable?: boolean;
   onRetryDrive?: (fileIds: string[]) => void;
+  sourceReceipt?: PurchaseReceiptCard | null;
 };
 
 type NumericLineField = "quantity" | "unit_cost";
@@ -448,6 +452,55 @@ function taxCellClassName(expanded: boolean, extra?: string): string {
 
 type PurchaseDocumentFormProps = Omit<PurchaseDocumentModalProps, "isOpen">;
 
+function ReceiptSourceBanner({ receipt }: { receipt: PurchaseReceiptCard }) {
+  const [photoUrl, setPhotoUrl] = useState<string | null>(null);
+  const path = receipt.pagePaths[0];
+
+  useEffect(() => {
+    if (!path) {
+      return;
+    }
+
+    let cancelled = false;
+    void purchaseReceiptService.signStoragePaths([path]).then((result) => {
+      if (cancelled) {
+        return;
+      }
+      const url = result.data?.[0];
+      if (!result.error && typeof url === "string" && url.length > 0) {
+        setPhotoUrl(url);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [path]);
+
+  const supplier = receipt.supplierName?.trim() ? receipt.supplierName : "No supplier";
+  const total =
+    receipt.receiptTotal === null ? "no total" : formatMoney(receipt.receiptTotal);
+
+  return (
+    <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+      <p>
+        From receipt · {supplier} · {formatReceiptDisplayDate(receipt.receiptDate)} · {total}
+      </p>
+      <p className="mt-1">The receipt is attached when you save.</p>
+      {photoUrl ? (
+        <a
+          href={photoUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="mt-2 inline-block font-medium underline"
+        >
+          Open photo
+        </a>
+      ) : null}
+    </div>
+  );
+}
+
 function PurchaseDocumentForm({
   purchase,
   initialValues,
@@ -464,6 +517,7 @@ function PurchaseDocumentForm({
   driveConfigured = false,
   driveUnavailable = false,
   onRetryDrive,
+  sourceReceipt = null,
 }: PurchaseDocumentFormProps) {
   const [formValues, setFormValues] = useState<FormDraft>(() =>
     valuesToDraft(initialValues, {
@@ -1250,6 +1304,7 @@ function PurchaseDocumentForm({
       )}
 
       <form onSubmit={handleSubmit} className="space-y-6">
+        {sourceReceipt && !purchase ? <ReceiptSourceBanner receipt={sourceReceipt} /> : null}
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="space-y-2">
             <label
@@ -2039,6 +2094,7 @@ export function PurchaseDocumentModal({
   driveConfigured = false,
   driveUnavailable = false,
   onRetryDrive,
+  sourceReceipt = null,
 }: PurchaseDocumentModalProps) {
   if (!isOpen) {
     return null;
@@ -2071,6 +2127,7 @@ export function PurchaseDocumentModal({
         driveConfigured={driveConfigured}
         driveUnavailable={driveUnavailable}
         onRetryDrive={onRetryDrive}
+        sourceReceipt={sourceReceipt}
       />
     </div>
   );
