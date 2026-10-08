@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { createPortal } from "react-dom";
+import { useRouter } from "next/navigation";
 import { parseNumericInput, sanitizeNumericInput } from "@/components/ui/numeric-input";
 import { formatReceiptDisplayDate } from "../utils/receipt-purchase-link";
 import type {
@@ -56,10 +57,11 @@ export function ReceiptViewer({
   const [discardOpen, setDiscardOpen] = useState(false);
   const [discardError, setDiscardError] = useState<string | null>(null);
 
-  async function handleSave() {
+  const router = useRouter();
+
+  function buildUpdate(): { input: UpdatePurchaseReceiptInput } | { error: string } {
     if (receiptDate.trim().length === 0) {
-      setLocalError("Receipt date is required.");
-      return;
+      return { error: "Receipt date is required." };
     }
 
     const trimmedTotal = receiptTotal.trim();
@@ -67,23 +69,51 @@ export function ReceiptViewer({
     if (trimmedTotal.length > 0) {
       parsedTotal = parseNumericInput(trimmedTotal);
       if (parsedTotal === null || parsedTotal < 0) {
-        setLocalError("Enter a valid receipt total.");
-        return;
+        return { error: "Enter a valid receipt total." };
       }
     }
 
     const trimmedNote = note.trim();
-    const result = await onSave({
-      supplierId: supplierId.length > 0 ? supplierId : null,
-      receiptDate,
-      receiptTotal: parsedTotal,
-      note: trimmedNote.length > 0 ? trimmedNote : null,
-    });
+    return {
+      input: {
+        supplierId: supplierId.length > 0 ? supplierId : null,
+        receiptDate,
+        receiptTotal: parsedTotal,
+        note: trimmedNote.length > 0 ? trimmedNote : null,
+      },
+    };
+  }
+
+  const pendingUpdate = buildUpdate();
+  // An invalid form counts as dirty so Enter purchase surfaces the error.
+  const isDirty =
+    !("input" in pendingUpdate) ||
+    pendingUpdate.input.supplierId !== receipt.supplierId ||
+    pendingUpdate.input.receiptDate !== receipt.receiptDate ||
+    pendingUpdate.input.receiptTotal !== receipt.receiptTotal ||
+    pendingUpdate.input.note !== receipt.note;
+
+  async function handleSave(): Promise<boolean> {
+    const update = buildUpdate();
+    if (!("input" in update)) {
+      setLocalError(update.error);
+      return false;
+    }
+
+    const result = await onSave(update.input);
     if (result.error) {
       setLocalError(result.error);
-      return;
+      return false;
     }
     setLocalError(null);
+    return true;
+  }
+
+  async function handleEnterPurchase() {
+    if (isDirty && !(await handleSave())) {
+      return;
+    }
+    router.push(`/purchases?fromReceipt=${encodeURIComponent(receipt.id)}`);
   }
 
   async function confirmDiscard() {
@@ -199,6 +229,16 @@ export function ReceiptViewer({
           <p role="alert" className="text-sm text-red-700">
             {localError}
           </p>
+        ) : null}
+        {receipt.purchaseId === null ? (
+          <button
+            type="button"
+            onClick={() => void handleEnterPurchase()}
+            disabled={isSaving}
+            className="min-h-12 w-full rounded-lg bg-amber-500 text-base font-semibold text-white disabled:opacity-60"
+          >
+            Enter purchase
+          </button>
         ) : null}
         <button
           type="button"

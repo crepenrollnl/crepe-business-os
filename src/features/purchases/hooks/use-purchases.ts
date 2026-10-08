@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { purchaseService } from "../services/purchase-service";
+import { purchaseReceiptService } from "../services/purchase-receipt-service";
 import { purchaseTaxService } from "../services/purchase-tax-service";
 import type {
   PurchaseFormValues,
@@ -14,6 +15,7 @@ import type {
   PurchaseWithRelations,
 } from "../types/purchase";
 import type { PurchaseAccountingPreviewData } from "../types/purchase-accounting-preview";
+import type { PurchaseReceiptCard } from "../types/purchase-receipt";
 import type { PurchaseTaxResult } from "../types/purchase-tax";
 import { accountingContextService } from "@/features/accounting/services/accounting-context-service";
 import { buildPurchaseTaxDocument } from "../utils/build-purchase-tax-document";
@@ -73,6 +75,22 @@ async function fetchPurchasesState() {
   };
 }
 
+function removeFromReceiptParam(): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+  const url = new URL(window.location.href);
+  if (!url.searchParams.has("fromReceipt")) {
+    return;
+  }
+  url.searchParams.delete("fromReceipt");
+  window.history.replaceState(
+    window.history.state,
+    "",
+    `${url.pathname}${url.search}${url.hash}`,
+  );
+}
+
 function emptyFormValues(): PurchaseFormValues {
   return {
     supplier_id: "",
@@ -118,6 +136,11 @@ export function usePurchases() {
   const [postingError, setPostingError] = useState<string | null>(null);
   const [accountingPreview, setAccountingPreview] =
     useState<PurchaseAccountingPreviewData | null>(null);
+  const [sourceReceipt, setSourceReceipt] = useState<PurchaseReceiptCard | null>(null);
+  const [createInitialValues, setCreateInitialValues] =
+    useState<PurchaseFormValues | null>(null);
+  const [receiptNotice, setReceiptNotice] = useState<string | null>(null);
+  const [cameFromReceipt, setCameFromReceipt] = useState(false);
   const openedFromQueryRef = useRef(false);
 
   const applyState = useCallback(
@@ -206,6 +229,8 @@ export function usePurchases() {
   );
 
   const openCreateModal = useCallback(() => {
+    setSourceReceipt(null);
+    setCreateInitialValues(null);
     setEditingPurchase(null);
     setAccountingPreview(null);
     setActionError(null);
@@ -213,40 +238,47 @@ export function usePurchases() {
     setIsModalOpen(true);
   }, []);
 
-  const openPurchaseById = useCallback(async (purchaseId: string) => {
-    setActionError(null);
-    setPostingError(null);
-    setEditingPurchase(null);
-    setAccountingPreview(null);
-    setIsLoadingPurchase(true);
-    setIsModalOpen(true);
-
-    const result = await purchaseService.getPurchaseById(purchaseId);
-
-    if (result.error || !result.data) {
-      setActionError(result.error ?? "Failed to load purchase");
+  const openPurchaseById = useCallback(
+    async (purchaseId: string, options?: { keepReceiptSource?: boolean }) => {
+      if (!options?.keepReceiptSource) {
+        setSourceReceipt(null);
+        setCreateInitialValues(null);
+      }
+      setActionError(null);
+      setPostingError(null);
       setEditingPurchase(null);
-      setIsLoadingPurchase(false);
-      return;
-    }
+      setAccountingPreview(null);
+      setIsLoadingPurchase(true);
+      setIsModalOpen(true);
 
-    setEditingPurchase(result.data);
-    // Document totals only — journal proposals are not persisted. Only
-    // show this persisted DB snapshot for purchases that are no longer
-    // editable (received/cancelled — same condition as `isReadOnly` in
-    // purchase-document-modal.tsx). For an editable draft, leave this
-    // null so the modal's live tax preview (which recalculates on every
-    // line edit) always drives the Subtotal/Tax total/Grand total —
-    // otherwise this frozen DB snapshot from load time permanently wins
-    // over the `??` fallback and the footer totals stop updating the
-    // moment the user adds/edits a line in a reopened draft.
-    const isEditable =
-      result.data.status !== "received" && result.data.status !== "cancelled";
-    setAccountingPreview(
-      isEditable ? null : mapPurchaseTotalsToAccountingPreview(result.data),
-    );
-    setIsLoadingPurchase(false);
-  }, []);
+      const result = await purchaseService.getPurchaseById(purchaseId);
+
+      if (result.error || !result.data) {
+        setActionError(result.error ?? "Failed to load purchase");
+        setEditingPurchase(null);
+        setIsLoadingPurchase(false);
+        return;
+      }
+
+      setEditingPurchase(result.data);
+      // Document totals only — journal proposals are not persisted. Only
+      // show this persisted DB snapshot for purchases that are no longer
+      // editable (received/cancelled — same condition as `isReadOnly` in
+      // purchase-document-modal.tsx). For an editable draft, leave this
+      // null so the modal's live tax preview (which recalculates on every
+      // line edit) always drives the Subtotal/Tax total/Grand total —
+      // otherwise this frozen DB snapshot from load time permanently wins
+      // over the `??` fallback and the footer totals stop updating the
+      // moment the user adds/edits a line in a reopened draft.
+      const isEditable =
+        result.data.status !== "received" && result.data.status !== "cancelled";
+      setAccountingPreview(
+        isEditable ? null : mapPurchaseTotalsToAccountingPreview(result.data),
+      );
+      setIsLoadingPurchase(false);
+    },
+    [],
+  );
 
   const openPurchaseModal = useCallback(
     async (item: PurchaseListItem) => {
@@ -255,14 +287,37 @@ export function usePurchases() {
     [openPurchaseById],
   );
 
+  const openFromReceipt = useCallback(async (receiptId: string) => {
+    const result = await purchaseReceiptService.getUnassigned(receiptId);
+    if (result.error || !result.data) {
+      setReceiptNotice(result.error ?? "This receipt is no longer unassigned.");
+      return;
+    }
+
+    setSourceReceipt(result.data);
+    setCreateInitialValues({
+      ...emptyFormValues(),
+      supplier_id: result.data.supplierId ?? "",
+      purchased_at: result.data.receiptDate,
+    });
+    setCameFromReceipt(true);
+    setEditingPurchase(null);
+    setAccountingPreview(null);
+    setActionError(null);
+    setPostingError(null);
+    setIsModalOpen(true);
+  }, []);
+
   useEffect(() => {
     if (openedFromQueryRef.current || loading || typeof window === "undefined") {
       return;
     }
 
-    const openId = new URLSearchParams(window.location.search).get("open");
+    const params = new URLSearchParams(window.location.search);
+    const openId = params.get("open");
+    const fromReceipt = params.get("fromReceipt");
 
-    if (!openId) {
+    if (!openId && !fromReceipt) {
       return;
     }
 
@@ -270,13 +325,19 @@ export function usePurchases() {
 
     // Defer so modal open state is not set synchronously inside the effect body.
     const timerId = window.setTimeout(() => {
-      void openPurchaseById(openId);
+      if (openId) {
+        void openPurchaseById(openId);
+        return;
+      }
+      if (fromReceipt) {
+        void openFromReceipt(fromReceipt);
+      }
     }, 0);
 
     return () => {
       window.clearTimeout(timerId);
     };
-  }, [loading, openPurchaseById]);
+  }, [loading, openFromReceipt, openPurchaseById]);
 
   const closeModal = useCallback(() => {
     if (isSaving) {
@@ -289,6 +350,9 @@ export function usePurchases() {
     setActionError(null);
     setPostingError(null);
     setIsLoadingPurchase(false);
+    setSourceReceipt(null);
+    setCreateInitialValues(null);
+    setCameFromReceipt(false);
   }, [isSaving]);
 
   const resolvePurchaseTax = useCallback(
@@ -315,6 +379,8 @@ export function usePurchases() {
 
   const saveDraft = useCallback(
     async (values: PurchaseFormValues) => {
+      const editingId = editingPurchase?.id;
+      const receiptToLink = sourceReceipt;
       setIsSaving(true);
       setActionError(null);
 
@@ -337,7 +403,7 @@ export function usePurchases() {
 
       const result = await purchaseService.saveDraft({
         ...values,
-        id: editingPurchase?.id,
+        id: editingId,
         lines: netLines.data,
         tax_total: tax.tax_total,
       });
@@ -349,15 +415,40 @@ export function usePurchases() {
       }
 
       await loadPurchases({ silent: true });
+      if (receiptToLink && editingId === undefined && result.data) {
+        const receiptId = receiptToLink.id;
+        const savedId = result.data.id;
+        setSourceReceipt(null);
+        const linkResult = await purchaseReceiptService.linkToPurchase(receiptId, savedId);
+        removeFromReceiptParam();
+        await openPurchaseById(savedId, { keepReceiptSource: true });
+        if (linkResult.error) {
+          setActionError(
+            `Draft saved. The receipt could not be attached: ${linkResult.error} Attach it in Receipts below.`,
+          );
+        }
+        setIsSaving(false);
+        return true;
+      }
+
       setIsSaving(false);
       closeModal();
       return true;
     },
-    [closeModal, editingPurchase?.id, loadPurchases, resolvePurchaseTax],
+    [
+      closeModal,
+      editingPurchase?.id,
+      loadPurchases,
+      openPurchaseById,
+      resolvePurchaseTax,
+      sourceReceipt,
+    ],
   );
 
   const receiveGoods = useCallback(
     async (values: PurchaseFormValues) => {
+      const editingId = editingPurchase?.id;
+      const receiptToLink = sourceReceipt;
       setIsSaving(true);
       setActionError(null);
       setPostingError(null);
@@ -381,9 +472,24 @@ export function usePurchases() {
 
       const receiveInput = {
         ...values,
-        id: editingPurchase?.id,
+        id: editingId,
         lines: netLines.data,
         tax_total: tax.tax_total,
+      };
+
+      const attachSourceReceipt = async (purchaseId: string) => {
+        if (!receiptToLink || editingId !== undefined) {
+          return;
+        }
+        const receiptId = receiptToLink.id;
+        setSourceReceipt(null);
+        const linkResult = await purchaseReceiptService.linkToPurchase(receiptId, purchaseId);
+        removeFromReceiptParam();
+        if (linkResult.error) {
+          setActionError(
+            `Purchase received. The receipt could not be attached: ${linkResult.error} Attach it in Receipts below.`,
+          );
+        }
       };
 
       const contextResult =
@@ -401,6 +507,7 @@ export function usePurchases() {
           return false;
         }
 
+        await attachSourceReceipt(fallback.data.id);
         setEditingPurchase(fallback.data);
         setAccountingPreview(mapPurchaseTotalsToAccountingPreview(fallback.data));
         setPostingError(
@@ -423,6 +530,7 @@ export function usePurchases() {
         return false;
       }
 
+      await attachSourceReceipt(result.data.purchase.id);
       // Keep modal open so the owner can verify totals + the posted journal.
       setEditingPurchase(result.data.purchase);
       setAccountingPreview(
@@ -435,8 +543,12 @@ export function usePurchases() {
       setIsSaving(false);
       return true;
     },
-    [editingPurchase?.id, loadPurchases, resolvePurchaseTax],
+    [editingPurchase?.id, loadPurchases, resolvePurchaseTax, sourceReceipt],
   );
+
+  const dismissReceiptNotice = useCallback(() => {
+    setReceiptNotice(null);
+  }, []);
 
   return {
     items: filteredItems,
@@ -459,12 +571,16 @@ export function usePurchases() {
     editingPurchase,
     initialFormValues: editingPurchase
       ? purchaseToFormValues(editingPurchase)
-      : emptyFormValues(),
+      : (createInitialValues ?? emptyFormValues()),
     isLoadingPurchase,
     isSaving,
     actionError,
     postingError,
     accountingPreview,
+    sourceReceipt,
+    receiptNotice,
+    dismissReceiptNotice,
+    cameFromReceipt,
     openCreateModal,
     openPurchaseModal,
     closeModal,

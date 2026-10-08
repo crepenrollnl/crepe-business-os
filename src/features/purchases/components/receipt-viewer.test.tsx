@@ -3,6 +3,13 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
 import type { PurchaseReceiptCard } from "../types/purchase-receipt";
+
+const { pushMock } = vi.hoisted(() => ({ pushMock: vi.fn() }));
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: pushMock }),
+}));
+
 import { ReceiptViewer } from "./receipt-viewer";
 
 function receipt(purchaseId: string | null): PurchaseReceiptCard {
@@ -183,5 +190,81 @@ describe("ReceiptViewer photos", () => {
 
     expect(screen.queryByText("Drive copy failed")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+  });
+});
+
+describe("ReceiptViewer Enter purchase", () => {
+  afterEach(() => {
+    cleanup();
+    pushMock.mockReset();
+  });
+
+  function renderViewer(
+    card: PurchaseReceiptCard,
+    onSave: ReturnType<typeof vi.fn> = vi.fn(),
+  ) {
+    render(
+      <ReceiptViewer
+        receipt={card}
+        pageUrls={[]}
+        suppliers={[{ id: "supplier-1", name: "Sligro" }]}
+        isSaving={false}
+        photosLoading={false}
+        error={null}
+        onClose={vi.fn()}
+        onSave={onSave}
+        onDiscard={vi.fn()}
+        onRetryPhotos={vi.fn()}
+      />,
+    );
+  }
+
+  it("opens the purchase form without saving when nothing changed", async () => {
+    const onSave = vi.fn();
+    renderViewer({ ...receipt(null), id: "receipt 1/x" }, onSave);
+
+    await userEvent.click(screen.getByRole("button", { name: "Enter purchase" }));
+
+    expect(onSave).not.toHaveBeenCalled();
+    expect(pushMock).toHaveBeenCalledTimes(1);
+    expect(pushMock).toHaveBeenCalledWith("/purchases?fromReceipt=receipt%201%2Fx");
+  });
+
+  it("saves edited values before opening the purchase form", async () => {
+    const onSave = vi.fn().mockResolvedValue({ error: null });
+    renderViewer(receipt(null), onSave);
+
+    await userEvent.selectOptions(screen.getByRole("combobox"), "supplier-1");
+    await userEvent.click(screen.getByRole("button", { name: "Enter purchase" }));
+
+    expect(onSave).toHaveBeenCalledTimes(1);
+    expect(onSave).toHaveBeenCalledWith({
+      supplierId: "supplier-1",
+      receiptDate: "2026-10-05",
+      receiptTotal: null,
+      note: null,
+    });
+    expect(pushMock).toHaveBeenCalledWith("/purchases?fromReceipt=receipt-1");
+    expect(onSave.mock.invocationCallOrder[0]).toBeLessThan(
+      pushMock.mock.invocationCallOrder[0] ?? 0,
+    );
+  });
+
+  it("stays on the receipt when saving the edits fails", async () => {
+    const onSave = vi.fn().mockResolvedValue({ error: "Could not update the receipt." });
+    renderViewer(receipt(null), onSave);
+
+    await userEvent.selectOptions(screen.getByRole("combobox"), "supplier-1");
+    await userEvent.click(screen.getByRole("button", { name: "Enter purchase" }));
+
+    expect(onSave).toHaveBeenCalledTimes(1);
+    expect(pushMock).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert")).toHaveTextContent("Could not update the receipt.");
+  });
+
+  it("does not offer Enter purchase for a linked receipt", () => {
+    renderViewer(receipt("purchase-1"));
+
+    expect(screen.queryByRole("button", { name: "Enter purchase" })).not.toBeInTheDocument();
   });
 });

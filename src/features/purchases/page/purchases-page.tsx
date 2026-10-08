@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { PurchaseDocumentModal } from "../components/purchase-document-modal";
 import { PurchasesTable } from "../components/purchases-table";
@@ -35,6 +36,10 @@ export function PurchasesPage() {
     actionError,
     postingError,
     accountingPreview,
+    sourceReceipt,
+    receiptNotice,
+    dismissReceiptNotice,
+    cameFromReceipt,
     openCreateModal,
     openPurchaseModal,
     closeModal,
@@ -42,6 +47,7 @@ export function PurchasesPage() {
     receiveGoods,
     retry,
   } = usePurchases();
+  const router = useRouter();
   const access = useCanManagePurchaseReceipts();
   const showReceipts = access.status === "allowed";
   const drive = useDriveReceiptSync(showReceipts);
@@ -59,6 +65,22 @@ export function PurchasesPage() {
             Record supplier purchases and receive goods into inventory stock.
           </p>
         </div>
+
+        {receiptNotice ? (
+          <div
+            role="status"
+            className="flex items-start justify-between gap-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950"
+          >
+            <p>{receiptNotice}</p>
+            <button
+              type="button"
+              onClick={dismissReceiptNotice}
+              className="shrink-0 font-medium underline"
+            >
+              Dismiss
+            </button>
+          </div>
+        ) : null}
 
         <PurchasesToolbar
           search={search}
@@ -98,9 +120,14 @@ export function PurchasesPage() {
           error={actionError}
           accountingPreview={accountingPreview}
           postingError={postingError}
+          sourceReceipt={sourceReceipt}
           onClose={() => {
+            const returnToReceipts = cameFromReceipt && !isSaving;
             closeModal();
             void refreshUnassignedCount();
+            if (returnToReceipts) {
+              router.push("/purchases/receipts");
+            }
           }}
           onSaveDraft={saveDraft}
           onReceiveGoods={receiveGoods}

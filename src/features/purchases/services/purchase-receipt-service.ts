@@ -265,6 +265,40 @@ export const purchaseReceiptService = {
     }
   },
 
+  async getUnassigned(id: string): Promise<ServiceResult<PurchaseReceiptCard>> {
+    try {
+      const { data, error } = await supabase
+        .from("purchase_receipts")
+        .select(RECEIPT_SELECT)
+        .eq("id", id)
+        .is("purchase_id", null)
+        .is("discarded_at", null)
+        .order("page_number", {
+          foreignTable: "purchase_receipt_files",
+          ascending: true,
+        })
+        .maybeSingle();
+
+      if (error) {
+        return fail(toUserError(error, "Failed to load receipts"));
+      }
+
+      if (!data) {
+        return fail(RECEIPT_NO_LONGER_UNASSIGNED);
+      }
+
+      const cards = await loadCards([data]);
+      const card = cards.data?.[0];
+      if (cards.error || !card) {
+        return fail(cards.error ?? RECEIPT_NO_LONGER_UNASSIGNED);
+      }
+
+      return ok(card);
+    } catch (error) {
+      return fail(toUserError(error, "Failed to load receipts"));
+    }
+  },
+
   async listRecent(): Promise<ServiceResult<PurchaseReceiptCard[]>> {
     try {
       const fromDate = addCalendarDays(amsterdamToday(), -RECENT_RECEIPT_DAYS);
