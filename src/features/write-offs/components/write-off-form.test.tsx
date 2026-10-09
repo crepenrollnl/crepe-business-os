@@ -180,3 +180,120 @@ describe("WriteOffForm", () => {
     ).not.toBeInTheDocument();
   });
 });
+
+describe("WriteOffForm dish", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
+  const DISHES = [
+    { id: "dish-1", name: "Crepe Nutella" },
+    { id: "dish-2", name: "Crepe Salmon" },
+  ];
+
+  function renderDishForm() {
+    const onSubmit = vi.fn().mockResolvedValue(true);
+    const onSubmitDish = vi.fn().mockResolvedValue(true);
+    render(
+      <WriteOffForm
+        ingredients={INGREDIENTS}
+        products={PRODUCTS}
+        dishes={DISHES}
+        isSaving={false}
+        error={null}
+        lastSuccess={null}
+        postingWarning={null}
+        accountingNote={null}
+        onSubmit={onSubmit}
+        onSubmitDish={onSubmitDish}
+        onDismissSuccess={vi.fn()}
+      />,
+    );
+    return { onSubmit, onSubmitDish };
+  }
+
+  const HINT =
+    "Writes off every ingredient and component in this dish's recipe, the same amounts as a sale.";
+
+  it("shows the dish picker and hint after Dish is pressed", () => {
+    renderDishForm();
+
+    expect(screen.queryByText(HINT)).not.toBeInTheDocument();
+    const dishButton = screen.getByRole("button", { name: "Dish" });
+    expect(dishButton).toHaveAttribute("aria-pressed", "false");
+
+    fireEvent.click(dishButton);
+
+    expect(dishButton).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Ingredient" })).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
+    const picker = screen.getByLabelText("Dish");
+    expect(
+      Array.from((picker as HTMLSelectElement).options).map((option) => option.text),
+    ).toEqual(["Select dish", "Crepe Nutella", "Crepe Salmon"]);
+    expect(screen.getByText(HINT)).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Filter dishes")).toBeInTheDocument();
+  });
+
+  it("asks for a dish before it can submit", () => {
+    renderDishForm();
+
+    fireEvent.click(screen.getByRole("button", { name: "Dish" }));
+
+    expect(screen.getByText("Select a dish")).toBeInTheDocument();
+  });
+
+  it("submits a dish through onSubmitDish and not onSubmit, with no unit shown", async () => {
+    const { onSubmit, onSubmitDish } = renderDishForm();
+
+    fireEvent.click(screen.getByRole("button", { name: "Dish" }));
+    fireEvent.change(screen.getByLabelText("Dish"), { target: { value: "dish-1" } });
+    fireEvent.change(screen.getByLabelText("Quantity"), { target: { value: "2" } });
+    fireEvent.change(screen.getByLabelText("Reason"), { target: { value: "staff_use" } });
+    fireEvent.change(screen.getByLabelText(/Note/), { target: { value: " burned " } });
+
+    expect(screen.queryByText("pcs")).not.toBeInTheDocument();
+    expect(screen.queryByText("kg")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /record write-off/i }));
+
+    await waitFor(() => {
+      expect(onSubmitDish).toHaveBeenCalledWith({
+        productId: "dish-1",
+        quantity: 2,
+        reason: "staff_use",
+        note: "burned",
+      });
+    });
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it("still submits an ingredient through onSubmit after switching back", async () => {
+    const { onSubmit, onSubmitDish } = renderDishForm();
+
+    fireEvent.click(screen.getByRole("button", { name: "Dish" }));
+    fireEvent.click(screen.getByRole("button", { name: "Ingredient" }));
+    fillRequiredFields();
+    fireEvent.click(screen.getByRole("button", { name: /record write-off/i }));
+
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith({
+        itemType: "ingredient",
+        ingredientId: "ing-1",
+        productId: null,
+        quantity: 2,
+        reason: "spoilage",
+        note: null,
+      });
+    });
+    expect(onSubmitDish).not.toHaveBeenCalled();
+  });
+
+  it("offers no Dish toggle without onSubmitDish", () => {
+    renderForm();
+
+    expect(screen.queryByRole("button", { name: "Dish" })).not.toBeInTheDocument();
+  });
+});

@@ -5,7 +5,10 @@ import { NumericInput, parseNumericInput } from "@/components/ui/numeric-input";
 import {
   WRITE_OFF_REASON_LABELS,
   WRITE_OFF_REASONS,
+  type RecordDishWriteOffInput,
   type RecordWriteOffInput,
+  type WriteOffDishOption,
+  type WriteOffFormItemType,
   type WriteOffIngredientOption,
   type WriteOffItemType,
   type WriteOffProductOption,
@@ -13,7 +16,7 @@ import {
 } from "../types/write-off";
 
 interface WriteOffFormDraft {
-  itemType: WriteOffItemType;
+  itemType: WriteOffFormItemType;
   itemId: string;
   quantity: string;
   reason: WriteOffReason;
@@ -37,14 +40,38 @@ function emptyDraft(prefill?: {
 
 type FormErrors = Partial<Record<"itemId" | "quantity", string>>;
 
+interface WriteOffItemOption {
+  id: string;
+  name: string;
+  unit?: string | null;
+}
+
+const ITEM_LABELS: Record<WriteOffFormItemType, string> = {
+  ingredient: "Ingredient",
+  finished_good: "Finished good",
+  dish: "Dish",
+};
+
+const ITEM_PLURAL_LABELS: Record<WriteOffFormItemType, string> = {
+  ingredient: "ingredients",
+  finished_good: "finished goods",
+  dish: "dishes",
+};
+
+const ITEM_REQUIRED_MESSAGES: Record<WriteOffFormItemType, string> = {
+  ingredient: "Select an ingredient",
+  finished_good: "Select a finished good",
+  dish: "Select a dish",
+};
+
+const DISH_HINT =
+  "Writes off every ingredient and component in this dish's recipe, the same amounts as a sale.";
+
 function validateDraft(draft: WriteOffFormDraft): FormErrors {
   const errors: FormErrors = {};
 
   if (!draft.itemId) {
-    errors.itemId =
-      draft.itemType === "ingredient"
-        ? "Select an ingredient"
-        : "Select a finished good";
+    errors.itemId = ITEM_REQUIRED_MESSAGES[draft.itemType];
   }
 
   const quantity = parseNumericInput(draft.quantity);
@@ -55,11 +82,24 @@ function validateDraft(draft: WriteOffFormDraft): FormErrors {
   return errors;
 }
 
-function draftToInput(draft: WriteOffFormDraft): RecordWriteOffInput {
+/** Single-item write-off. The item type is passed already narrowed: never "dish". */
+function draftToInput(
+  draft: WriteOffFormDraft,
+  itemType: WriteOffItemType,
+): RecordWriteOffInput {
   return {
-    itemType: draft.itemType,
-    ingredientId: draft.itemType === "ingredient" ? draft.itemId : null,
-    productId: draft.itemType === "finished_good" ? draft.itemId : null,
+    itemType,
+    ingredientId: itemType === "ingredient" ? draft.itemId : null,
+    productId: itemType === "finished_good" ? draft.itemId : null,
+    quantity: parseNumericInput(draft.quantity) ?? 0,
+    reason: draft.reason,
+    note: draft.note.trim() || null,
+  };
+}
+
+function draftToDishInput(draft: WriteOffFormDraft): RecordDishWriteOffInput {
+  return {
+    productId: draft.itemId,
     quantity: parseNumericInput(draft.quantity) ?? 0,
     reason: draft.reason,
     note: draft.note.trim() || null,
@@ -69,6 +109,8 @@ function draftToInput(draft: WriteOffFormDraft): RecordWriteOffInput {
 interface WriteOffFormProps {
   ingredients: WriteOffIngredientOption[];
   products: WriteOffProductOption[];
+  /** Dishes (assembly recipes). The Dish toggle appears only with onSubmitDish. */
+  dishes?: WriteOffDishOption[];
   isSaving: boolean;
   error: string | null;
   lastSuccess: string | null;
@@ -77,6 +119,7 @@ interface WriteOffFormProps {
   prefillItemType?: WriteOffItemType | null;
   prefillItemId?: string | null;
   onSubmit: (input: RecordWriteOffInput) => Promise<boolean>;
+  onSubmitDish?: (input: RecordDishWriteOffInput) => Promise<boolean>;
   onDismissSuccess: () => void;
 }
 
@@ -86,6 +129,7 @@ const inputClassName =
 export function WriteOffForm({
   ingredients,
   products,
+  dishes = [],
   isSaving,
   error,
   lastSuccess,
@@ -94,6 +138,7 @@ export function WriteOffForm({
   prefillItemType,
   prefillItemId,
   onSubmit,
+  onSubmitDish,
   onDismissSuccess,
 }: WriteOffFormProps) {
   const [draft, setDraft] = useState<WriteOffFormDraft>(() =>
@@ -116,7 +161,12 @@ export function WriteOffForm({
     return fieldErrors[field];
   };
 
-  const options = draft.itemType === "ingredient" ? ingredients : products;
+  const options: WriteOffItemOption[] =
+    draft.itemType === "ingredient"
+      ? ingredients
+      : draft.itemType === "finished_good"
+        ? products
+        : dishes;
   const filteredOptions = useMemo(() => {
     const query = draft.search.trim().toLowerCase();
     if (!query) {
@@ -137,7 +187,7 @@ export function WriteOffForm({
     }
   };
 
-  const setItemType = (itemType: WriteOffItemType) => {
+  const setItemType = (itemType: WriteOffFormItemType) => {
     setDraft((current) => ({
       ...current,
       itemType,
@@ -155,7 +205,15 @@ export function WriteOffForm({
       return;
     }
 
-    const succeeded = await onSubmit(draftToInput(draft));
+    let succeeded = false;
+    if (draft.itemType === "dish") {
+      if (!onSubmitDish) {
+        return;
+      }
+      succeeded = await onSubmitDish(draftToDishInput(draft));
+    } else {
+      succeeded = await onSubmit(draftToInput(draft, draft.itemType));
+    }
 
     if (succeeded) {
       setDraft(emptyDraft());
@@ -166,8 +224,7 @@ export function WriteOffForm({
 
   const itemError = showFieldError("itemId");
   const quantityError = showFieldError("quantity");
-  const itemLabel =
-    draft.itemType === "ingredient" ? "Ingredient" : "Finished good";
+  const itemLabel = ITEM_LABELS[draft.itemType];
   const selectedIngredient =
     draft.itemType === "ingredient"
       ? ingredients.find((ingredient) => ingredient.id === draft.itemId)
@@ -267,6 +324,20 @@ export function WriteOffForm({
             >
               Finished good
             </button>
+            {onSubmitDish ? (
+              <button
+                type="button"
+                aria-pressed={draft.itemType === "dish"}
+                onClick={() => setItemType("dish")}
+                className={`rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+                  draft.itemType === "dish"
+                    ? "bg-amber-500 text-white"
+                    : "bg-zinc-100 text-zinc-700 hover:bg-zinc-200"
+                }`}
+              >
+                Dish
+              </button>
+            ) : null}
           </div>
         </fieldset>
 
@@ -280,7 +351,7 @@ export function WriteOffForm({
             value={draft.search}
             onChange={(event) => updateField("search", event.target.value)}
             className={inputClassName}
-            placeholder={`Filter ${itemLabel.toLowerCase()}s`}
+            placeholder={`Filter ${ITEM_PLURAL_LABELS[draft.itemType]}`}
           />
         </div>
 
@@ -304,6 +375,9 @@ export function WriteOffForm({
             ))}
           </select>
           {itemError && <p className="text-sm text-red-600">{itemError}</p>}
+          {draft.itemType === "dish" && (
+            <p className="text-xs text-zinc-500">{DISH_HINT}</p>
+          )}
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2">

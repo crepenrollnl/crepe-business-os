@@ -2,7 +2,10 @@
  * Write-off operational service.
  *
  * recordWriteOff wraps record_write_off (sql/115) — physical stock only.
- * Journals are posted afterwards by write-off-accounting-service.
+ * recordDishWriteOff wraps record_dish_write_off (sql/136): one dish is
+ * written off as its recipe_components, one record_write_off row per part,
+ * in one transaction. Neither RPC posts journals — they are posted
+ * afterwards by write-off-accounting-service, one per write-off row.
  */
 
 import { finishedGoodsListService } from "@/features/finished-goods/services/finished-goods-list-service";
@@ -10,13 +13,17 @@ import { toUserError } from "@/lib/service-errors";
 import { supabase } from "@/lib/supabase";
 import { fail, ok, type ServiceResult } from "@/types/service";
 import type {
+  RecordDishWriteOffInput,
+  RecordDishWriteOffRpcResult,
   RecordWriteOffInput,
   RecordWriteOffRpcResult,
+  WriteOffDishOption,
   WriteOffIngredientOption,
   WriteOffProductOption,
   WriteOffRecord,
 } from "../types/write-off";
 import {
+  DISH_WRITE_OFF_MAX_QUANTITY,
   WRITE_OFF_ITEM_TYPES,
   WRITE_OFF_REASONS,
 } from "../types/write-off";
@@ -90,6 +97,45 @@ export const writeOffService = {
       return ok(data as RecordWriteOffRpcResult);
     } catch (error) {
       return fail(toUserError(error, "Failed to record write-off."));
+    }
+  },
+
+  async recordDishWriteOff(
+    input: RecordDishWriteOffInput,
+  ): Promise<ServiceResult<RecordDishWriteOffRpcResult>> {
+    try {
+      if (!isWriteOffReason(input.reason)) {
+        return fail("Write-off reason is invalid.");
+      }
+
+      if (!(input.quantity > 0) || !Number.isFinite(input.quantity)) {
+        return fail("Write-off quantity must be greater than zero.");
+      }
+
+      if (input.quantity > DISH_WRITE_OFF_MAX_QUANTITY) {
+        return fail(
+          `Dish quantity must be at most ${DISH_WRITE_OFF_MAX_QUANTITY}.`,
+        );
+      }
+
+      if (!input.productId.trim()) {
+        return fail("Select a dish to write off.");
+      }
+
+      const { data, error } = await supabase.rpc("record_dish_write_off", {
+        p_product_id: input.productId,
+        p_quantity: input.quantity,
+        p_reason: input.reason,
+        p_note: input.note?.trim() ? input.note.trim() : null,
+      });
+
+      if (error || !data) {
+        return fail(toUserError(error, "Failed to record dish write-off."));
+      }
+
+      return ok(data as RecordDishWriteOffRpcResult);
+    } catch (error) {
+      return fail(toUserError(error, "Failed to record dish write-off."));
     }
   },
 
@@ -184,6 +230,26 @@ export const writeOffService = {
       return ok((data ?? []) as WriteOffIngredientOption[]);
     } catch (error) {
       return fail(toUserError(error, "Failed to load ingredients."));
+    }
+  },
+
+  /** Active dishes (assembly recipes) — the products a sale consumes as parts. */
+  async listDishOptions(): Promise<ServiceResult<WriteOffDishOption[]>> {
+    try {
+      const { data, error } = await supabase
+        .from("recipes")
+        .select("id, name")
+        .eq("recipe_role", "assembly")
+        .eq("is_active", true)
+        .order("name");
+
+      if (error) {
+        return fail(toUserError(error, "Failed to load dishes."));
+      }
+
+      return ok((data ?? []) as WriteOffDishOption[]);
+    } catch (error) {
+      return fail(toUserError(error, "Failed to load dishes."));
     }
   },
 

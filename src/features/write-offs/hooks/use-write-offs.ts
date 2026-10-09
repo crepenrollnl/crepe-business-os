@@ -5,7 +5,9 @@ import { useAsyncEffect } from "@/hooks/use-async-effect";
 import { writeOffAccountingService } from "../services/write-off-accounting-service";
 import { writeOffService } from "../services/write-off-service";
 import type {
+  RecordDishWriteOffInput,
   RecordWriteOffInput,
+  WriteOffDishOption,
   WriteOffIngredientOption,
   WriteOffProductOption,
   WriteOffRecord,
@@ -16,6 +18,7 @@ interface UseWriteOffsState {
   writeOffs: WriteOffRecord[];
   ingredients: WriteOffIngredientOption[];
   products: WriteOffProductOption[];
+  dishes: WriteOffDishOption[];
   loading: boolean;
   error: string | null;
   isSaving: boolean;
@@ -28,11 +31,12 @@ interface UseWriteOffsState {
 }
 
 async function fetchWriteOffsState() {
-  const [writeOffsResult, ingredientsResult, productsResult] =
+  const [writeOffsResult, ingredientsResult, productsResult, dishesResult] =
     await Promise.all([
       writeOffService.listWriteOffs(),
       writeOffService.listIngredientOptions(),
       writeOffService.listProductOptions(),
+      writeOffService.listDishOptions(),
     ]);
 
   return {
@@ -41,10 +45,12 @@ async function fetchWriteOffsState() {
       ? []
       : (ingredientsResult.data ?? []),
     products: productsResult.error ? [] : (productsResult.data ?? []),
+    dishes: dishesResult.error ? [] : (dishesResult.data ?? []),
     error:
       writeOffsResult.error ??
       ingredientsResult.error ??
       productsResult.error ??
+      dishesResult.error ??
       null,
   };
 }
@@ -55,6 +61,7 @@ export function useWriteOffs() {
     writeOffs: [],
     ingredients: [],
     products: [],
+    dishes: [],
     loading: true,
     error: null,
     isSaving: false,
@@ -74,6 +81,7 @@ export function useWriteOffs() {
       writeOffs: next.writeOffs,
       ingredients: next.ingredients,
       products: next.products,
+      dishes: next.dishes,
       error: next.error,
       loading: false,
     }));
@@ -121,6 +129,51 @@ export function useWriteOffs() {
     return true;
   }, []);
 
+  const submitDishWriteOff = useCallback(
+    async (input: RecordDishWriteOffInput) => {
+      setState((prev) => ({
+        ...prev,
+        isSaving: true,
+        formError: null,
+        lastSuccess: null,
+        postingWarning: null,
+        accountingNote: null,
+      }));
+
+      const result =
+        await writeOffAccountingService.recordDishWriteOffAndPost(input);
+
+      if (result.error !== null || !result.data) {
+        setState((prev) => ({
+          ...prev,
+          isSaving: false,
+          formError: result.error ?? "Failed to record dish write-off.",
+        }));
+        return false;
+      }
+
+      const writeOffsResult = await writeOffService.listWriteOffs();
+      const { dishWriteOff, postingErrors, accountingNote } = result.data;
+
+      setState((prev) => ({
+        ...prev,
+        isSaving: false,
+        formError: null,
+        lastSuccess: accountingNote
+          ? null
+          : `Dish write-off recorded: ${dishWriteOff.write_offs.length} items written off.`,
+        postingWarning: postingErrors.length > 0 ? postingErrors.join("; ") : null,
+        accountingNote,
+        writeOffs: writeOffsResult.error
+          ? prev.writeOffs
+          : (writeOffsResult.data ?? []),
+      }));
+
+      return true;
+    },
+    [],
+  );
+
   const clearLastSuccess = useCallback(() => {
     setState((prev) => ({
       ...prev,
@@ -142,6 +195,7 @@ export function useWriteOffs() {
     writeOffs: state.writeOffs,
     ingredients: state.ingredients,
     products: state.products,
+    dishes: state.dishes,
     loading: state.loading,
     error: state.error,
     isSaving: state.isSaving,
@@ -154,6 +208,7 @@ export function useWriteOffs() {
     setPeriodFrom,
     setPeriodTo,
     submitWriteOff,
+    submitDishWriteOff,
     clearLastSuccess,
     retry: load,
   };
