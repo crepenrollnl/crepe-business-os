@@ -432,4 +432,84 @@ describe("purchaseReceiptService", () => {
     expect(result.error).toBe("This receipt is no longer unassigned.");
     expect(createSignedUrlsMock).not.toHaveBeenCalled();
   });
+
+  it("matches receipt lines through match_receipt_lines", async () => {
+    supabaseMock.rpc.mockResolvedValue({
+      data: [
+        {
+          line_index: 1,
+          text_key: "melk",
+          action: "ingredient",
+          ingredient_id: "ingredient-1",
+          units_per_item: "0.5000",
+        },
+        { line_index: 2, text_key: "tas", action: "skip", ingredient_id: null, units_per_item: null },
+        { line_index: 3, text_key: "x", action: null, ingredient_id: null, units_per_item: null },
+      ],
+      error: null,
+    });
+
+    const result = await purchaseReceiptService.matchReceiptLines("supplier-1", [
+      "MELK",
+      "TAS",
+      "X",
+    ]);
+
+    expect(supabaseMock.rpc).toHaveBeenCalledWith("match_receipt_lines", {
+      p_supplier_id: "supplier-1",
+      p_texts: ["MELK", "TAS", "X"],
+    });
+    expect(result.data).toEqual([
+      { lineIndex: 1, action: "ingredient", ingredientId: "ingredient-1", unitsPerItem: 0.5 },
+      { lineIndex: 2, action: "skip", ingredientId: null, unitsPerItem: null },
+      { lineIndex: 3, action: null, ingredientId: null, unitsPerItem: null },
+    ]);
+  });
+
+  it("returns an error when matching fails", async () => {
+    supabaseMock.rpc.mockResolvedValue({ data: null, error: { message: "nope" } });
+
+    const result = await purchaseReceiptService.matchReceiptLines("supplier-1", ["MELK"]);
+
+    expect(result.data).toBeNull();
+    expect(result.error).toBeTruthy();
+  });
+
+  it("remembers a receipt line through remember_receipt_line_mapping", async () => {
+    supabaseMock.rpc.mockResolvedValue({ data: "mapping-1", error: null });
+
+    const result = await purchaseReceiptService.rememberReceiptLineMapping({
+      supplierId: "supplier-1",
+      receiptText: "MELK",
+      action: "ingredient",
+      ingredientId: "ingredient-1",
+      unitsPerItem: 0.5,
+    });
+
+    expect(result).toEqual({ data: "mapping-1", error: null });
+    expect(supabaseMock.rpc).toHaveBeenCalledWith("remember_receipt_line_mapping", {
+      p_supplier_id: "supplier-1",
+      p_receipt_text: "MELK",
+      p_action: "ingredient",
+      p_ingredient_id: "ingredient-1",
+      p_units_per_item: 0.5,
+    });
+  });
+
+  it("returns the remember error", async () => {
+    supabaseMock.rpc.mockResolvedValue({
+      data: null,
+      error: { message: "Choose an ingredient." },
+    });
+
+    const result = await purchaseReceiptService.rememberReceiptLineMapping({
+      supplierId: "supplier-1",
+      receiptText: "MELK",
+      action: "skip",
+      ingredientId: null,
+      unitsPerItem: null,
+    });
+
+    expect(result.error).toBe("Choose an ingredient.");
+  });
 });
