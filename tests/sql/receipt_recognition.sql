@@ -17,6 +17,12 @@
 
 BEGIN;
 
+-- Live Supabase grants USAGE on schema auth to anon and authenticated, so
+-- auth.uid() called by name inside PL/pgSQL (receipt_line_mappings_touch)
+-- resolves there. The vanilla CI prelude has no such grant; mirror the
+-- live setting for this transaction only (rolled back below).
+GRANT USAGE ON SCHEMA auth TO authenticated, anon;
+
 -- ============================================================================
 -- DRY-RUN SCENARIOS A-K. Everything below runs inside the same transaction
 -- and is rolled back. Any failure raises an error; a clean
