@@ -2,11 +2,11 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
 import { formatMoney } from "@/lib/money";
-import type { PurchaseWithRelations } from "../types/purchase";
+import type { PurchaseFormValues, PurchaseWithRelations } from "../types/purchase";
 import type { PurchaseReceiptCard } from "../types/purchase-receipt";
 import { purchaseReceiptService } from "../services/purchase-receipt-service";
 import { formatReceiptDisplayDate } from "../utils/receipt-purchase-link";
-import { PurchaseDocumentModal } from "./purchase-document-modal";
+import { draftToValues, PurchaseDocumentModal } from "./purchase-document-modal";
 
 const getLastPurchaseLines = vi.fn();
 
@@ -48,7 +48,15 @@ vi.mock("../services/purchase-receipt-service", () => ({
     save: vi.fn(),
     countUnassigned: vi.fn(),
     listRecent: vi.fn(),
+    matchReceiptLines: vi.fn(),
+    rememberReceiptLineMapping: vi.fn(),
   },
+}));
+
+const { requestRecognition } = vi.hoisted(() => ({ requestRecognition: vi.fn() }));
+
+vi.mock("../utils/request-receipt-recognition", () => ({
+  requestReceiptRecognition: (...args: unknown[]) => requestRecognition(...args),
 }));
 
 const INGREDIENT_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
@@ -1203,5 +1211,381 @@ describe("PurchaseDocumentModal source receipt banner", () => {
     renderWithReceipt(sourceReceipt(), draftPurchase());
 
     expect(screen.queryByText(/From receipt/)).not.toBeInTheDocument();
+  });
+});
+
+describe("PurchaseDocumentModal fill lines from receipt", () => {
+  afterEach(() => {
+    cleanup();
+    getLastPurchaseLines.mockReset();
+    requestRecognition.mockReset();
+    vi.mocked(purchaseReceiptService.signStoragePaths).mockReset();
+    vi.mocked(purchaseReceiptService.matchReceiptLines).mockReset();
+    vi.mocked(purchaseReceiptService.rememberReceiptLineMapping).mockReset();
+  });
+
+  function receiptCard(): PurchaseReceiptCard {
+    return {
+      id: "receipt-1",
+      purchaseId: null,
+      supplierId: SUPPLIER_ID,
+      supplierName: "Makro",
+      receiptDate: "2026-10-05",
+      receiptTotal: 8.25,
+      note: null,
+      pageCount: 1,
+      pagePaths: ["receipt/page.jpg"],
+      thumbnailUrl: null,
+      files: [],
+    };
+  }
+
+  function recognitionResult() {
+    return {
+      status: "ok" as const,
+      cached: false,
+      recognitionId: "recognition-1",
+      result: {
+        schemaVersion: 1 as const,
+        readable: true,
+        storeName: "Makro",
+        receiptDate: "2026-10-05",
+        currency: "EUR",
+        total: 8.25,
+        lines: [
+          {
+            text: "MEEL 5KG",
+            quantity: 2,
+            unitPrice: 2.5,
+            lineTotal: 5,
+            vatRate: 9,
+            kind: "item" as const,
+          },
+          {
+            text: "MELK",
+            quantity: 2,
+            unitPrice: 1.5,
+            lineTotal: 3,
+            vatRate: null,
+            kind: "item" as const,
+          },
+          {
+            text: "TAS",
+            quantity: null,
+            unitPrice: null,
+            lineTotal: 0.25,
+            vatRate: 21,
+            kind: "bag" as const,
+          },
+        ],
+      },
+    };
+  }
+
+  function blankLine() {
+    return {
+      ingredient_id: "",
+      quantity: 1,
+      unit_cost: 0,
+      discount: 0,
+      tax_category: "food",
+      tax_regime: "reduced_vat",
+      price_mode: "inclusive" as const,
+    };
+  }
+
+  function renderFromReceipt(options?: {
+    supplierId?: string;
+    lines?: Array<ReturnType<typeof blankLine>>;
+    onSaveDraft?: (values: PurchaseFormValues) => Promise<boolean>;
+  }) {
+    getLastPurchaseLines.mockResolvedValue({ data: [], error: null });
+    vi.mocked(purchaseReceiptService.signStoragePaths).mockResolvedValue({
+      data: [null],
+      error: null,
+    });
+    vi.mocked(purchaseReceiptService.matchReceiptLines).mockResolvedValue({
+      data: [
+        { lineIndex: 1, action: "ingredient", ingredientId: INGREDIENT_ID, unitsPerItem: 0.5 },
+        { lineIndex: 2, action: null, ingredientId: null, unitsPerItem: null },
+        { lineIndex: 3, action: null, ingredientId: null, unitsPerItem: null },
+      ],
+      error: null,
+    });
+    vi.mocked(purchaseReceiptService.rememberReceiptLineMapping).mockResolvedValue({
+      data: "mapping-1",
+      error: null,
+    });
+    requestRecognition.mockResolvedValue(recognitionResult());
+    const onSaveDraft = vi.fn(options?.onSaveDraft ?? (async () => true));
+    render(
+      <PurchaseDocumentModal
+        isOpen
+        purchase={null}
+        initialValues={{
+          supplier_id: options?.supplierId ?? SUPPLIER_ID,
+          invoice_number: "",
+          purchased_at: "2026-10-05",
+          notes: "",
+          supplier_country: "NL",
+          tax_country: "NL",
+          lines: options?.lines ?? [blankLine()],
+        }}
+        suppliers={[{ id: SUPPLIER_ID, name: "Makro" }]}
+        ingredients={[
+          { id: INGREDIENT_ID, name: "Flour", unit: "kg" },
+          { id: INGREDIENT_B, name: "Milk", unit: "L" },
+        ]}
+        isLoading={false}
+        isSaving={false}
+        error={null}
+        onClose={() => undefined}
+        onSaveDraft={onSaveDraft}
+        onReceiveGoods={async () => true}
+        sourceReceipt={receiptCard()}
+      />,
+    );
+    return onSaveDraft;
+  }
+
+  function ingredientSelects(): HTMLSelectElement[] {
+    return screen
+      .getAllByRole("combobox")
+      .filter((element): element is HTMLSelectElement =>
+        Array.from((element as HTMLSelectElement).options).some(
+          (option) => option.value === INGREDIENT_ID,
+        ),
+      );
+  }
+
+  function inputValues(elements: HTMLElement[]): string[] {
+    return elements.map((element) => (element as HTMLInputElement).value);
+  }
+
+  async function fill() {
+    fireEvent.click(screen.getByRole("button", { name: "Fill lines from receipt" }));
+    await screen.findByText(/added €8\.00/);
+  }
+
+  it("replaces a blank line with the receipt lines", async () => {
+    renderFromReceipt();
+
+    await fill();
+
+    expect(ingredientSelects().map((select) => select.value)).toEqual([INGREDIENT_ID, ""]);
+    expect(inputValues(screen.getAllByPlaceholderText("0"))).toEqual(["1", "2"]);
+    expect(inputValues(screen.getAllByRole("textbox", { name: "Line total" }))).toEqual([
+      "5",
+      "3",
+    ]);
+    expect(inputValues(screen.getAllByRole("textbox", { name: "Unit price" }))).toEqual([
+      "5",
+      "1.5",
+    ]);
+    expect(purchaseReceiptService.matchReceiptLines).toHaveBeenCalledWith(SUPPLIER_ID, [
+      "MEEL 5KG",
+      "MELK",
+      "TAS",
+    ]);
+  });
+
+  it("appends after a line the user already filled", async () => {
+    renderFromReceipt({ lines: [{ ...blankLine(), ingredient_id: INGREDIENT_B }] });
+
+    await fill();
+
+    expect(ingredientSelects().map((select) => select.value)).toEqual([
+      INGREDIENT_B,
+      INGREDIENT_ID,
+      "",
+    ]);
+  });
+
+  it("shows the receipt hint and Check VAT, and Skip removes the line", async () => {
+    renderFromReceipt();
+
+    await fill();
+
+    expect(screen.getByText("Receipt: MEEL 5KG · 2 × · €5.00")).toBeInTheDocument();
+    expect(screen.getByText("Receipt: MELK · 2 × · €3.00")).toBeInTheDocument();
+    expect(screen.getAllByText("Check VAT")).toHaveLength(1);
+
+    const skipButtons = screen.getAllByRole("button", { name: "Skip" });
+    expect(skipButtons).toHaveLength(2);
+    fireEvent.click(skipButtons[1] as HTMLElement);
+
+    expect(screen.queryByText("Receipt: MELK · 2 × · €3.00")).not.toBeInTheDocument();
+    expect(ingredientSelects()).toHaveLength(1);
+  });
+
+  it("keeps the receipt price when a last purchase price arrives", async () => {
+    renderFromReceipt();
+    getLastPurchaseLines.mockResolvedValue(lastLineResponse());
+
+    await fill();
+
+    await waitFor(() => {
+      expect(getLastPurchaseLines).toHaveBeenCalledWith([INGREDIENT_ID], SUPPLIER_ID);
+    });
+    await screen.findByRole("button", { name: /Use$/ });
+    expect(screen.getAllByRole("textbox", { name: "Unit price" })[0]).toHaveValue("5");
+    expect(screen.getAllByRole("textbox", { name: "Line total" })[0]).toHaveValue("5");
+  });
+
+  it("keeps the receipt amount when the ingredient is switched", async () => {
+    renderFromReceipt();
+
+    await fill();
+    fireEvent.change(ingredientSelects()[0] as HTMLElement, {
+      target: { value: INGREDIENT_B },
+    });
+
+    expect(ingredientSelects()[0]).toHaveValue(INGREDIENT_B);
+    expect(screen.getAllByRole("textbox", { name: "Line total" })[0]).toHaveValue("5");
+    expect(screen.getAllByRole("textbox", { name: "Unit price" })[0]).toHaveValue("5");
+  });
+
+  it("saves values without receipt_source and then remembers the lines", async () => {
+    let resolveSave: (value: boolean) => void = () => undefined;
+    const onSaveDraft = renderFromReceipt({
+      onSaveDraft: () =>
+        new Promise<boolean>((resolve) => {
+          resolveSave = resolve;
+        }),
+    });
+
+    await fill();
+    fireEvent.click(screen.getAllByRole("button", { name: "Skip" })[1] as HTMLElement);
+    fireEvent.change(screen.getAllByPlaceholderText("0")[0] as HTMLElement, {
+      target: { value: "1.5" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
+
+    await waitFor(() => {
+      expect(onSaveDraft).toHaveBeenCalledTimes(1);
+    });
+    const saved = onSaveDraft.mock.calls[0]?.[0];
+    expect(saved?.lines).toHaveLength(1);
+    expect(saved?.lines[0]).not.toHaveProperty("receipt_source");
+    expect(purchaseReceiptService.rememberReceiptLineMapping).not.toHaveBeenCalled();
+
+    resolveSave(true);
+
+    await waitFor(() => {
+      expect(purchaseReceiptService.rememberReceiptLineMapping).toHaveBeenCalledTimes(2);
+    });
+    expect(vi.mocked(purchaseReceiptService.rememberReceiptLineMapping).mock.calls).toEqual([
+      [
+        {
+          supplierId: SUPPLIER_ID,
+          receiptText: "MELK",
+          action: "skip",
+          ingredientId: null,
+          unitsPerItem: null,
+        },
+      ],
+      [
+        {
+          supplierId: SUPPLIER_ID,
+          receiptText: "MEEL 5KG",
+          action: "ingredient",
+          ingredientId: INGREDIENT_ID,
+          unitsPerItem: 0.75,
+        },
+      ],
+    ]);
+  });
+
+  it("remembers a newly chosen ingredient but not an unchanged mapping", async () => {
+    const onSaveDraft = renderFromReceipt();
+
+    await fill();
+    fireEvent.change(ingredientSelects()[1] as HTMLElement, {
+      target: { value: INGREDIENT_B },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
+
+    await waitFor(() => {
+      expect(purchaseReceiptService.rememberReceiptLineMapping).toHaveBeenCalledTimes(1);
+    });
+    expect(onSaveDraft).toHaveBeenCalledTimes(1);
+    expect(purchaseReceiptService.rememberReceiptLineMapping).toHaveBeenCalledWith({
+      supplierId: SUPPLIER_ID,
+      receiptText: "MELK",
+      action: "ingredient",
+      ingredientId: INGREDIENT_B,
+      unitsPerItem: 1,
+    });
+  });
+
+  it("remembers nothing when the save fails", async () => {
+    const onSaveDraft = renderFromReceipt({ onSaveDraft: async () => false });
+
+    await fill();
+    fireEvent.change(ingredientSelects()[1] as HTMLElement, {
+      target: { value: INGREDIENT_B },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
+
+    await waitFor(() => {
+      expect(onSaveDraft).toHaveBeenCalledTimes(1);
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(purchaseReceiptService.rememberReceiptLineMapping).not.toHaveBeenCalled();
+  });
+
+  it("remembers nothing without a supplier", async () => {
+    const onSaveDraft = renderFromReceipt({ supplierId: "" });
+
+    await fill();
+    fireEvent.change(ingredientSelects()[1] as HTMLElement, {
+      target: { value: INGREDIENT_B },
+    });
+    fireEvent.change(ingredientSelects()[0] as HTMLElement, {
+      target: { value: INGREDIENT_ID },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
+
+    await waitFor(() => {
+      expect(onSaveDraft).toHaveBeenCalledTimes(1);
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(purchaseReceiptService.matchReceiptLines).not.toHaveBeenCalled();
+    expect(purchaseReceiptService.rememberReceiptLineMapping).not.toHaveBeenCalled();
+  });
+});
+
+describe("draftToValues", () => {
+  it("never passes receipt_source on", () => {
+    const values = draftToValues({
+      supplier_id: SUPPLIER_ID,
+      invoice_number: "",
+      purchased_at: "2026-10-05",
+      notes: "",
+      supplier_country: "NL",
+      tax_country: "NL",
+      lines: [
+        {
+          ingredient_id: INGREDIENT_ID,
+          quantity: "1",
+          unit_cost: "5",
+          line_total: "5",
+          last_edited_field: "line_total",
+          discount: "",
+          tax_category: "food",
+          tax_regime: "reduced_vat",
+          price_mode: "inclusive",
+          receipt_source: {
+            text: "MEEL",
+            quantity: 2,
+            lineTotal: 5,
+            mapped: null,
+            vatUnclear: false,
+          },
+        },
+      ],
+    });
+
+    expect(values.lines[0]).not.toHaveProperty("receipt_source");
   });
 });

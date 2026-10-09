@@ -7,6 +7,7 @@ import {
   useRef,
   useState,
   type FormEvent,
+  type ReactNode,
 } from "react";
 import {
   NumericInput,
@@ -16,9 +17,17 @@ import {
 import { formatMoney, formatUnitCost } from "@/lib/money";
 import type { PurchaseReceiptCard } from "../types/purchase-receipt";
 import { formatReceiptDisplayDate } from "../utils/receipt-purchase-link";
-import { purchaseReceiptService } from "../services/purchase-receipt-service";
+import {
+  purchaseReceiptService,
+  type RememberReceiptLineInput,
+} from "../services/purchase-receipt-service";
+import type {
+  BuiltReceiptLine,
+  ReceiptLineSource,
+} from "../utils/receipt-lines-to-draft";
 import { PurchaseAccountingPreview } from "./purchase-accounting-preview";
 import { PurchaseReceiptsSection } from "./purchase-receipts-section";
+import { ReceiptFillPanel } from "./receipt-fill-panel";
 import { purchaseService } from "../services/purchase-service";
 import { purchaseTaxService } from "../services/purchase-tax-service";
 import type {
@@ -127,6 +136,8 @@ export type LineDraft = Omit<
   helper_tax_regime?: boolean;
   /** Last automatic-prefill event applied or considered for this line. */
   prefill_key?: string;
+  /** UI only: what the receipt printed for a line filled from it. Never saved. */
+  receipt_source?: ReceiptLineSource & { vatUnclear: boolean };
 };
 
 function lineTouchState(line: LineDraft): PrefillTouchState {
@@ -356,6 +367,117 @@ export function draftToValues(draft: FormDraft): PurchaseFormValues {
   };
 }
 
+const MAPPING_UNITS_TOLERANCE = 0.0001;
+
+function isBlankLine(line: LineDraft): boolean {
+  return (
+    line.ingredient_id.trim().length === 0 &&
+    line.quantity.trim().length === 0 &&
+    line.unit_cost.trim().length === 0 &&
+    line.line_total.trim().length === 0
+  );
+}
+
+function blankLineDraft(): LineDraft {
+  return {
+    ingredient_id: "",
+    quantity: "",
+    unit_cost: "",
+    line_total: "",
+    last_edited_field: null,
+    discount: "",
+    ...NEW_LINE_TAX_SEED,
+    ...blankPrefillFlags,
+  };
+}
+
+/**
+ * A form line filled from the receipt. Price and tax are marked as the
+ * user's own so the automatic last-price prefill never overwrites them.
+ */
+function receiptLineToDraft(built: BuiltReceiptLine): LineDraft {
+  const line: LineDraft = {
+    ...blankPrefillFlags,
+    ingredient_id: built.ingredientId,
+    quantity: formatNumericInput(built.quantity),
+    unit_cost:
+      built.quantity > 0
+        ? formatNumericInput(roundUnitCost(built.lineTotal / built.quantity))
+        : "",
+    line_total: formatNumericInput(built.lineTotal),
+    discount: built.discount > 0 ? formatNumericInput(built.discount) : "",
+    last_edited_field: "line_total",
+    price_mode: "inclusive",
+    tax_category: built.taxCategory,
+    tax_regime: built.taxRegime,
+    receipt_source: { ...built.receiptSource, vatUnclear: built.vatUnclear },
+  };
+  return markPrefillField(
+    markPrefillField(
+      markPrefillField(markPrefillField(line, "unit_cost", "user"), "price_mode", "user"),
+      "tax_category",
+      "user",
+    ),
+    "tax_regime",
+    "user",
+  );
+}
+
+/** Memory writes for supplier + receipt text, computed from the draft at save time. */
+export function receiptMemoryWrites(
+  draft: FormDraft,
+  skippedTexts: readonly string[],
+): RememberReceiptLineInput[] {
+  const supplierId = draft.supplier_id.trim();
+  if (!supplierId) {
+    return [];
+  }
+  const writes: RememberReceiptLineInput[] = skippedTexts.map((text) => ({
+    supplierId,
+    receiptText: text,
+    action: "skip",
+    ingredientId: null,
+    unitsPerItem: null,
+  }));
+  for (const line of draft.lines) {
+    const source = line.receipt_source;
+    const quantity = parseNumericInput(line.quantity);
+    if (!source || !line.ingredient_id || quantity === null) {
+      continue;
+    }
+    const unitsPerItem = roundUnitCost(quantity / (source.quantity ?? 1));
+    if (!(unitsPerItem > 0)) {
+      continue;
+    }
+    const mapped = source.mapped;
+    const changed =
+      mapped === null ||
+      mapped.ingredientId !== line.ingredient_id ||
+      Math.abs(unitsPerItem - mapped.unitsPerItem) > MAPPING_UNITS_TOLERANCE;
+    if (changed) {
+      writes.push({
+        supplierId,
+        receiptText: source.text,
+        action: "ingredient",
+        ingredientId: line.ingredient_id,
+        unitsPerItem,
+      });
+    }
+  }
+  return writes;
+}
+
+/** Best-effort and sequential; the form may already have remounted, so no state. */
+async function rememberReceiptLines(writes: readonly RememberReceiptLineInput[]) {
+  for (const write of writes) {
+    try {
+      await purchaseReceiptService.rememberReceiptLineMapping(write);
+    } catch {
+      // Memory is a convenience; a failed write never affects the purchase.
+    }
+  }
+}
+
 function validateDraft(
   draft: FormDraft,
   options?: { requireSupplier?: boolean },
@@ -452,7 +574,13 @@ function taxCellClassName(expanded: boolean, extra?: string): string {
 
 type PurchaseDocumentFormProps = Omit<PurchaseDocumentModalProps, "isOpen">;
 
-function ReceiptSourceBanner({ receipt }: { receipt: PurchaseReceiptCard }) {
+function ReceiptSourceBanner({
+  receipt,
+  children,
+}: {
+  receipt: PurchaseReceiptCard;
+  children?: ReactNode;
+}) {
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
   const path = receipt.pagePaths[0];
 
@@ -497,6 +625,7 @@ function ReceiptSourceBanner({ receipt }: { receipt: PurchaseReceiptCard }) {
           Open photo
         </a>
       ) : null}
+      {children}
     </div>
   );
 }
@@ -549,6 +678,11 @@ function PurchaseDocumentForm({
   const [lastPurchaseLookup, setLastPurchaseLookup] =
     useState<LastPurchaseLookupCache>(emptyLastPurchaseLookup);
   const [fillNote, setFillNote] = useState<string | null>(null);
+  const [skippedReceiptTexts, setSkippedReceiptTexts] = useState<string[]>([]);
+  const knownIngredientIds = useMemo(
+    () => new Set(ingredients.map((ingredient) => ingredient.id)),
+    [ingredients],
+  );
 
   // The RPC preview only applies once the draft has enough content to price
   // (matches validateDraft's own requirements) — that check is pure
@@ -1026,6 +1160,41 @@ function PurchaseDocumentForm({
     }));
   };
 
+  const appendReceiptLines = (built: BuiltReceiptLine[]) => {
+    if (built.length === 0) {
+      return;
+    }
+    setFormValues((current) => {
+      const replace = current.lines.every(isBlankLine);
+      const start = replace ? 0 : current.lines.length;
+      // New indexes must probe again so the line-total probe finalizes unit_cost.
+      for (let offset = 0; offset < built.length; offset += 1) {
+        delete appliedLineTotalProbeKeysRef.current[start + offset];
+      }
+      const added = built.map(receiptLineToDraft);
+      return {
+        ...current,
+        lines: replace ? added : [...current.lines, ...added],
+      };
+    });
+  };
+
+  const skipReceiptLine = (index: number) => {
+    const text = formValues.lines[index]?.receipt_source?.text;
+    if (!text) {
+      return;
+    }
+    setSkippedReceiptTexts((current) =>
+      current.includes(text) ? current : [...current, text],
+    );
+    if (formValues.lines.length === 1) {
+      delete appliedLineTotalProbeKeysRef.current[0];
+      setFormValues((current) => ({ ...current, lines: [blankLineDraft()] }));
+      return;
+    }
+    removeLine(index);
+  };
+
   const toggleTaxLine = (index: number) => {
     setExpandedTaxLines((current) => {
       const next = new Set(current);
@@ -1241,7 +1410,11 @@ function PurchaseDocumentForm({
       return;
     }
 
-    await action(draftToValues(formValues));
+    const memoryWrites = receiptMemoryWrites(formValues, skippedReceiptTexts);
+    const succeeded = await action(draftToValues(formValues));
+    if (succeeded && memoryWrites.length > 0) {
+      void rememberReceiptLines(memoryWrites);
+    }
   };
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
@@ -1304,7 +1477,17 @@ function PurchaseDocumentForm({
       )}
 
       <form onSubmit={handleSubmit} className="space-y-6">
-        {sourceReceipt && !purchase ? <ReceiptSourceBanner receipt={sourceReceipt} /> : null}
+        {sourceReceipt && !purchase ? (
+          <ReceiptSourceBanner receipt={sourceReceipt}>
+            <ReceiptFillPanel
+              receiptId={sourceReceipt.id}
+              supplierId={formValues.supplier_id.trim()}
+              knownIngredientIds={knownIngredientIds}
+              disabled={isSaving}
+              onFill={appendReceiptLines}
+            />
+          </ReceiptSourceBanner>
+        ) : null}
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="space-y-2">
             <label
@@ -1621,6 +1804,12 @@ function PurchaseDocumentForm({
                               if (!currentLine || nextId === currentLine.ingredient_id) {
                                 return;
                               }
+                              if (currentLine.receipt_source) {
+                                // Price, amount and tax come from the receipt; a new
+                                // ingredient choice must not clear them.
+                                updateLine(index, "ingredient_id", nextId);
+                                return;
+                              }
                               const switchingIngredient =
                                 currentLine.ingredient_id.trim().length > 0 &&
                                 nextId.trim().length > 0;
@@ -1693,6 +1882,30 @@ function PurchaseDocumentForm({
                               {lineError.ingredient_id}
                             </p>
                           )}
+                          {line.receipt_source ? (
+                            <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-zinc-500">
+                              <span className="min-w-0 break-words">
+                                Receipt: {line.receipt_source.text} ·{" "}
+                                {line.receipt_source.quantity ?? 1} × ·{" "}
+                                {formatMoney(line.receipt_source.lineTotal)}
+                              </span>
+                              {line.receipt_source.vatUnclear ? (
+                                <span className="font-medium text-amber-700">
+                                  Check VAT
+                                </span>
+                              ) : null}
+                              {!isReadOnly ? (
+                                <button
+                                  type="button"
+                                  onClick={() => skipReceiptLine(index)}
+                                  disabled={isSaving}
+                                  className="font-medium text-zinc-700 underline decoration-zinc-300 underline-offset-2 hover:text-zinc-900 disabled:cursor-not-allowed disabled:opacity-60"
+                                >
+                                  Skip
+                                </button>
+                              ) : null}
+                            </div>
+                          ) : null}
                         </td>
                         <td className={`${lineCellClassName} order-2`}>
                           {mobileFieldLabel("Quantity")}

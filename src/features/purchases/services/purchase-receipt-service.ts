@@ -10,6 +10,7 @@ import {
   type UpdatePurchaseReceiptInput,
 } from "../types/purchase-receipt";
 import { RECEIPT_NO_LONGER_UNASSIGNED } from "../utils/receipt-purchase-link";
+import type { ReceiptLineMatch } from "../utils/receipt-lines-to-draft";
 import { addCalendarDays, amsterdamToday } from "../utils/amsterdam-date";
 
 const SIGNED_URL_SECONDS = 60 * 60;
@@ -138,6 +139,37 @@ async function signPaths(paths: string[]): Promise<Map<string, string | null>> {
   }
 
   return signed;
+}
+
+export interface RememberReceiptLineInput {
+  supplierId: string;
+  receiptText: string;
+  action: "ingredient" | "skip";
+  ingredientId: string | null;
+  unitsPerItem: number | null;
+}
+
+function toReceiptLineMatch(value: unknown): ReceiptLineMatch | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  const row = value as Record<string, unknown>;
+  if (typeof row.line_index !== "number") {
+    return null;
+  }
+  const action =
+    row.action === "ingredient" || row.action === "skip" ? row.action : null;
+  const units = toNumber(
+    typeof row.units_per_item === "number" || typeof row.units_per_item === "string"
+      ? row.units_per_item
+      : null,
+  );
+  return {
+    lineIndex: row.line_index,
+    action,
+    ingredientId: typeof row.ingredient_id === "string" ? row.ingredient_id : null,
+    unitsPerItem: units,
+  };
 }
 
 async function loadCards(
@@ -513,6 +545,57 @@ export const purchaseReceiptService = {
       return ok(true);
     } catch (error) {
       return fail(toUserError(error, "Could not unlink the receipt."));
+    }
+  },
+
+  async matchReceiptLines(
+    supplierId: string,
+    texts: string[],
+  ): Promise<ServiceResult<ReceiptLineMatch[]>> {
+    try {
+      const { data, error } = await supabase.rpc("match_receipt_lines", {
+        p_supplier_id: supplierId,
+        p_texts: texts,
+      });
+
+      if (error) {
+        return fail(toUserError(error, "Could not load remembered lines."));
+      }
+
+      return ok(
+        (Array.isArray(data) ? data : []).flatMap((row) => {
+          const match = toReceiptLineMatch(row);
+          return match ? [match] : [];
+        }),
+      );
+    } catch (error) {
+      return fail(toUserError(error, "Could not load remembered lines."));
+    }
+  },
+
+  async rememberReceiptLineMapping(
+    input: RememberReceiptLineInput,
+  ): Promise<ServiceResult<string>> {
+    try {
+      const { data, error } = await supabase.rpc("remember_receipt_line_mapping", {
+        p_supplier_id: input.supplierId,
+        p_receipt_text: input.receiptText,
+        p_action: input.action,
+        p_ingredient_id: input.ingredientId,
+        p_units_per_item: input.unitsPerItem,
+      });
+
+      if (error) {
+        return fail(toUserError(error, "Could not remember the receipt line."));
+      }
+
+      if (typeof data !== "string" || data.length === 0) {
+        return fail("Could not remember the receipt line.");
+      }
+
+      return ok(data);
+    } catch (error) {
+      return fail(toUserError(error, "Could not remember the receipt line."));
     }
   },
 };
