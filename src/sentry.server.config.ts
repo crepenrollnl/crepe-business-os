@@ -8,11 +8,12 @@ import * as Sentry from "@sentry/nextjs";
  */
 const dsn = process.env.NEXT_PUBLIC_SENTRY_DSN;
 
-function driveSecretValues(): string[] {
+function serverSecretValues(): string[] {
   return [
     process.env.GOOGLE_DRIVE_CLIENT_ID,
     process.env.GOOGLE_DRIVE_CLIENT_SECRET,
     process.env.GOOGLE_DRIVE_REFRESH_TOKEN,
+    process.env.ANTHROPIC_API_KEY,
   ].filter((value): value is string => typeof value === "string" && value.length > 0);
 }
 
@@ -25,13 +26,15 @@ function redact(value: string, secrets: readonly string[]): string {
 }
 
 function scrubEvent(event: Sentry.ErrorEvent): Sentry.ErrorEvent {
-  const secrets = driveSecretValues();
+  const secrets = serverSecretValues();
   const headers = event.request?.headers;
   if (headers) {
     delete headers.Authorization;
     delete headers.authorization;
     delete headers.Cookie;
     delete headers.cookie;
+    delete headers["X-Api-Key"];
+    delete headers["x-api-key"];
   }
   if (typeof event.message === "string") {
     event.message = redact(event.message, secrets);
