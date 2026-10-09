@@ -2,6 +2,9 @@ export const WRITE_OFF_ITEM_TYPES = ["ingredient", "finished_good"] as const;
 
 export type WriteOffItemType = (typeof WRITE_OFF_ITEM_TYPES)[number];
 
+/** What the form can write off. "dish" is never stored: it becomes one row per part. */
+export type WriteOffFormItemType = WriteOffItemType | "dish";
+
 export const WRITE_OFF_REASONS = [
   "spoilage",
   "damaged",
@@ -50,6 +53,12 @@ export interface WriteOffProductOption {
   unit: string | null;
 }
 
+/** An assembly recipe (dish). Dishes are never stocked, so no unit is shown. */
+export interface WriteOffDishOption {
+  id: string;
+  name: string;
+}
+
 export interface RecordWriteOffInput {
   itemType: WriteOffItemType;
   ingredientId: string | null;
@@ -65,6 +74,23 @@ export interface RecordWriteOffRpcResult {
   total_value: number;
 }
 
+export const DISH_WRITE_OFF_MAX_QUANTITY = 1000;
+
+export interface RecordDishWriteOffInput {
+  productId: string;
+  quantity: number;
+  reason: WriteOffReason;
+  note: string | null;
+}
+
+/** record_dish_write_off (sql/136): one record_write_off row per recipe part. */
+export interface RecordDishWriteOffRpcResult {
+  product_id: string;
+  quantity: number;
+  total_value: number;
+  write_offs: RecordWriteOffRpcResult[];
+}
+
 export const WRITE_OFF_ZERO_COST_ACCOUNTING_NOTE =
   "Write-off recorded. No cost is on record for this item, so no accounting entry was created.";
 
@@ -72,6 +98,14 @@ export interface RecordWriteOffAndPostResult {
   writeOff: RecordWriteOffRpcResult;
   postingError: string | null;
   /** Expected skip of the journal when total_value is 0 — not a posting failure. */
+  accountingNote: string | null;
+}
+
+export interface RecordDishWriteOffAndPostResult {
+  dishWriteOff: RecordDishWriteOffRpcResult;
+  /** Distinct posting failures across the parts; the stock change stands regardless. */
+  postingErrors: string[];
+  /** Set only when no part carried a cost, so no journal was expected. */
   accountingNote: string | null;
 }
 

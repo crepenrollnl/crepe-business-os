@@ -52,6 +52,9 @@ function WriteOffRow({ writeOff }: { writeOff: WriteOffRecord }) {
       </td>
       <td className="px-4 py-4 text-sm text-zinc-900">
         {writeOff.item_name ?? "—"}
+        {writeOff.note ? (
+          <p className="mt-0.5 text-xs text-zinc-500">{writeOff.note}</p>
+        ) : null}
       </td>
       <td className="px-4 py-4 text-right text-sm text-zinc-700">
         {writeOff.quantity}

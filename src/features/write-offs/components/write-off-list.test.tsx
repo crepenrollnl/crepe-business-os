@@ -42,6 +42,27 @@ describe("WriteOffList", () => {
     expect(screen.getByText("€10.00")).toBeInTheDocument();
   });
 
+  it("shows the note under the item name when there is one", () => {
+    render(
+      <WriteOffList
+        writeOffs={[
+          { ...row, note: "Dish: Crepe Nutella × 1 — burned" },
+          { ...row, id: "wo-2", item_name: "Flour" },
+        ]}
+        periodFrom="2026-09-01"
+        periodTo="2026-09-30"
+        loading={false}
+        error={null}
+        onRetry={vi.fn()}
+      />,
+    );
+
+    const note = screen.getByText("Dish: Crepe Nutella × 1 — burned");
+    expect(note).toHaveClass("text-xs", "text-zinc-500");
+    expect(note.closest("td")).toHaveTextContent("Chicken");
+    expect(screen.getAllByText(/^Dish:/)).toHaveLength(1);
+  });
+
   it("hides rows outside the selected period", () => {
     render(
       <WriteOffList

@@ -266,3 +266,140 @@ describe("writeOffService.listProductOptions", () => {
     expect(result.error).toBe("Failed to load finished goods summary");
   });
 });
+
+describe("writeOffService.recordDishWriteOff", () => {
+  beforeEach(() => {
+    supabaseMock.rpc.mockReset();
+  });
+
+  const dishInput = {
+    productId: "dish-1",
+    quantity: 2,
+    reason: "spoilage" as const,
+    note: "  burned  ",
+  };
+
+  it("calls record_dish_write_off with the exact arguments and a trimmed note", async () => {
+    const rpcResult = {
+      product_id: "dish-1",
+      quantity: 2,
+      total_value: 3.5,
+      write_offs: [
+        { id: "wo-1", item_type: "ingredient", total_value: 1.5 },
+        { id: "wo-2", item_type: "finished_good", total_value: 2 },
+      ],
+    };
+    supabaseMock.rpc.mockResolvedValue({ data: rpcResult, error: null });
+
+    const result = await writeOffService.recordDishWriteOff(dishInput);
+
+    expect(supabaseMock.rpc).toHaveBeenCalledWith("record_dish_write_off", {
+      p_product_id: "dish-1",
+      p_quantity: 2,
+      p_reason: "spoilage",
+      p_note: "burned",
+    });
+    expect(result.error).toBeNull();
+    expect(result.data).toEqual(rpcResult);
+  });
+
+  it("sends a blank note as null", async () => {
+    supabaseMock.rpc.mockResolvedValue({
+      data: { product_id: "dish-1", quantity: 1, total_value: 0, write_offs: [] },
+      error: null,
+    });
+
+    await writeOffService.recordDishWriteOff({ ...dishInput, quantity: 1, note: "   " });
+    await writeOffService.recordDishWriteOff({ ...dishInput, quantity: 1, note: null });
+
+    expect(supabaseMock.rpc.mock.calls.map((call) => call[1].p_note)).toEqual([null, null]);
+  });
+
+  it.each([
+    ["quantity 0", { quantity: 0 }, "Write-off quantity must be greater than zero."],
+    ["quantity 1000.001", { quantity: 1000.001 }, "Dish quantity must be at most 1000."],
+    ["quantity NaN", { quantity: Number.NaN }, "Write-off quantity must be greater than zero."],
+    ["quantity Infinity", { quantity: Number.POSITIVE_INFINITY }, "Write-off quantity must be greater than zero."],
+    ["an empty product id", { productId: "  " }, "Select a dish to write off."],
+    ["a bad reason", { reason: "lost" as never }, "Write-off reason is invalid."],
+  ])("rejects %s without calling the RPC", async (_name, overrides, message) => {
+    const result = await writeOffService.recordDishWriteOff({ ...dishInput, ...overrides });
+
+    expect(result.error).toBe(message);
+    expect(result.data).toBeNull();
+    expect(supabaseMock.rpc).not.toHaveBeenCalled();
+  });
+
+  it("accepts exactly 1000", async () => {
+    supabaseMock.rpc.mockResolvedValue({
+      data: { product_id: "dish-1", quantity: 1000, total_value: 0, write_offs: [] },
+      error: null,
+    });
+
+    const result = await writeOffService.recordDishWriteOff({ ...dishInput, quantity: 1000 });
+
+    expect(result.error).toBeNull();
+    expect(supabaseMock.rpc).toHaveBeenCalledTimes(1);
+  });
+
+  it("surfaces an RPC error message verbatim", async () => {
+    supabaseMock.rpc.mockResolvedValue({
+      data: null,
+      error: {
+        message:
+          'Could not write off "Nutella" for dish "Crepe Nutella": Insufficient stock for Nutella.',
+      },
+    });
+
+    const result = await writeOffService.recordDishWriteOff(dishInput);
+
+    expect(result.error).toBe(
+      'Could not write off "Nutella" for dish "Crepe Nutella": Insufficient stock for Nutella.',
+    );
+    expect(result.data).toBeNull();
+  });
+});
+
+describe("writeOffService.listDishOptions", () => {
+  beforeEach(() => {
+    supabaseMock.from.mockReset();
+  });
+
+  it("lists active assembly recipes by name", async () => {
+    const order = vi.fn().mockResolvedValue({
+      data: [
+        { id: "dish-1", name: "Crepe Nutella" },
+        { id: "dish-2", name: "Crepe Salmon" },
+      ],
+      error: null,
+    });
+    const isActive = vi.fn(() => ({ order }));
+    const role = vi.fn(() => ({ eq: isActive }));
+    const select = vi.fn(() => ({ eq: role }));
+    supabaseMock.from.mockReturnValue({ select });
+
+    const result = await writeOffService.listDishOptions();
+
+    expect(supabaseMock.from).toHaveBeenCalledWith("recipes");
+    expect(select).toHaveBeenCalledWith("id, name");
+    expect(role).toHaveBeenCalledWith("recipe_role", "assembly");
+    expect(isActive).toHaveBeenCalledWith("is_active", true);
+    expect(order).toHaveBeenCalledWith("name");
+    expect(result.data).toEqual([
+      { id: "dish-1", name: "Crepe Nutella" },
+      { id: "dish-2", name: "Crepe Salmon" },
+    ]);
+  });
+
+  it("returns an error when the query fails", async () => {
+    const order = vi.fn().mockResolvedValue({ data: null, error: { message: "denied" } });
+    supabaseMock.from.mockReturnValue({
+      select: () => ({ eq: () => ({ eq: () => ({ order }) }) }),
+    });
+
+    const result = await writeOffService.listDishOptions();
+
+    expect(result.data).toBeNull();
+    expect(result.error).toBeTruthy();
+  });
+});

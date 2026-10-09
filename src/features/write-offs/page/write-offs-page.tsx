@@ -23,6 +23,7 @@ export function WriteOffsPage({
     writeOffs,
     ingredients,
     products,
+    dishes,
     loading,
     error,
     isSaving,
@@ -35,6 +36,7 @@ export function WriteOffsPage({
     setPeriodFrom,
     setPeriodTo,
     submitWriteOff,
+    submitDishWriteOff,
     clearLastSuccess,
     retry,
   } = useWriteOffs();
@@ -46,14 +48,15 @@ export function WriteOffsPage({
           Write-offs
         </h1>
         <p className="mt-2 text-base text-zinc-600 sm:text-lg">
-          Record spoilage, damage, and other stock losses for raw materials
-          and finished goods.
+          Record spoilage, damage, and other stock losses for raw materials,
+          finished goods and whole dishes.
         </p>
       </div>
 
       <WriteOffForm
         ingredients={ingredients}
         products={products}
+        dishes={dishes}
         isSaving={isSaving}
         error={formError}
         lastSuccess={lastSuccess}
@@ -62,6 +65,7 @@ export function WriteOffsPage({
         prefillItemType={prefillItemType}
         prefillItemId={prefillItemId}
         onSubmit={submitWriteOff}
+        onSubmitDish={submitDishWriteOff}
         onDismissSuccess={clearLastSuccess}
       />
 
