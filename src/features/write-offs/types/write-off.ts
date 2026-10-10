@@ -94,6 +94,10 @@ export interface RecordDishWriteOffRpcResult {
 export const WRITE_OFF_ZERO_COST_ACCOUNTING_NOTE =
   "Write-off recorded. No cost is on record for this item, so no accounting entry was created.";
 
+/** total_value > 0 but rounds to 0.00 (e.g. 3 g of salt): nothing to put in the ledger. */
+export const WRITE_OFF_BELOW_ONE_CENT_ACCOUNTING_NOTE =
+  "Write-off recorded. Its value is below one cent, so no accounting entry was created.";
+
 export interface RecordWriteOffAndPostResult {
   writeOff: RecordWriteOffRpcResult;
   postingError: string | null;
