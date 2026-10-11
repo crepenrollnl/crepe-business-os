@@ -1,29 +1,17 @@
 /**
  * Daily Sales Summary service (DEV-114).
  *
- * Generates an immutable commercial snapshot once when a Shift closes.
- * Reads completed Sales in the shift window — does not change Sales module.
+ * Reads the immutable commercial snapshot of a closed Shift. The snapshot
+ * is written by close_shift (sql/142) in the same transaction that closes
+ * the shift — the browser never writes it.
  */
 
 import { toUserError } from "@/lib/service-errors";
 import { supabase } from "@/lib/supabase";
 import { fail, ok, type ServiceResult } from "@/types/service";
-import type { Shift } from "../types/shift";
-import type {
-  BuildDailySalesSummaryResult,
-  DailySalesSaleFact,
-  DailySalesSummary,
-  GenerateDailySalesSummaryResult,
-} from "../types/daily-sales-summary";
-import {
-  assertCanGenerateDailySalesSummary,
-  assertDailySalesSummaryHistoricallyImmutable,
-  assertDailySalesSummaryNotDuplicate,
-  buildDailySalesSummary,
-  isCompletedSaleStatus,
-} from "../utils/daily-sales-summary-builder";
+import type { DailySalesSummary } from "../types/daily-sales-summary";
 
-interface DailySalesSummaryRow {
+export interface DailySalesSummaryRow {
   id: string;
   shift_id: string;
   sales_count: number | string;
@@ -33,19 +21,6 @@ interface DailySalesSummaryRow {
   average_receipt: number | string;
   generated_at: string;
   created_at: string;
-}
-
-interface SaleHeaderRow {
-  id: string;
-  status: string;
-  subtotal: number | string;
-  total: number | string;
-  confirmed_at: string | null;
-}
-
-interface SaleLineQtyRow {
-  sale_id: string;
-  quantity: number | string;
 }
 
 const SUMMARY_SELECT =
@@ -59,7 +34,9 @@ function toNumber(value: number | string): number | null {
   return parsed;
 }
 
-function mapSummary(row: DailySalesSummaryRow): DailySalesSummary | null {
+export function mapDailySalesSummary(
+  row: DailySalesSummaryRow,
+): DailySalesSummary | null {
   const sales_count = toNumber(row.sales_count);
   const items_sold = toNumber(row.items_sold);
   const gross_revenue = toNumber(row.gross_revenue);
@@ -89,37 +66,6 @@ function mapSummary(row: DailySalesSummaryRow): DailySalesSummary | null {
   };
 }
 
-/**
- * Server-side recomputation check for the JS-built summary. Rejects the
- * write if the independent SQL aggregate disagrees with the JS result.
- */
-async function verifyDailySalesSummary(
-  built: BuildDailySalesSummaryResult,
-): Promise<ServiceResult<true>> {
-  const { data, error } = await supabase.rpc("verify_daily_sales_summary", {
-    p_shift_id: built.shift_id,
-    p_sales_count: built.sales_count,
-    p_items_sold: built.items_sold,
-    p_gross_revenue: built.gross_revenue,
-    p_net_revenue: built.net_revenue,
-    p_average_receipt: built.average_receipt,
-  });
-
-  if (error) {
-    return fail(
-      mapSummaryError(error, "Failed to verify daily sales summary"),
-    );
-  }
-
-  if (data !== true) {
-    return fail(
-      "Daily sales summary failed server-side verification and was not saved.",
-    );
-  }
-
-  return ok(true);
-}
-
 function mapSummaryError(error: unknown, fallback: string): string {
   return toUserError(error, fallback, {
     map: (err) => {
@@ -140,14 +86,6 @@ function mapSummaryError(error: unknown, fallback: string): string {
       const normalized = message.toLowerCase();
 
       if (
-        normalized.includes("shift_daily_sales_summaries_shift_uidx") ||
-        (normalized.includes("duplicate") &&
-          normalized.includes("shift_daily_sales_summaries"))
-      ) {
-        return "This shift already has a daily sales summary.";
-      }
-
-      if (
         normalized.includes("shift_daily_sales_summaries") &&
         (normalized.includes("does not exist") ||
           normalized.includes("schema cache") ||
@@ -161,84 +99,7 @@ function mapSummaryError(error: unknown, fallback: string): string {
   });
 }
 
-/**
- * Load completed sales confirmed during the shift window and line quantities.
- */
-async function loadCompletedSaleFactsForShift(
-  shift: Shift,
-): Promise<ServiceResult<DailySalesSaleFact[]>> {
-  if (!shift.closed_at) {
-    return fail("Closed shift is missing closed_at.");
-  }
-
-  const { data: salesRows, error: salesError } = await supabase
-    .from("sales")
-    .select("id, status, subtotal, total, confirmed_at")
-    .in("status", ["confirmed", "paid"])
-    .not("confirmed_at", "is", null)
-    .gte("confirmed_at", shift.opened_at)
-    .lte("confirmed_at", shift.closed_at);
-
-  if (salesError) {
-    return fail(mapSummaryError(salesError, "Failed to load shift sales"));
-  }
-
-  const headers = (salesRows ?? []) as SaleHeaderRow[];
-  if (headers.length === 0) {
-    return ok([]);
-  }
-
-  const saleIds = headers.map((row) => row.id);
-
-  const { data: lineRows, error: linesError } = await supabase
-    .from("sale_lines")
-    .select("sale_id, quantity")
-    .in("sale_id", saleIds);
-
-  if (linesError) {
-    return fail(mapSummaryError(linesError, "Failed to load sale lines"));
-  }
-
-  const itemsBySale = new Map<string, number>();
-  for (const line of (lineRows ?? []) as SaleLineQtyRow[]) {
-    const qty = toNumber(line.quantity);
-    if (qty === null) {
-      return fail("Sale line quantity is invalid.");
-    }
-    itemsBySale.set(line.sale_id, (itemsBySale.get(line.sale_id) ?? 0) + qty);
-  }
-
-  const facts: DailySalesSaleFact[] = [];
-
-  for (const row of headers) {
-    if (!isCompletedSaleStatus(row.status)) {
-      continue;
-    }
-
-    const subtotal = toNumber(row.subtotal);
-    const total = toNumber(row.total);
-    if (subtotal === null || total === null) {
-      return fail("Sale commercial totals are invalid.");
-    }
-
-    facts.push({
-      id: row.id,
-      status: row.status,
-      subtotal,
-      total,
-      items_sold: Math.round((itemsBySale.get(row.id) ?? 0) * 1000) / 1000,
-    });
-  }
-
-  return ok(facts);
-}
-
 export const dailySalesSummaryService = {
-  buildDailySalesSummary,
-  assertCanGenerateDailySalesSummary,
-  assertDailySalesSummaryNotDuplicate,
-  assertDailySalesSummaryHistoricallyImmutable,
-
   async getSummaryForShift(
     shiftId: string,
   ): Promise<ServiceResult<DailySalesSummary | null>> {
@@ -262,7 +123,7 @@ export const dailySalesSummaryService = {
         return ok(null);
       }
 
-      const mapped = mapSummary(data as DailySalesSummaryRow);
+      const mapped = mapDailySalesSummary(data as DailySalesSummaryRow);
       if (!mapped) {
         return fail("Daily sales summary data is invalid.");
       }
@@ -270,93 +131,6 @@ export const dailySalesSummaryService = {
       return ok(mapped);
     } catch (error) {
       return fail(mapSummaryError(error, "Failed to load daily sales summary"));
-    }
-  },
-
-  /**
-   * Generate and persist the immutable summary for a closed shift.
-   * Empty / no completed sales still stores a zero summary.
-   */
-  async generateForClosedShift(
-    shift: Shift,
-  ): Promise<ServiceResult<GenerateDailySalesSummaryResult>> {
-    try {
-      const shiftGuard = assertCanGenerateDailySalesSummary(shift);
-      if (shiftGuard) {
-        return fail(shiftGuard);
-      }
-
-      const existingResult = await this.getSummaryForShift(shift.id);
-      if (existingResult.error) {
-        return fail(existingResult.error);
-      }
-
-      const duplicateGuard = assertDailySalesSummaryNotDuplicate(
-        existingResult.data,
-      );
-      if (duplicateGuard) {
-        return fail(duplicateGuard);
-      }
-
-      const factsResult = await loadCompletedSaleFactsForShift(shift);
-      if (factsResult.error || !factsResult.data) {
-        return fail(factsResult.error ?? "Failed to load shift sales");
-      }
-
-      const built = buildDailySalesSummary({
-        shift_id: shift.id,
-        sales: factsResult.data,
-      });
-
-      if (built.error || !built.data) {
-        return fail(built.error ?? "Failed to build daily sales summary");
-      }
-
-      const verified = await verifyDailySalesSummary(built.data);
-      if (verified.error) {
-        return fail(verified.error);
-      }
-
-      const { data, error } = await supabase
-        .from("shift_daily_sales_summaries")
-        .insert({
-          shift_id: built.data.shift_id,
-          sales_count: built.data.sales_count,
-          items_sold: built.data.items_sold,
-          gross_revenue: built.data.gross_revenue,
-          net_revenue: built.data.net_revenue,
-          average_receipt: built.data.average_receipt,
-        })
-        .select(SUMMARY_SELECT)
-        .single();
-
-      if (error) {
-        return fail(
-          mapSummaryError(error, "Failed to save daily sales summary"),
-        );
-      }
-
-      const mapped = mapSummary(data as DailySalesSummaryRow);
-      if (!mapped) {
-        return fail("Daily sales summary saved but the response was invalid.");
-      }
-
-      if (
-        mapped.shift_id !== built.data.shift_id ||
-        mapped.sales_count !== built.data.sales_count ||
-        mapped.items_sold !== built.data.items_sold ||
-        mapped.gross_revenue !== built.data.gross_revenue ||
-        mapped.net_revenue !== built.data.net_revenue ||
-        mapped.average_receipt !== built.data.average_receipt
-      ) {
-        return fail("Daily sales summaries are immutable historical records.");
-      }
-
-      return ok({ summary: mapped });
-    } catch (error) {
-      return fail(
-        mapSummaryError(error, "Failed to save daily sales summary"),
-      );
     }
   },
 };

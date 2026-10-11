@@ -197,38 +197,12 @@ export function useShift() {
       return false;
     }
 
+    // close_shift wrote both daily summaries in the same transaction.
     const closed = result.data.shift;
     setActiveShift(null);
     setClosedShift(closed);
-
-    const salesResult =
-      await dailySalesSummaryService.generateForClosedShift(closed);
-
-    if (salesResult.error || !salesResult.data) {
-      setDailySalesSummary(null);
-      setDailyProfitSummary(null);
-      setActionError(
-        salesResult.error ?? "Failed to generate daily sales summary",
-      );
-      setMutating(false);
-      return true;
-    }
-
-    setDailySalesSummary(salesResult.data.summary);
-
-    const profitResult =
-      await dailyProfitSummaryService.generateForClosedShift(closed);
-
-    if (profitResult.error || !profitResult.data) {
-      setDailyProfitSummary(null);
-      setActionError(
-        profitResult.error ?? "Failed to generate daily profit summary",
-      );
-      setMutating(false);
-      return true;
-    }
-
-    setDailyProfitSummary(profitResult.data.summary);
+    setDailySalesSummary(result.data.salesSummary);
+    setDailyProfitSummary(result.data.profitSummary);
 
     const reconciliationError = await loadReconciliationForShift(closed);
     if (reconciliationError) {

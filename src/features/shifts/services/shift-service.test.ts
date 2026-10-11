@@ -1,7 +1,8 @@
 /**
  * Service-level coverage for shiftService (DEV-112).
  *
- * Covers open / close / active lookup, duplicate guards, and historical preservation.
+ * Covers active lookup and the open_shift / close_shift RPCs (sql/142),
+ * which enforce the single open shift and write both daily summaries.
  */
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -10,9 +11,6 @@ const { supabaseMock } = vi.hoisted(() => {
   const supabaseMock = {
     from: vi.fn(),
     rpc: vi.fn(),
-    auth: {
-      getUser: vi.fn(),
-    },
   };
   return { supabaseMock };
 });
@@ -25,7 +23,6 @@ import { shiftService } from "./shift-service";
 import type { Shift } from "../types/shift";
 
 const SHIFT_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
-const USER_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 const OPENED_AT = "2026-07-26T08:00:00.000Z";
 const CREATED_AT = "2026-07-26T08:00:00.000Z";
 const CLOSED_AT = "2026-07-26T18:00:00.000Z";
@@ -81,6 +78,34 @@ function mappedClosed(overrides?: Partial<Shift>): Shift {
   };
 }
 
+/** close_shift returns numerics as JSON numbers or strings; both must map. */
+function salesSummaryRow() {
+  return {
+    id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+    shift_id: SHIFT_ID,
+    sales_count: 3,
+    items_sold: "9.000",
+    gross_revenue: 300,
+    net_revenue: "250.00",
+    average_receipt: 100,
+    generated_at: CLOSED_AT,
+    created_at: CLOSED_AT,
+  };
+}
+
+function profitSummaryRow() {
+  return {
+    id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+    shift_id: SHIFT_ID,
+    net_revenue: 250,
+    total_cogs: "100.00",
+    gross_profit: 150,
+    gross_margin_percent: 60,
+    generated_at: CLOSED_AT,
+    created_at: CLOSED_AT,
+  };
+}
+
 function mockActiveLookup(
   row: Record<string, unknown> | null,
   error: unknown = null,
@@ -95,86 +120,9 @@ function mockActiveLookup(
   return { select, eq, maybeSingle };
 }
 
-function mockOpenInsert(
-  active: Record<string, unknown> | null,
-  inserted: Record<string, unknown> | null,
-  insertError: unknown = null,
-) {
-  const activeLookup = mockActiveLookup(active);
-
-  const single = vi.fn().mockResolvedValue({
-    data: insertError ? null : inserted,
-    error: insertError,
-  });
-  const selectAfterInsert = vi.fn().mockReturnValue({ single });
-  const insert = vi.fn().mockReturnValue({ select: selectAfterInsert });
-
-  let call = 0;
-  supabaseMock.from.mockImplementation((table: string) => {
-    expect(table).toBe("shifts");
-    call += 1;
-    if (call === 1) {
-      return { select: activeLookup.select };
-    }
-    return { insert };
-  });
-
-  return { activeLookup, insert, selectAfterInsert, single };
-}
-
-function mockCloseFlow(options: {
-  existing: Record<string, unknown> | null;
-  updated?: Record<string, unknown> | null;
-  loadError?: unknown;
-  updateError?: unknown;
-}) {
-  const loadMaybeSingle = vi.fn().mockResolvedValue({
-    data: options.loadError ? null : options.existing,
-    error: options.loadError ?? null,
-  });
-  const loadEq = vi.fn().mockReturnValue({ maybeSingle: loadMaybeSingle });
-  const loadSelect = vi.fn().mockReturnValue({ eq: loadEq });
-
-  const updateMaybeSingle = vi.fn().mockResolvedValue({
-    data: options.updateError ? null : (options.updated ?? null),
-    error: options.updateError ?? null,
-  });
-  const updateSelect = vi.fn().mockReturnValue({
-    maybeSingle: updateMaybeSingle,
-  });
-  const updateEqStatus = vi.fn().mockReturnValue({ select: updateSelect });
-  const updateEqId = vi.fn().mockReturnValue({ eq: updateEqStatus });
-  const update = vi.fn().mockReturnValue({ eq: updateEqId });
-
-  let call = 0;
-  supabaseMock.from.mockImplementation((table: string) => {
-    expect(table).toBe("shifts");
-    call += 1;
-    if (call === 1) {
-      return { select: loadSelect };
-    }
-    return { update };
-  });
-
-  return {
-    loadSelect,
-    loadEq,
-    loadMaybeSingle,
-    update,
-    updateSelect,
-    updateEqId,
-    updateEqStatus,
-    updateMaybeSingle,
-  };
-}
-
 describe("shiftService (DEV-112)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    supabaseMock.auth.getUser.mockResolvedValue({
-      data: { user: { id: USER_ID } },
-      error: null,
-    });
   });
 
   describe("getActiveShift", () => {
@@ -210,8 +158,11 @@ describe("shiftService (DEV-112)", () => {
   });
 
   describe("openShift", () => {
-    it("opens a shift when none is active", async () => {
-      const flow = mockOpenInsert(null, openRow({ notes: "Start" }));
+    it("calls open_shift with trimmed notes and maps the shift", async () => {
+      supabaseMock.rpc.mockResolvedValue({
+        data: openRow({ notes: "Start" }),
+        error: null,
+      });
 
       const result = await shiftService.openShift({ notes: "  Start  " });
 
@@ -219,32 +170,30 @@ describe("shiftService (DEV-112)", () => {
       expect(result.data).toEqual({
         shift: mappedOpen({ notes: "Start" }),
       });
-      expect(flow.insert).toHaveBeenCalledWith(
-        expect.objectContaining({
-          status: "open",
-          closed_at: null,
-          notes: "Start",
-          opened_by: USER_ID,
-        }),
-      );
+      expect(supabaseMock.rpc).toHaveBeenCalledTimes(1);
+      expect(supabaseMock.rpc).toHaveBeenCalledWith("open_shift", {
+        p_notes: "Start",
+      });
+      expect(supabaseMock.from).not.toHaveBeenCalled();
     });
 
-    it("rejects duplicate open when an active shift already exists", async () => {
-      const flow = mockOpenInsert(openRow(), null);
+    it("sends null notes when none are given", async () => {
+      supabaseMock.rpc.mockResolvedValue({ data: openRow(), error: null });
 
       const result = await shiftService.openShift({});
 
-      expect(result.data).toBeNull();
-      expect(result.error).toBe(
-        "A shift is already open. Close it before opening another.",
-      );
-      expect(flow.insert).not.toHaveBeenCalled();
+      expect(result.error).toBeNull();
+      expect(supabaseMock.rpc).toHaveBeenCalledWith("open_shift", {
+        p_notes: null,
+      });
     });
 
-    it("maps unique-index duplicate open errors", async () => {
-      const flow = mockOpenInsert(null, null, {
-        message:
-          'duplicate key value violates unique constraint "shifts_one_open_uidx"',
+    it("surfaces the RPC error message verbatim", async () => {
+      supabaseMock.rpc.mockResolvedValue({
+        data: null,
+        error: {
+          message: "A shift is already open. Close it before opening another.",
+        },
       });
 
       const result = await shiftService.openShift({});
@@ -253,28 +202,38 @@ describe("shiftService (DEV-112)", () => {
       expect(result.error).toBe(
         "A shift is already open. Close it before opening another.",
       );
-      expect(flow.insert).toHaveBeenCalled();
     });
 
-    it("requires authentication", async () => {
-      supabaseMock.auth.getUser.mockResolvedValue({
-        data: { user: null },
+    it("rejects notes that are too long without calling the RPC", async () => {
+      const result = await shiftService.openShift({ notes: "x".repeat(5000) });
+
+      expect(result.data).toBeNull();
+      expect(result.error).toMatch(/^Notes must be \d+ characters or fewer\.$/);
+      expect(supabaseMock.rpc).not.toHaveBeenCalled();
+    });
+
+    it("fails when the RPC returns an invalid shift", async () => {
+      supabaseMock.rpc.mockResolvedValue({
+        data: openRow({ status: "weird" }),
         error: null,
       });
 
       const result = await shiftService.openShift({});
 
       expect(result.data).toBeNull();
-      expect(result.error).toBe("You must be signed in to open a shift.");
-      expect(supabaseMock.from).not.toHaveBeenCalled();
+      expect(result.error).toBe("Shift opened but the response was invalid.");
     });
   });
 
   describe("closeShift", () => {
-    it("closes an open shift and preserves opened_at / id", async () => {
-      const flow = mockCloseFlow({
-        existing: openRow(),
-        updated: closedRow(),
+    it("calls close_shift and returns the shift with both summaries", async () => {
+      supabaseMock.rpc.mockResolvedValue({
+        data: {
+          shift: closedRow(),
+          sales_summary: salesSummaryRow(),
+          profit_summary: profitSummaryRow(),
+        },
+        error: null,
       });
 
       const result = await shiftService.closeShift({ shift_id: SHIFT_ID });
@@ -282,58 +241,87 @@ describe("shiftService (DEV-112)", () => {
       expect(result.error).toBeNull();
       expect(result.data).toEqual({
         shift: mappedClosed(),
+        salesSummary: {
+          id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          shift_id: SHIFT_ID,
+          sales_count: 3,
+          items_sold: 9,
+          gross_revenue: 300,
+          net_revenue: 250,
+          average_receipt: 100,
+          generated_at: CLOSED_AT,
+          created_at: CLOSED_AT,
+        },
+        profitSummary: {
+          id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+          shift_id: SHIFT_ID,
+          net_revenue: 250,
+          total_cogs: 100,
+          gross_profit: 150,
+          gross_margin_percent: 60,
+          generated_at: CLOSED_AT,
+          created_at: CLOSED_AT,
+        },
       });
-      expect(result.data?.shift.id).toBe(SHIFT_ID);
-      expect(result.data?.shift.opened_at).toBe(OPENED_AT);
-      expect(result.data?.shift.created_at).toBe(CREATED_AT);
-      expect(flow.update).toHaveBeenCalledWith(
-        expect.objectContaining({
-          status: "closed",
-          closed_by: USER_ID,
-        }),
-      );
-      expect(flow.updateEqId).toHaveBeenCalledWith("id", SHIFT_ID);
-      expect(flow.updateEqStatus).toHaveBeenCalledWith("status", "open");
+      expect(supabaseMock.rpc).toHaveBeenCalledTimes(1);
+      expect(supabaseMock.rpc).toHaveBeenCalledWith("close_shift", {
+        p_shift_id: SHIFT_ID,
+        p_notes: null,
+      });
+      expect(supabaseMock.from).not.toHaveBeenCalled();
     });
 
-    it("rejects closing a non-existent shift", async () => {
-      const flow = mockCloseFlow({ existing: null });
+    it("passes trimmed notes when given", async () => {
+      supabaseMock.rpc.mockResolvedValue({
+        data: {
+          shift: closedRow({ notes: "Busy day" }),
+          sales_summary: salesSummaryRow(),
+          profit_summary: profitSummaryRow(),
+        },
+        error: null,
+      });
+
+      await shiftService.closeShift({
+        shift_id: SHIFT_ID,
+        notes: "  Busy day ",
+      });
+
+      expect(supabaseMock.rpc).toHaveBeenCalledWith("close_shift", {
+        p_shift_id: SHIFT_ID,
+        p_notes: "Busy day",
+      });
+    });
+
+    it.each([
+      "Shift was not found.",
+      "This shift is already closed.",
+    ])("surfaces the RPC error %s verbatim", async (message) => {
+      supabaseMock.rpc.mockResolvedValue({ data: null, error: { message } });
 
       const result = await shiftService.closeShift({ shift_id: SHIFT_ID });
 
       expect(result.data).toBeNull();
-      expect(result.error).toBe("Shift was not found.");
-      expect(flow.update).not.toHaveBeenCalled();
+      expect(result.error).toBe(message);
     });
 
-    it("rejects duplicate close of an already closed shift", async () => {
-      const flow = mockCloseFlow({ existing: closedRow() });
-
-      const result = await shiftService.closeShift({ shift_id: SHIFT_ID });
-
-      expect(result.data).toBeNull();
-      expect(result.error).toBe("This shift is already closed.");
-      expect(flow.update).not.toHaveBeenCalled();
-    });
-
-    it("rejects concurrent duplicate close when update matches no open row", async () => {
-      const flow = mockCloseFlow({
-        existing: openRow(),
-        updated: null,
+    it("fails when a summary is missing from the RPC result", async () => {
+      supabaseMock.rpc.mockResolvedValue({
+        data: { shift: closedRow(), sales_summary: salesSummaryRow() },
+        error: null,
       });
 
       const result = await shiftService.closeShift({ shift_id: SHIFT_ID });
 
       expect(result.data).toBeNull();
-      expect(result.error).toBe("This shift is already closed.");
-      expect(flow.update).toHaveBeenCalled();
+      expect(result.error).toBe("Shift closed but the response was invalid.");
     });
 
-    it("requires a valid shift id", async () => {
+    it("requires a valid shift id without calling the RPC", async () => {
       const result = await shiftService.closeShift({ shift_id: "bad" });
 
       expect(result.data).toBeNull();
       expect(result.error).toBe("Shift id is required.");
+      expect(supabaseMock.rpc).not.toHaveBeenCalled();
       expect(supabaseMock.from).not.toHaveBeenCalled();
     });
   });

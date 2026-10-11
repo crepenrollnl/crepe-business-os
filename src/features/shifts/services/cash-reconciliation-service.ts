@@ -2,7 +2,8 @@
  * Cash Reconciliation service (DEV-113).
  *
  * Reconciles counted till cash against expected cash for a closed Shift.
- * One immutable row per shift. Does not touch Sales / Accounting.
+ * One immutable row per shift, written by reconcile_shift_cash (sql/142).
+ * Does not touch Sales / Accounting.
  */
 
 import { toUserError } from "@/lib/service-errors";
@@ -13,7 +14,6 @@ import type {
   ReconcileShiftCashInput,
   ReconcileShiftCashResult,
 } from "../types/cash-reconciliation";
-import { shiftService } from "./shift-service";
 import {
   assertCanReconcileShift,
   assertCashReconciliationHistoricallyImmutable,
@@ -75,43 +75,6 @@ function optionalNotes(value: string | null | undefined): string | null {
   }
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : null;
-}
-
-/**
- * Server-side recomputation check for the JS-built expected cash and
- * difference. Rejects the write if the independent SQL arithmetic
- * disagrees with the JS result.
- */
-async function verifyCashReconciliation(input: {
-  opening_cash?: number;
-  cash_in?: number;
-  cash_out?: number;
-  counted_cash: number;
-  expected_cash: number;
-  difference: number;
-}): Promise<ServiceResult<true>> {
-  const { data, error } = await supabase.rpc("verify_cash_reconciliation", {
-    p_opening_cash: input.opening_cash ?? 0,
-    p_cash_in: input.cash_in ?? 0,
-    p_cash_out: input.cash_out ?? 0,
-    p_counted_cash: input.counted_cash,
-    p_expected_cash: input.expected_cash,
-    p_difference: input.difference,
-  });
-
-  if (error) {
-    return fail(
-      mapReconciliationError(error, "Failed to verify cash reconciliation"),
-    );
-  }
-
-  if (data !== true) {
-    return fail(
-      "Cash reconciliation failed server-side verification and was not saved.",
-    );
-  }
-
-  return ok(true);
 }
 
 function mapReconciliationError(error: unknown, fallback: string): string {
@@ -221,7 +184,10 @@ export const cashReconciliationService = {
   },
 
   /**
-   * Create the immutable reconciliation for a closed shift.
+   * Create the immutable reconciliation for a closed shift via
+   * reconcile_shift_cash (sql/142). The server checks the shift is closed
+   * and not yet reconciled, computes expected = opening + in − out and the
+   * difference, and takes the user from the login.
    */
   async reconcileShiftCash(
     input: ReconcileShiftCashInput,
@@ -232,71 +198,14 @@ export const cashReconciliationService = {
         return fail(validationError);
       }
 
-      const {
-        data: { user },
-        error: authError,
-      } = await supabase.auth.getUser();
-
-      if (authError || !user) {
-        return fail("You must be signed in to reconcile cash.");
-      }
-
-      const shiftId = input.shift_id.trim();
-
-      const shiftResult = await shiftService.getShiftById(shiftId);
-      if (shiftResult.error) {
-        return fail(shiftResult.error);
-      }
-
-      const shiftGuard = assertCanReconcileShift(shiftResult.data);
-      if (shiftGuard) {
-        return fail(shiftGuard);
-      }
-
-      const existingResult = await this.getReconciliationForShift(shiftId);
-      if (existingResult.error) {
-        return fail(existingResult.error);
-      }
-
-      const duplicateGuard = assertShiftNotAlreadyReconciled(
-        existingResult.data,
-      );
-      if (duplicateGuard) {
-        return fail(duplicateGuard);
-      }
-
-      const expectedCash = calculateExpectedCash({
-        opening_cash: input.opening_cash,
-        cash_in: input.cash_in,
-        cash_out: input.cash_out,
+      const { data, error } = await supabase.rpc("reconcile_shift_cash", {
+        p_shift_id: input.shift_id.trim(),
+        p_counted_cash: input.counted_cash,
+        p_opening_cash: input.opening_cash ?? 0,
+        p_cash_in: input.cash_in ?? 0,
+        p_cash_out: input.cash_out ?? 0,
+        p_notes: optionalNotes(input.notes),
       });
-      const countedCash = input.counted_cash;
-      const difference = calculateCashDifference(countedCash, expectedCash);
-
-      const verified = await verifyCashReconciliation({
-        opening_cash: input.opening_cash,
-        cash_in: input.cash_in,
-        cash_out: input.cash_out,
-        counted_cash: countedCash,
-        expected_cash: expectedCash,
-        difference,
-      });
-      if (verified.error) {
-        return fail(verified.error);
-      }
-
-      const { data, error } = await supabase
-        .from("shift_cash_reconciliations")
-        .insert({
-          shift_id: shiftId,
-          expected_cash: expectedCash,
-          counted_cash: countedCash,
-          difference,
-          notes: optionalNotes(input.notes),
-          reconciled_by: user.id,
-        })
-        .select(RECONCILIATION_SELECT)
-        .single();
 
       if (error) {
         return fail(
@@ -304,18 +213,11 @@ export const cashReconciliationService = {
         );
       }
 
-      const mapped = mapReconciliation(data as CashReconciliationRow);
+      const mapped = data
+        ? mapReconciliation(data as CashReconciliationRow)
+        : null;
       if (!mapped) {
         return fail("Cash reconciliation saved but the response was invalid.");
-      }
-
-      if (
-        mapped.shift_id !== shiftId ||
-        mapped.expected_cash !== expectedCash ||
-        mapped.counted_cash !== countedCash ||
-        mapped.difference !== difference
-      ) {
-        return fail("Cash reconciliations are immutable historical records.");
       }
 
       return ok({ reconciliation: mapped });
