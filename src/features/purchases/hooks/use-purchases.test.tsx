@@ -17,6 +17,7 @@ const {
   linkToPurchase,
   calculatePurchaseTaxes,
   getCurrentAccountingContext,
+  reportSkippedPosting,
 } = vi.hoisted(() => ({
   getPurchases: vi.fn(),
   getSuppliers: vi.fn(),
@@ -29,6 +30,7 @@ const {
   linkToPurchase: vi.fn(),
   calculatePurchaseTaxes: vi.fn(),
   getCurrentAccountingContext: vi.fn(),
+  reportSkippedPosting: vi.fn(),
 }));
 
 vi.mock("../services/purchase-service", () => ({
@@ -41,6 +43,7 @@ vi.mock("../services/purchase-service", () => ({
     receivePurchase: (input: unknown) => receivePurchase(input),
     receivePurchaseAndPostJournal: (...args: unknown[]) =>
       receivePurchaseAndPostJournal(...args),
+    reportSkippedPosting: (...args: unknown[]) => reportSkippedPosting(...args),
   },
 }));
 
@@ -312,5 +315,98 @@ describe("usePurchases from a receipt", () => {
     expect(getPurchaseById).not.toHaveBeenCalled();
     expect(result.current.isModalOpen).toBe(false);
     expect(result.current.cameFromReceipt).toBe(false);
+  });
+});
+
+describe("usePurchases.receiveGoods posting-failure recording (audit D1)", () => {
+  const ACCOUNTING_CONTEXT = {
+    fiscalPeriod: {
+      id: "period-1",
+      name: "FY2026",
+      start_date: "2026-01-01",
+      end_date: "2026-12-31",
+      status: "open",
+      closed_at: null,
+      created_at: "2026-01-01T00:00:00.000Z",
+    },
+    accountRoleBindings: [],
+    baseCurrency: "EUR",
+    transactionCurrency: "EUR",
+    exchangeRate: 1,
+    rateDate: "2026-10-05",
+  };
+
+  beforeEach(() => {
+    setUrl("");
+    getPurchases.mockResolvedValue({ data: [], error: null });
+    getSuppliers.mockResolvedValue({ data: [], error: null });
+    getIngredients.mockResolvedValue({ data: [], error: null });
+    calculatePurchaseTaxes.mockResolvedValue({ data: TAX, error: null });
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.clearAllMocks();
+    setUrl("");
+  });
+
+  async function receiveNewPurchase() {
+    const { result } = renderHook(() => usePurchases());
+    await waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+
+    act(() => {
+      result.current.openCreateModal();
+    });
+
+    let received = false;
+    await act(async () => {
+      received = await result.current.receiveGoods(formValues());
+    });
+
+    return { result, received };
+  }
+
+  it("records a purchase_receive posting failure once when the accounting context cannot be loaded", async () => {
+    getCurrentAccountingContext.mockResolvedValue({
+      data: null,
+      error: "No open fiscal period.",
+    });
+    receivePurchase.mockResolvedValue({ data: savedPurchase("received"), error: null });
+
+    const { result, received } = await receiveNewPurchase();
+
+    expect(received).toBe(true);
+    expect(result.current.editingPurchase?.status).toBe("received");
+    expect(reportSkippedPosting).toHaveBeenCalledTimes(1);
+    expect(reportSkippedPosting).toHaveBeenCalledWith(
+      NEW_PURCHASE_ID,
+      "No open fiscal period.",
+    );
+    expect(result.current.postingError).toBe("No open fiscal period.");
+  });
+
+  it("does not record a second failure when the post itself fails (the service already did)", async () => {
+    getCurrentAccountingContext.mockResolvedValue({
+      data: ACCOUNTING_CONTEXT,
+      error: null,
+    });
+    receivePurchaseAndPostJournal.mockResolvedValue({
+      data: {
+        purchase: savedPurchase("received"),
+        posting: null,
+        postingError: "Purchase received but accounting posting failed.",
+      },
+      error: null,
+    });
+
+    const { result, received } = await receiveNewPurchase();
+
+    expect(received).toBe(true);
+    expect(reportSkippedPosting).not.toHaveBeenCalled();
+    expect(result.current.postingError).toBe(
+      "Purchase received but accounting posting failed.",
+    );
   });
 });

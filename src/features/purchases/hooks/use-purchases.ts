@@ -510,9 +510,10 @@ export function usePurchases() {
         await attachSourceReceipt(fallback.data.id);
         setEditingPurchase(fallback.data);
         setAccountingPreview(mapPurchaseTotalsToAccountingPreview(fallback.data));
-        setPostingError(
-          contextResult.error ?? "Accounting posting was skipped.",
-        );
+        const skippedError =
+          contextResult.error ?? "Accounting posting was skipped.";
+        purchaseService.reportSkippedPosting(fallback.data.id, skippedError);
+        setPostingError(skippedError);
         await loadPurchases({ silent: true });
         setIsSaving(false);
         return true;

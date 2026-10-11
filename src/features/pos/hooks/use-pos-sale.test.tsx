@@ -20,6 +20,7 @@ const {
   createAndConfirmSaleMock,
   createAndConfirmSaleAndPostJournalsMock,
   markSaleQueuedMock,
+  reportSkippedPostingMock,
 } = vi.hoisted(() => ({
   getRecipesMock: vi.fn(),
   getSoldQuantityByProductIdMock: vi.fn(),
@@ -27,6 +28,7 @@ const {
   createAndConfirmSaleMock: vi.fn(),
   createAndConfirmSaleAndPostJournalsMock: vi.fn(),
   markSaleQueuedMock: vi.fn(),
+  reportSkippedPostingMock: vi.fn(),
 }));
 
 vi.mock("@/features/recipes/services/recipe-service", () => ({
@@ -49,6 +51,8 @@ vi.mock("@/features/sales/services/sales-service", () => ({
     createAndConfirmSaleAndPostJournals: (...args: unknown[]) =>
       createAndConfirmSaleAndPostJournalsMock(...args),
     markSaleQueued: (...args: unknown[]) => markSaleQueuedMock(...args),
+    reportSkippedPosting: (...args: unknown[]) =>
+      reportSkippedPostingMock(...args),
   },
 }));
 
@@ -327,5 +331,110 @@ describe("usePosSale client_request_id (sql/118)", () => {
       .client_request_id as string;
 
     expect(secondToken).not.toBe(firstToken);
+  });
+});
+
+describe("usePosSale posting-failure recording (audit D1)", () => {
+  const ACCOUNTING_CONTEXT = {
+    fiscalPeriod: {
+      id: "period-1",
+      name: "FY2026",
+      start_date: "2026-01-01",
+      end_date: "2026-12-31",
+      status: "open",
+      closed_at: null,
+      created_at: "2026-01-01T00:00:00.000Z",
+    },
+    accountRoleBindings: [],
+    baseCurrency: "EUR",
+    transactionCurrency: "EUR",
+    exchangeRate: 1,
+    rateDate: "2026-09-14",
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    getRecipesMock.mockResolvedValue({
+      data: [
+        recipe({
+          id: TOKEN_TEST_PRODUCT.id,
+          name: TOKEN_TEST_PRODUCT.name,
+          selling_price: TOKEN_TEST_PRODUCT.selling_price,
+        }),
+      ],
+      error: null,
+    });
+    getSoldQuantityByProductIdMock.mockResolvedValue({
+      data: new Map<string, number>(),
+      error: null,
+    });
+  });
+
+  async function confirmOneItem() {
+    const { result } = renderHook(() => usePosSale());
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    act(() => {
+      result.current.addToCart(TOKEN_TEST_PRODUCT);
+    });
+
+    let confirmed: boolean | undefined;
+    await act(async () => {
+      confirmed = await result.current.confirm();
+    });
+
+    return { result, confirmed };
+  }
+
+  it("records a pos_confirm posting failure once when the accounting context cannot be loaded", async () => {
+    getCurrentAccountingContextMock.mockResolvedValue({
+      data: null,
+      error: "No open fiscal period covers today's date.",
+    });
+    createAndConfirmSaleMock.mockResolvedValue({
+      data: confirmedSale("sale-9"),
+      error: null,
+    });
+
+    const { result, confirmed } = await confirmOneItem();
+
+    expect(confirmed).toBe(true);
+    expect(result.current.lastConfirmedSaleNumber).toBe("S-000001");
+    expect(reportSkippedPostingMock).toHaveBeenCalledTimes(1);
+    expect(reportSkippedPostingMock).toHaveBeenCalledWith(
+      "sale-9",
+      "pos_confirm",
+      "No open fiscal period covers today's date.",
+    );
+    expect(result.current.postingError).toBe(
+      "No open fiscal period covers today's date.",
+    );
+  });
+
+  it("does not record a second failure when the post itself fails (the service already did)", async () => {
+    getCurrentAccountingContextMock.mockResolvedValue({
+      data: ACCOUNTING_CONTEXT,
+      error: null,
+    });
+    createAndConfirmSaleAndPostJournalsMock.mockResolvedValue({
+      data: {
+        ...confirmedSale("sale-10"),
+        posting: null,
+        postingError: "Sale confirmed but accounting posting failed.",
+      },
+      error: null,
+    });
+
+    const { result, confirmed } = await confirmOneItem();
+
+    expect(confirmed).toBe(true);
+    expect(createAndConfirmSaleAndPostJournalsMock.mock.calls[0][2]).toBe(
+      "pos_confirm",
+    );
+    expect(reportSkippedPostingMock).not.toHaveBeenCalled();
+    expect(result.current.postingError).toBe(
+      "Sale confirmed but accounting posting failed.",
+    );
   });
 });

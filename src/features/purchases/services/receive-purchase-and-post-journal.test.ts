@@ -205,3 +205,25 @@ describe("purchaseService.receivePurchaseAndPostJournal (audit finding #3)", () 
     receiveSpy.mockRestore();
   });
 });
+
+describe("purchaseService.reportSkippedPosting (audit D1)", () => {
+  beforeEach(() => {
+    reportPostingFailureMock.mockReset();
+  });
+
+  it("records one purchase_receive posting failure for the purchase with no business event", () => {
+    purchaseService.reportSkippedPosting(
+      "purchase-77",
+      "No open fiscal period covers today's date.",
+    );
+
+    expect(reportPostingFailureMock).toHaveBeenCalledTimes(1);
+    expect(reportPostingFailureMock).toHaveBeenCalledWith({
+      sourceFlow: "purchase_receive",
+      entityType: "purchase",
+      entityId: "purchase-77",
+      businessEventId: null,
+      errorMessage: "No open fiscal period covers today's date.",
+    });
+  });
+});

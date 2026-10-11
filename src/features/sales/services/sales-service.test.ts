@@ -1247,6 +1247,32 @@ describe("salesService.createAndConfirmSaleAndPostJournals sourceFlow", () => {
   });
 });
 
+describe("salesService.reportSkippedPosting (audit D1)", () => {
+  beforeEach(() => {
+    reportPostingFailureMock.mockReset();
+  });
+
+  it.each(["sale_confirm", "quick_sale_confirm", "pos_confirm"] as const)(
+    "records one %s posting failure for the sale with no business event",
+    (sourceFlow) => {
+      salesService.reportSkippedPosting(
+        "sale-77",
+        sourceFlow,
+        "No open fiscal period covers today's date.",
+      );
+
+      expect(reportPostingFailureMock).toHaveBeenCalledTimes(1);
+      expect(reportPostingFailureMock).toHaveBeenCalledWith({
+        sourceFlow,
+        entityType: "sale",
+        entityId: "sale-77",
+        businessEventId: null,
+        errorMessage: "No open fiscal period covers today's date.",
+      });
+    },
+  );
+});
+
 describe("salesService.markSaleQueued / markSaleFulfilled", () => {
   function mockSalesUpdate(error: unknown = null) {
     const notMock = vi.fn().mockResolvedValue({ data: null, error });

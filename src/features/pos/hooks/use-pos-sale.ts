@@ -249,9 +249,14 @@ export function usePosSale() {
       }
 
       setLastConfirmedSaleNumber(fallback.data.sale.sale_number);
-      setPostingError(
-        contextResult.error ?? "Accounting posting was skipped.",
+      const skippedError =
+        contextResult.error ?? "Accounting posting was skipped.";
+      salesService.reportSkippedPosting(
+        fallback.data.sale.id,
+        "pos_confirm",
+        skippedError,
       );
+      setPostingError(skippedError);
 
       if (sendToQueue) {
         const queued = await salesService.markSaleQueued(fallback.data.sale.id);

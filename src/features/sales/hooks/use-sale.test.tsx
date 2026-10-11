@@ -20,6 +20,7 @@ const {
   getSaleProfitSummaryMock,
   buildFrozenSaleProfitMock,
   getSaleCompletedPostingStatusMock,
+  reportSkippedPostingMock,
 } = vi.hoisted(() => ({
   getSaleMock: vi.fn(),
   confirmSaleMock: vi.fn(),
@@ -29,6 +30,7 @@ const {
   getSaleProfitSummaryMock: vi.fn(),
   buildFrozenSaleProfitMock: vi.fn(),
   getSaleCompletedPostingStatusMock: vi.fn(),
+  reportSkippedPostingMock: vi.fn(),
 }));
 
 vi.mock("../services/sales-read-service", () => ({
@@ -42,6 +44,8 @@ vi.mock("../services/sales-service", () => ({
     confirmSale: (...args: unknown[]) => confirmSaleMock(...args),
     confirmSaleAndPostJournals: (...args: unknown[]) =>
       confirmSaleAndPostJournalsMock(...args),
+    reportSkippedPosting: (...args: unknown[]) =>
+      reportSkippedPostingMock(...args),
     addSaleLine: vi.fn(),
     updateSaleLine: vi.fn(),
     deleteSaleLine: vi.fn(),
@@ -143,6 +147,7 @@ describe("useSale.confirm (accounting posting wiring)", () => {
     getSaleProfitSummaryMock.mockReset();
     buildFrozenSaleProfitMock.mockReset();
     getSaleCompletedPostingStatusMock.mockReset();
+    reportSkippedPostingMock.mockReset();
 
     getSaleMock.mockResolvedValue({ data: draftSale(), error: null });
     getSaleCostSummaryMock.mockResolvedValue({
@@ -283,5 +288,68 @@ describe("useSale.confirm (accounting posting wiring)", () => {
     expect(result.current.sale?.status).toBe("draft");
     expect(result.current.actionError).toBe("Insufficient Finished Goods stock.");
     expect(result.current.postingError).toBeNull();
+  });
+
+  it("records a posting failure once when the accounting context cannot be loaded", async () => {
+    getCurrentAccountingContextMock.mockResolvedValue({
+      data: null,
+      error: "No open fiscal period covers today's date.",
+    });
+    confirmSaleMock.mockResolvedValue({
+      data: { sale: { id: SALE_ID }, total_cogs: 4 },
+      error: null,
+    });
+    getSaleMock.mockResolvedValueOnce({ data: draftSale(), error: null });
+    getSaleMock.mockResolvedValueOnce({ data: confirmedSale(), error: null });
+
+    const { result } = renderHook(() => useSale(SALE_ID));
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    let confirmed: boolean | undefined;
+    await act(async () => {
+      confirmed = await result.current.confirm();
+    });
+
+    expect(confirmed).toBe(true);
+    expect(reportSkippedPostingMock).toHaveBeenCalledTimes(1);
+    expect(reportSkippedPostingMock).toHaveBeenCalledWith(
+      SALE_ID,
+      "sale_confirm",
+      "No open fiscal period covers today's date.",
+    );
+    expect(result.current.postingError).toBe(
+      "No open fiscal period covers today's date.",
+    );
+  });
+
+  it("does not record a second failure when the post itself fails (the service already did)", async () => {
+    getCurrentAccountingContextMock.mockResolvedValue({
+      data: ACCOUNTING_CONTEXT,
+      error: null,
+    });
+    confirmSaleAndPostJournalsMock.mockResolvedValue({
+      data: {
+        sale: { id: SALE_ID },
+        total_cogs: 4,
+        posting: null,
+        postingError: "Sale confirmed but accounting posting failed.",
+      },
+      error: null,
+    });
+    getSaleMock.mockResolvedValueOnce({ data: draftSale(), error: null });
+    getSaleMock.mockResolvedValueOnce({ data: confirmedSale(), error: null });
+
+    const { result } = renderHook(() => useSale(SALE_ID));
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    let confirmed: boolean | undefined;
+    await act(async () => {
+      confirmed = await result.current.confirm();
+    });
+
+    expect(confirmed).toBe(true);
+    expect(reportSkippedPostingMock).not.toHaveBeenCalled();
   });
 });

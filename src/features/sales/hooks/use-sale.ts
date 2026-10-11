@@ -337,9 +337,14 @@ export function useSale(saleId: string) {
       }
 
       setLastConfirmCogs(fallback.data.total_cogs);
-      setPostingError(
-        contextResult.error ?? "Accounting posting was skipped.",
+      const skippedError =
+        contextResult.error ?? "Accounting posting was skipped.";
+      salesService.reportSkippedPosting(
+        fallback.data.sale.id,
+        "sale_confirm",
+        skippedError,
       );
+      setPostingError(skippedError);
     } else {
       const posted = await salesService.confirmSaleAndPostJournals(
         saleId,

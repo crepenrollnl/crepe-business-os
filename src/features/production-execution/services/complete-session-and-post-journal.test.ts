@@ -177,3 +177,25 @@ describe("productionSessionService.completeSessionAndPostJournal (DEV-105)", () 
     completeSessionSpy.mockRestore();
   });
 });
+
+describe("productionSessionService.reportSkippedPosting (audit D1)", () => {
+  beforeEach(() => {
+    reportPostingFailureMock.mockReset();
+  });
+
+  it("records one production_complete posting failure for the session with no business event", () => {
+    productionSessionService.reportSkippedPosting(
+      SESSION_ID,
+      "No open fiscal period covers today's date.",
+    );
+
+    expect(reportPostingFailureMock).toHaveBeenCalledTimes(1);
+    expect(reportPostingFailureMock).toHaveBeenCalledWith({
+      sourceFlow: "production_complete",
+      entityType: "production_session",
+      entityId: SESSION_ID,
+      businessEventId: null,
+      errorMessage: "No open fiscal period covers today's date.",
+    });
+  });
+});
