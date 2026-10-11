@@ -545,9 +545,10 @@ export function useProductionSession(sessionId: string) {
       }
 
       applySession(fallback.data);
-      setPostingError(
-        contextResult.error ?? "Accounting posting was skipped.",
-      );
+      const skippedError =
+        contextResult.error ?? "Accounting posting was skipped.";
+      productionSessionService.reportSkippedPosting(sessionId, skippedError);
+      setPostingError(skippedError);
       setFinishing(false);
       return true;
     }

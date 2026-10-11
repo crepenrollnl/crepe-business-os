@@ -1090,4 +1090,19 @@ export const productionSessionService = {
       postingError: null,
     });
   },
+
+  /**
+   * Records that a completed session's journal was skipped before posting
+   * started (e.g. the accounting context could not be loaded), so the gap
+   * shows in posting_failures. Fire-and-forget; never touches the session.
+   */
+  reportSkippedPosting(sessionId: string, errorMessage: string): void {
+    void reportPostingFailure({
+      sourceFlow: "production_complete",
+      entityType: "production_session",
+      entityId: sessionId,
+      businessEventId: null,
+      errorMessage,
+    });
+  },
 };

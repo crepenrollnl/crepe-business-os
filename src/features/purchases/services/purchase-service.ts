@@ -1100,4 +1100,19 @@ export const purchaseService = {
       error: null,
     };
   },
+
+  /**
+   * Records that a received purchase's journal was skipped before posting
+   * started (e.g. the accounting context could not be loaded), so the gap
+   * shows in posting_failures. Fire-and-forget; never touches the purchase.
+   */
+  reportSkippedPosting(purchaseId: string, errorMessage: string): void {
+    void reportPostingFailure({
+      sourceFlow: "purchase_receive",
+      entityType: "purchase",
+      entityId: purchaseId,
+      businessEventId: null,
+      errorMessage,
+    });
+  },
 };

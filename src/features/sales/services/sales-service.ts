@@ -1074,6 +1074,28 @@ export const salesService = {
   },
 
   /**
+   * Records that a confirmed sale's journals were skipped before posting
+   * started (e.g. the accounting context could not be loaded), so the gap
+   * shows in posting_failures. Fire-and-forget; never touches the sale.
+   */
+  reportSkippedPosting(
+    saleId: string,
+    sourceFlow: Extract<
+      PostingFailureSourceFlow,
+      "sale_confirm" | "quick_sale_confirm" | "pos_confirm"
+    >,
+    errorMessage: string,
+  ): void {
+    void reportPostingFailure({
+      sourceFlow,
+      entityType: "sale",
+      entityId: saleId,
+      businessEventId: null,
+      errorMessage,
+    });
+  },
+
+  /**
    * Put a just-confirmed sale into the kitchen queue by clearing the
    * default-ready stamp the draft→confirmed trigger wrote. Call only when
    * the seller ticked "Send to queue". Does not touch confirm_sale.

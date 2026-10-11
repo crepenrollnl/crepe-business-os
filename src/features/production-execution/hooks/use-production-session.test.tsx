@@ -19,6 +19,7 @@ const {
   loadRecipeBomsForCompletionMock,
   loadRecipeCompletionLookupsMock,
   saveSessionProgressMock,
+  reportSkippedPostingMock,
 } = vi.hoisted(() => ({
   getSessionByIdMock: vi.fn(),
   completeSessionMock: vi.fn(),
@@ -27,6 +28,7 @@ const {
   loadRecipeBomsForCompletionMock: vi.fn(),
   loadRecipeCompletionLookupsMock: vi.fn(),
   saveSessionProgressMock: vi.fn(),
+  reportSkippedPostingMock: vi.fn(),
 }));
 
 vi.mock("../services/production-session-service", () => ({
@@ -40,6 +42,8 @@ vi.mock("../services/production-session-service", () => ({
     loadRecipeCompletionLookups: (...args: unknown[]) =>
       loadRecipeCompletionLookupsMock(...args),
     saveSessionProgress: (...args: unknown[]) => saveSessionProgressMock(...args),
+    reportSkippedPosting: (...args: unknown[]) =>
+      reportSkippedPostingMock(...args),
   },
 }));
 
@@ -121,6 +125,7 @@ describe("useProductionSession.finishProduction (accounting posting wiring)", ()
     loadRecipeBomsForCompletionMock.mockReset();
     loadRecipeCompletionLookupsMock.mockReset();
     saveSessionProgressMock.mockReset();
+    reportSkippedPostingMock.mockReset();
 
     getSessionByIdMock.mockResolvedValue({ data: sessionFixture(), error: null });
     loadRecipeBomsForCompletionMock.mockResolvedValue({
@@ -236,6 +241,64 @@ describe("useProductionSession.finishProduction (accounting posting wiring)", ()
       "No open fiscal period covers today's date.",
     );
     expect(result.current.actionError).toBeNull();
+  });
+
+  it("records a posting failure once when the accounting context cannot be loaded", async () => {
+    getCurrentAccountingContextMock.mockResolvedValue({
+      data: null,
+      error: "No open fiscal period covers today's date.",
+    });
+    completeSessionMock.mockResolvedValue({
+      data: completedFixture(),
+      error: null,
+    });
+    getSessionByIdMock.mockResolvedValueOnce({ data: sessionFixture(), error: null });
+
+    const { result } = renderHook(() => useProductionSession(SESSION_ID));
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    let ok: boolean | undefined;
+    await act(async () => {
+      ok = await result.current.finishProduction();
+    });
+
+    expect(ok).toBe(true);
+    expect(result.current.session?.status).toBe("completed");
+    expect(reportSkippedPostingMock).toHaveBeenCalledTimes(1);
+    expect(reportSkippedPostingMock).toHaveBeenCalledWith(
+      SESSION_ID,
+      "No open fiscal period covers today's date.",
+    );
+  });
+
+  it("does not record a second failure when the post itself fails (the service already did)", async () => {
+    getCurrentAccountingContextMock.mockResolvedValue({
+      data: ACCOUNTING_CONTEXT,
+      error: null,
+    });
+    completeSessionAndPostJournalMock.mockResolvedValue({
+      data: {
+        session: completedFixture(),
+        posting: null,
+        postingError: "Production completed but accounting posting failed.",
+      },
+      error: null,
+    });
+    getSessionByIdMock.mockResolvedValueOnce({ data: sessionFixture(), error: null });
+    getSessionByIdMock.mockResolvedValueOnce({ data: completedFixture(), error: null });
+
+    const { result } = renderHook(() => useProductionSession(SESSION_ID));
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    let ok: boolean | undefined;
+    await act(async () => {
+      ok = await result.current.finishProduction();
+    });
+
+    expect(ok).toBe(true);
+    expect(reportSkippedPostingMock).not.toHaveBeenCalled();
   });
 
   it("does not apply any session and surfaces actionError when completeSession itself fails", async () => {
