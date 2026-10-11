@@ -9,7 +9,7 @@
  * Finished Goods / Sale rows, or calculate COGS / totals locally.
  */
 
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { supabaseMock, postJournalsForSaleCompletedMock, reportPostingFailureMock } =
   vi.hoisted(() => {
@@ -1274,86 +1274,100 @@ describe("salesService.reportSkippedPosting (audit D1)", () => {
 });
 
 describe("salesService.markSaleQueued / markSaleFulfilled", () => {
-  function mockSalesUpdate(error: unknown = null) {
-    const notMock = vi.fn().mockResolvedValue({ data: null, error });
-    const isMock = vi.fn().mockResolvedValue({ data: null, error });
-    const eqMock = vi.fn().mockReturnValue({
-      not: notMock,
-      is: isMock,
-    });
-    const updateFn = vi.fn().mockReturnValue({ eq: eqMock });
-
-    supabaseMock.from.mockImplementation((table: string) => {
-      if (table === "sales") {
-        return {
-          update: updateFn,
-          select: vi.fn(),
-          insert: insertMock,
-          delete: deleteMock,
-        };
-      }
-
-      throw new Error(`Unexpected table: ${table}`);
-    });
-
-    return { updateFn, eqMock, notMock, isMock };
-  }
-
   beforeEach(() => {
     vi.clearAllMocks();
-    insertMock.mockReset();
-    updateMock.mockReset();
-    deleteMock.mockReset();
   });
 
-  afterEach(() => {
-    vi.useRealTimers();
-  });
+  it("rejects an invalid sale id without calling the RPC", async () => {
+    const queued = await salesService.markSaleQueued("not-a-uuid");
+    expect(queued.data).toBeNull();
+    expect(queued.error).toBe("Sale id is required.");
 
-  it("rejects an invalid sale id without touching the table", async () => {
-    const result = await salesService.markSaleQueued("not-a-uuid");
+    const fulfilled = await salesService.markSaleFulfilled("not-a-uuid");
+    expect(fulfilled.data).toBeNull();
+    expect(fulfilled.error).toBe("Sale id is required.");
 
-    expect(result.data).toBeNull();
-    expect(result.error).toBe("Sale id is required.");
+    expect(supabaseMock.rpc).not.toHaveBeenCalled();
     expect(supabaseMock.from).not.toHaveBeenCalled();
   });
 
-  it("clears fulfilled_at only when it is already set", async () => {
-    const { updateFn, eqMock, notMock, isMock } = mockSalesUpdate();
+  it("calls mark_sale_queued and does not UPDATE sales", async () => {
+    supabaseMock.rpc.mockResolvedValue({
+      data: { id: SALE_ID, fulfilled_at: null, changed: true },
+      error: null,
+    });
 
     const result = await salesService.markSaleQueued(SALE_ID);
 
     expect(result.error).toBeNull();
     expect(result.data).toEqual({ id: SALE_ID });
-    expect(supabaseMock.from).toHaveBeenCalledWith("sales");
-    expect(updateFn).toHaveBeenCalledWith({ fulfilled_at: null });
-    expect(eqMock).toHaveBeenCalledWith("id", SALE_ID);
-    expect(notMock).toHaveBeenCalledWith("fulfilled_at", "is", null);
-    expect(isMock).not.toHaveBeenCalled();
-    expect(supabaseMock.rpc).not.toHaveBeenCalled();
+    expect(supabaseMock.rpc).toHaveBeenCalledTimes(1);
+    expect(supabaseMock.rpc).toHaveBeenCalledWith("mark_sale_queued", {
+      p_sale_id: SALE_ID,
+    });
+    expect(supabaseMock.from).not.toHaveBeenCalled();
   });
 
-  it("stamps fulfilled_at only when it is still null", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-08-20T10:00:00.000Z"));
-    const { updateFn, eqMock, isMock, notMock } = mockSalesUpdate();
+  it("calls mark_sale_fulfilled without sending a timestamp and does not UPDATE sales", async () => {
+    supabaseMock.rpc.mockResolvedValue({
+      data: {
+        id: SALE_ID,
+        fulfilled_at: "2026-10-11T10:00:00.000Z",
+        changed: true,
+      },
+      error: null,
+    });
 
     const result = await salesService.markSaleFulfilled(SALE_ID);
 
     expect(result.error).toBeNull();
     expect(result.data).toEqual({ id: SALE_ID });
-    expect(updateFn).toHaveBeenCalledWith({
-      fulfilled_at: "2026-08-20T10:00:00.000Z",
+    expect(supabaseMock.rpc).toHaveBeenCalledTimes(1);
+    expect(supabaseMock.rpc).toHaveBeenCalledWith("mark_sale_fulfilled", {
+      p_sale_id: SALE_ID,
     });
-    expect(eqMock).toHaveBeenCalledWith("id", SALE_ID);
-    expect(isMock).toHaveBeenCalledWith("fulfilled_at", null);
-    expect(notMock).not.toHaveBeenCalled();
-    expect(supabaseMock.rpc).not.toHaveBeenCalled();
-    vi.useRealTimers();
+    expect(supabaseMock.from).not.toHaveBeenCalled();
   });
 
-  it("maps database errors without throwing", async () => {
-    mockSalesUpdate({});
+  it("treats a repeat call (changed: false) as success", async () => {
+    supabaseMock.rpc.mockResolvedValue({
+      data: { id: SALE_ID, fulfilled_at: null, changed: false },
+      error: null,
+    });
+
+    const result = await salesService.markSaleQueued(SALE_ID);
+
+    expect(result.error).toBeNull();
+    expect(result.data).toEqual({ id: SALE_ID });
+  });
+
+  it("surfaces the RPC error message verbatim", async () => {
+    supabaseMock.rpc.mockResolvedValueOnce({
+      data: null,
+      error: {
+        message:
+          "Only a confirmed sale can be sent to the kitchen queue (status: draft).",
+      },
+    });
+
+    const queued = await salesService.markSaleQueued(SALE_ID);
+    expect(queued.data).toBeNull();
+    expect(queued.error).toBe(
+      "Only a confirmed sale can be sent to the kitchen queue (status: draft).",
+    );
+
+    supabaseMock.rpc.mockResolvedValueOnce({
+      data: null,
+      error: { message: "Sale was not found." },
+    });
+
+    const fulfilled = await salesService.markSaleFulfilled(SALE_ID);
+    expect(fulfilled.data).toBeNull();
+    expect(fulfilled.error).toBe("Sale was not found.");
+  });
+
+  it("falls back to the default message when the RPC error has none", async () => {
+    supabaseMock.rpc.mockResolvedValue({ data: null, error: {} });
 
     const queued = await salesService.markSaleQueued(SALE_ID);
     expect(queued.data).toBeNull();
