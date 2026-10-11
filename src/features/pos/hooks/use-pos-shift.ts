@@ -2,8 +2,6 @@
 
 import { useCallback, useState } from "react";
 import { cashReconciliationService } from "@/features/shifts/services/cash-reconciliation-service";
-import { dailyProfitSummaryService } from "@/features/shifts/services/daily-profit-summary-service";
-import { dailySalesSummaryService } from "@/features/shifts/services/daily-sales-summary-service";
 import { shiftService } from "@/features/shifts/services/shift-service";
 import type { CashReconciliation } from "@/features/shifts/types/cash-reconciliation";
 import type { Shift } from "@/features/shifts/types/shift";
@@ -128,31 +126,10 @@ export function usePosShift() {
       return false;
     }
 
+    // close_shift wrote both daily summaries in the same transaction.
     const closed = result.data.shift;
     setActiveShift(null);
     setClosedShift(closed);
-
-    const salesResult =
-      await dailySalesSummaryService.generateForClosedShift(closed);
-
-    if (salesResult.error || !salesResult.data) {
-      setActionError(
-        salesResult.error ?? "Failed to generate daily sales summary",
-      );
-      setMutating(false);
-      return true;
-    }
-
-    const profitResult =
-      await dailyProfitSummaryService.generateForClosedShift(closed);
-
-    if (profitResult.error || !profitResult.data) {
-      setActionError(
-        profitResult.error ?? "Failed to generate daily profit summary",
-      );
-      setMutating(false);
-      return true;
-    }
 
     const reconciliationError = await loadReconciliationForShift(closed);
     if (reconciliationError) {

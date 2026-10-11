@@ -5,6 +5,9 @@
  * Only one open shift may exist at a time. Closed shifts are historical.
  */
 
+import type { DailyProfitSummary } from "./daily-profit-summary";
+import type { DailySalesSummary } from "./daily-sales-summary";
+
 export const SHIFT_STATUSES = ["open", "closed"] as const;
 
 export type ShiftStatus = (typeof SHIFT_STATUSES)[number];
@@ -33,4 +36,8 @@ export interface OpenShiftResult {
 
 export interface CloseShiftResult {
   shift: Shift;
+  /** Written by close_shift in the same transaction as the close. */
+  salesSummary: DailySalesSummary;
+  /** Written by close_shift in the same transaction as the close. */
+  profitSummary: DailyProfitSummary;
 }

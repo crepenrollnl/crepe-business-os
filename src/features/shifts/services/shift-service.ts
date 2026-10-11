@@ -2,7 +2,8 @@
  * Shift Management service (DEV-112).
  *
  * Open / close / active lookup for the business-day shift container.
- * Enforces a single open shift. Closed shifts are never mutated again.
+ * Writes go through open_shift / close_shift (sql/142), which enforce a
+ * single open shift; closed shifts are never mutated again.
  */
 
 import { toUserError } from "@/lib/service-errors";
@@ -24,6 +25,14 @@ import {
   validateCloseShiftInput,
   validateOpenShiftInput,
 } from "../utils/shift-validation";
+import {
+  mapDailyProfitSummary,
+  type DailyProfitSummaryRow,
+} from "./daily-profit-summary-service";
+import {
+  mapDailySalesSummary,
+  type DailySalesSummaryRow,
+} from "./daily-sales-summary-service";
 
 interface ShiftRow {
   id: string;
@@ -32,6 +41,13 @@ interface ShiftRow {
   status: string;
   notes: string | null;
   created_at: string;
+}
+
+/** close_shift (sql/142) jsonb result. */
+interface CloseShiftRpcResult {
+  shift: ShiftRow;
+  sales_summary: DailySalesSummaryRow;
+  profit_summary: DailyProfitSummaryRow;
 }
 
 const SHIFT_SELECT =
@@ -207,7 +223,8 @@ export const shiftService = {
   },
 
   /**
-   * Open a new shift. Fails when another shift is already open.
+   * Open a new shift via open_shift (sql/142). The server enforces the
+   * single open shift, stamps opened_at and takes the user from the login.
    */
   async openShift(
     input: OpenShiftInput = {},
@@ -218,43 +235,15 @@ export const shiftService = {
         return fail(validationError);
       }
 
-      const {
-        data: { user },
-        error: authError,
-      } = await supabase.auth.getUser();
-
-      if (authError || !user) {
-        return fail("You must be signed in to open a shift.");
-      }
-
-      const activeResult = await this.getActiveShift();
-      if (activeResult.error) {
-        return fail(activeResult.error);
-      }
-
-      const openGuard = assertCanOpenShift(activeResult.data);
-      if (openGuard) {
-        return fail(openGuard);
-      }
-
-      const nowIso = new Date().toISOString();
-      const { data, error } = await supabase
-        .from("shifts")
-        .insert({
-          status: "open",
-          opened_at: nowIso,
-          closed_at: null,
-          notes: optionalNotes(input.notes),
-          opened_by: user.id,
-        })
-        .select(SHIFT_SELECT)
-        .single();
+      const { data, error } = await supabase.rpc("open_shift", {
+        p_notes: optionalNotes(input.notes),
+      });
 
       if (error) {
         return fail(mapShiftError(error, "Failed to open shift"));
       }
 
-      const mapped = mapShift(data as ShiftRow);
+      const mapped = data ? mapShift(data as ShiftRow) : null;
       if (!mapped) {
         return fail("Shift opened but the response was invalid.");
       }
@@ -266,7 +255,10 @@ export const shiftService = {
   },
 
   /**
-   * Close an open shift. Preserves historical opened_at / created_at.
+   * Close an open shift via close_shift (sql/142). The shift and both
+   * daily summaries are written in one transaction on the server, so the
+   * summaries come back with the closed shift. notes undefined keeps the
+   * shift's current notes.
    */
   async closeShift(
     input: CloseShiftInput,
@@ -277,75 +269,29 @@ export const shiftService = {
         return fail(validationError);
       }
 
-      const {
-        data: { user },
-        error: authError,
-      } = await supabase.auth.getUser();
-
-      if (authError || !user) {
-        return fail("You must be signed in to close a shift.");
-      }
-
-      const shiftId = input.shift_id.trim();
-
-      const { data: existing, error: loadError } = await supabase
-        .from("shifts")
-        .select(SHIFT_SELECT)
-        .eq("id", shiftId)
-        .maybeSingle();
-
-      if (loadError) {
-        return fail(mapShiftError(loadError, "Failed to load shift"));
-      }
-
-      const current = existing ? mapShift(existing as ShiftRow) : null;
-      const closeGuard = assertCanCloseShift(current);
-      if (closeGuard) {
-        return fail(closeGuard);
-      }
-
-      if (!current) {
-        return fail("Shift was not found.");
-      }
-
-      const nowIso = new Date().toISOString();
-      const nextNotes =
-        input.notes !== undefined
-          ? optionalNotes(input.notes)
-          : current.notes;
-
-      const { data, error } = await supabase
-        .from("shifts")
-        .update({
-          status: "closed",
-          closed_at: nowIso,
-          notes: nextNotes,
-          closed_by: user.id,
-        })
-        .eq("id", shiftId)
-        .eq("status", "open")
-        .select(SHIFT_SELECT)
-        .maybeSingle();
+      const { data, error } = await supabase.rpc("close_shift", {
+        p_shift_id: input.shift_id.trim(),
+        p_notes: input.notes === undefined ? null : optionalNotes(input.notes),
+      });
 
       if (error) {
         return fail(mapShiftError(error, "Failed to close shift"));
       }
 
-      if (!data) {
-        return fail("This shift is already closed.");
-      }
+      const result = data as CloseShiftRpcResult | null;
+      const shift = result?.shift ? mapShift(result.shift) : null;
+      const salesSummary = result?.sales_summary
+        ? mapDailySalesSummary(result.sales_summary)
+        : null;
+      const profitSummary = result?.profit_summary
+        ? mapDailyProfitSummary(result.profit_summary)
+        : null;
 
-      const mapped = mapShift(data as ShiftRow);
-      if (!mapped) {
+      if (!shift || !salesSummary || !profitSummary) {
         return fail("Shift closed but the response was invalid.");
       }
 
-      // Closed record must preserve identity + opened_at.
-      if (mapped.opened_at !== current.opened_at || mapped.id !== current.id) {
-        return fail("Closed shifts are immutable historical records.");
-      }
-
-      return ok({ shift: mapped });
+      return ok({ shift, salesSummary, profitSummary });
     } catch (error) {
       return fail(mapShiftError(error, "Failed to close shift"));
     }

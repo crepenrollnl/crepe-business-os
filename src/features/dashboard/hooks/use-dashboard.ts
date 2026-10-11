@@ -3,8 +3,6 @@
 import { useCallback, useState } from "react";
 import { useAsyncEffect } from "@/hooks/use-async-effect";
 import { cashReconciliationService } from "@/features/shifts/services/cash-reconciliation-service";
-import { dailyProfitSummaryService } from "@/features/shifts/services/daily-profit-summary-service";
-import { dailySalesSummaryService } from "@/features/shifts/services/daily-sales-summary-service";
 import { shiftService } from "@/features/shifts/services/shift-service";
 import type { CashReconciliation } from "@/features/shifts/types/cash-reconciliation";
 import type { Shift } from "@/features/shifts/types/shift";
@@ -164,32 +162,8 @@ export function useDashboard() {
       return false;
     }
 
-    const closed = result.data.shift;
-
-    const salesResult =
-      await dailySalesSummaryService.generateForClosedShift(closed);
-
-    if (salesResult.error || !salesResult.data) {
-      setActionError(
-        salesResult.error ?? "Failed to generate daily sales summary",
-      );
-      await loadDashboard();
-      setMutating(false);
-      return true;
-    }
-
-    const profitResult =
-      await dailyProfitSummaryService.generateForClosedShift(closed);
-
-    if (profitResult.error || !profitResult.data) {
-      setActionError(
-        profitResult.error ?? "Failed to generate daily profit summary",
-      );
-      await loadDashboard();
-      setMutating(false);
-      return true;
-    }
-
+    // close_shift wrote both daily summaries in the same transaction;
+    // the reload picks up the closed shift, summaries and reconciliation.
     await loadDashboard();
     setMutating(false);
     return true;
