@@ -1098,7 +1098,10 @@ export const salesService = {
   /**
    * Put a just-confirmed sale into the kitchen queue by clearing the
    * default-ready stamp the draft→confirmed trigger wrote. Call only when
-   * the seller ticked "Send to queue". Does not touch confirm_sale.
+   * the seller ticked "Send to queue". Calls mark_sale_queued (sql/139) so
+   * the client never UPDATEs sales directly; the RPC accepts only a
+   * confirmed/paid sale and a repeat call is a no-op. Does not touch
+   * confirm_sale.
    */
   async markSaleQueued(saleId: string): Promise<ServiceResult<{ id: string }>> {
     const validationError = validateConfirmSaleInput(saleId);
@@ -1109,11 +1112,9 @@ export const salesService = {
     const trimmed = saleId.trim();
 
     try {
-      const { error } = await supabase
-        .from("sales")
-        .update({ fulfilled_at: null })
-        .eq("id", trimmed)
-        .not("fulfilled_at", "is", null);
+      const { error } = await supabase.rpc("mark_sale_queued", {
+        p_sale_id: trimmed,
+      });
 
       if (error) {
         return fail(toUserError(error, "Failed to send sale to the queue."));
@@ -1126,8 +1127,10 @@ export const salesService = {
   },
 
   /**
-   * Mark a queued sale as ready (cook pressed Done). Does not touch
-   * confirm_sale, stock, or journals.
+   * Mark a queued sale as ready (cook pressed Done). Calls
+   * mark_sale_fulfilled (sql/139): the server clock stamps fulfilled_at,
+   * only a confirmed/paid sale is accepted, and a repeat call is a no-op.
+   * Does not touch confirm_sale, stock, or journals.
    */
   async markSaleFulfilled(
     saleId: string,
@@ -1140,11 +1143,9 @@ export const salesService = {
     const trimmed = saleId.trim();
 
     try {
-      const { error } = await supabase
-        .from("sales")
-        .update({ fulfilled_at: new Date().toISOString() })
-        .eq("id", trimmed)
-        .is("fulfilled_at", null);
+      const { error } = await supabase.rpc("mark_sale_fulfilled", {
+        p_sale_id: trimmed,
+      });
 
       if (error) {
         return fail(toUserError(error, "Failed to mark sale as ready."));
