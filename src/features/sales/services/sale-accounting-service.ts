@@ -48,7 +48,7 @@ import type {
   SaleJournalPostings,
   SaleJournalProposals,
 } from "../types/sale-accounting";
-import type { SaleWithLines } from "../types/sale";
+import type { SalePostingHeader } from "../types/sale";
 import { stableBusinessEventId } from "../utils/stable-business-event-id";
 
 function saleRevenueIdempotencyKey(saleId: string): string {
@@ -97,7 +97,7 @@ function resolveCogsRules(
  * Build the sale_completed Business Event (frozen revenue + VAT facts).
  */
 export function buildSaleCompletedBusinessEvent(
-  sale: SaleWithLines,
+  sale: SalePostingHeader,
   accounting: Pick<
     SaleAccountingContext,
     | "baseCurrency"
@@ -167,7 +167,7 @@ export function buildSaleCompletedBusinessEvent(
  * Build the cogs_recognized Business Event (frozen COGS from DEV-108).
  */
 export function buildCogsRecognizedBusinessEvent(
-  sale: SaleWithLines,
+  sale: SalePostingHeader,
   totalCogs: number,
   accounting: Pick<
     SaleAccountingContext,

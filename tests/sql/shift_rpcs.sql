@@ -148,8 +148,8 @@ BEGIN
   VALUES ('TEST_S1S4_comp_' || v_tag, 1, 'pcs', true, 'component')
   RETURNING id INTO v_comp;
   PERFORM public.dryrun142_batch(v_comp, 10, 2.00, v_tag);
-  INSERT INTO recipes (name, yield_quantity, yield_unit, is_active, recipe_role)
-  VALUES ('TEST_S1S4_dish_' || v_tag, 1, 'pcs', true, 'assembly')
+  INSERT INTO recipes (name, yield_quantity, yield_unit, is_active, recipe_role, selling_price)
+  VALUES ('TEST_S1S4_dish_' || v_tag, 1, 'pcs', true, 'assembly', 10.00)
   RETURNING id INTO v_dish;
   INSERT INTO recipe_components (assembly_recipe_id, component_recipe_id, quantity, unit)
   VALUES (v_dish, v_comp, 1, 'pcs');
@@ -177,9 +177,13 @@ BEGIN
     p_customer_id => NULL,
     p_lines => jsonb_build_array(jsonb_build_object('product_id', v_dish, 'quantity', 2, 'unit_price', 10.00)))
     ->> 'sale_id')::uuid;
+  -- Since sql/146 the line price is always the dish price (10.00); the
+  -- second sale pays 5.00 through a 50% header discount.
   v_sale2 := (create_and_confirm_sale(
     p_customer_id => NULL,
-    p_lines => jsonb_build_array(jsonb_build_object('product_id', v_dish, 'quantity', 1, 'unit_price', 5.00)))
+    p_lines => jsonb_build_array(jsonb_build_object('product_id', v_dish, 'quantity', 1, 'unit_price', 10.00)),
+    p_discount_type => 'percent',
+    p_discount_value => 50)
     ->> 'sale_id')::uuid;
 
   -- One of the two sales is in status 'paid' — it must still count.

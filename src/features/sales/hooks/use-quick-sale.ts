@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { accountingContextService } from "@/features/accounting/services/accounting-context-service";
 import { recipeService } from "@/features/recipes/services/recipe-service";
 import { useAsyncEffect } from "@/hooks/use-async-effect";
@@ -8,10 +8,16 @@ import { calculateMoneyLineTotal, roundMoney } from "@/lib/money";
 import { salesReadService } from "../services/sales-read-service";
 import { salesService } from "../services/sales-service";
 import type { QuickSaleLineInput, SaleDiscountType } from "../types/sale";
+import { confirmWarning } from "../utils/confirm-warning";
 import {
   parseDiscountInput,
   resolveSaleHeaderDiscount,
 } from "../utils/quick-sale-discount";
+import {
+  describeReprice,
+  isPriceChangedError,
+  repriceCart,
+} from "../utils/reprice-cart";
 import {
   sortByProductName,
   sortBySoldQuantity,
@@ -86,6 +92,15 @@ export function useQuickSale() {
     useState<SaleDiscountType>("percent");
   const [discountInput, setDiscountInput] = useState("");
 
+  /**
+   * Idempotency token for the current checkout attempt (sql/118, audit D3),
+   * same contract as use-pos-sale: created once per cart on the first
+   * confirm(), kept across a failed attempt so a retry after a lost
+   * response returns the already-committed sale instead of selling twice,
+   * reset when the cart changes and after a successful confirm.
+   */
+  const clientRequestIdRef = useRef<string | null>(null);
+
   const loadProducts = useCallback(async () => {
     setLoading(true);
     const result = await fetchQuickSaleProducts();
@@ -99,6 +114,7 @@ export function useQuickSale() {
   const addToCart = useCallback((product: QuickSaleProduct) => {
     setActionError(null);
     setLastConfirmedSaleNumber(null);
+    clientRequestIdRef.current = null;
 
     // Unit price is frozen from the product at the moment it's tapped, not
     // re-read at confirm time -- matches the approved plan ("unit_price =
@@ -121,6 +137,8 @@ export function useQuickSale() {
   }, []);
 
   const incrementLine = useCallback((productId: string) => {
+    clientRequestIdRef.current = null;
+
     setCart((current) => {
       const existing = current[productId];
 
@@ -136,6 +154,8 @@ export function useQuickSale() {
   }, []);
 
   const decrementLine = useCallback((productId: string) => {
+    clientRequestIdRef.current = null;
+
     setCart((current) => {
       const existing = current[productId];
 
@@ -191,6 +211,28 @@ export function useQuickSale() {
     [itemsTotal, discountType, discountValue],
   );
 
+  /**
+   * The catalog price changed since the tile was tapped (sql/146 rejects the
+   * stale price). Reload the products, re-price the cart from the fresh
+   * selling_price, drop lines no longer for sale, and say so.
+   */
+  const repriceAfterPriceChange = useCallback(
+    async (priceError: string) => {
+      const fresh = await fetchQuickSaleProducts();
+      if (fresh.error) {
+        setActionError(priceError);
+        return;
+      }
+
+      setProducts(fresh.data);
+      const repriced = repriceCart(cart, fresh.data);
+      clientRequestIdRef.current = null;
+      setCart(repriced.cart);
+      setActionError(describeReprice(priceError, repriced.removedNames));
+    },
+    [cart],
+  );
+
   const confirm = useCallback(async () => {
     if (cartLines.length === 0) {
       return false;
@@ -204,6 +246,11 @@ export function useQuickSale() {
     setConfirming(true);
     setActionError(null);
     setPostingError(null);
+
+    if (!clientRequestIdRef.current) {
+      clientRequestIdRef.current = crypto.randomUUID();
+    }
+    const clientRequestId = clientRequestIdRef.current;
 
     const lines: QuickSaleLineInput[] = cartLines.map((line) => ({
       product_id: line.product_id,
@@ -222,26 +269,32 @@ export function useQuickSale() {
         kitchen_note: kitchenNote,
         discount_type: discountValue === null ? null : discountType,
         discount_value: discountValue,
+        client_request_id: clientRequestId,
       });
 
       if (fallback.error || !fallback.data) {
-        setActionError(fallback.error ?? "Failed to confirm sale");
+        const message = fallback.error ?? "Failed to confirm sale";
+        if (isPriceChangedError(message)) {
+          await repriceAfterPriceChange(message);
+        } else {
+          setActionError(message);
+        }
         setConfirming(false);
         return false;
       }
 
-      setLastConfirmedSaleNumber(fallback.data.sale.sale_number);
+      setLastConfirmedSaleNumber(fallback.data.sale?.sale_number ?? null);
       const skippedError =
         contextResult.error ?? "Accounting posting was skipped.";
       salesService.reportSkippedPosting(
-        fallback.data.sale.id,
+        fallback.data.sale_id,
         "quick_sale_confirm",
         skippedError,
       );
-      setPostingError(skippedError);
+      setPostingError(confirmWarning(fallback.data.reloadError, skippedError));
 
       if (sendToQueue) {
-        const queued = await salesService.markSaleQueued(fallback.data.sale.id);
+        const queued = await salesService.markSaleQueued(fallback.data.sale_id);
         if (queued.error) {
           setPostingError(queued.error);
         }
@@ -253,27 +306,38 @@ export function useQuickSale() {
           kitchen_note: kitchenNote,
           discount_type: discountValue === null ? null : discountType,
           discount_value: discountValue,
+          client_request_id: clientRequestId,
         },
         contextResult.data,
       );
 
       if (posted.error || !posted.data) {
-        setActionError(posted.error ?? "Failed to confirm sale");
+        const message = posted.error ?? "Failed to confirm sale";
+        if (isPriceChangedError(message)) {
+          await repriceAfterPriceChange(message);
+        } else {
+          setActionError(message);
+        }
         setConfirming(false);
         return false;
       }
 
-      setLastConfirmedSaleNumber(posted.data.sale.sale_number);
-      setPostingError(posted.data.postingError);
+      setLastConfirmedSaleNumber(posted.data.sale?.sale_number ?? null);
+      const warning = confirmWarning(
+        posted.data.reloadError,
+        posted.data.postingError,
+      );
+      setPostingError(warning);
 
       if (sendToQueue) {
-        const queued = await salesService.markSaleQueued(posted.data.sale.id);
+        const queued = await salesService.markSaleQueued(posted.data.sale_id);
         if (queued.error) {
-          setPostingError(posted.data.postingError ?? queued.error);
+          setPostingError(warning ?? queued.error);
         }
       }
     }
 
+    clientRequestIdRef.current = null;
     setCart({});
     setSendToQueue(false);
     setKitchenNote("");
@@ -288,6 +352,7 @@ export function useQuickSale() {
     discountPreview.error,
     discountType,
     discountValue,
+    repriceAfterPriceChange,
   ]);
 
   return {

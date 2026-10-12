@@ -171,8 +171,10 @@ describe("useSale.confirm (accounting posting wiring)", () => {
     });
     confirmSaleAndPostJournalsMock.mockResolvedValue({
       data: {
+        sale_id: SALE_ID,
         sale: { id: SALE_ID },
         total_cogs: 4,
+        reloadError: null,
         posting: { sale: {}, total_cogs: 4, revenue: {}, cogs: {} },
         postingError: null,
       },
@@ -206,8 +208,10 @@ describe("useSale.confirm (accounting posting wiring)", () => {
     });
     confirmSaleAndPostJournalsMock.mockResolvedValue({
       data: {
+        sale_id: SALE_ID,
         sale: { id: SALE_ID },
         total_cogs: 4,
+        reloadError: null,
         posting: null,
         postingError: "Sale confirmed but accounting posting failed.",
       },
@@ -239,7 +243,12 @@ describe("useSale.confirm (accounting posting wiring)", () => {
       error: "No open fiscal period covers today's date.",
     });
     confirmSaleMock.mockResolvedValue({
-      data: { sale: { id: SALE_ID }, total_cogs: 4 },
+      data: {
+        sale_id: SALE_ID,
+        sale: { id: SALE_ID },
+        total_cogs: 4,
+        reloadError: null,
+      },
       error: null,
     });
     getSaleMock.mockResolvedValueOnce({ data: draftSale(), error: null });
@@ -296,7 +305,12 @@ describe("useSale.confirm (accounting posting wiring)", () => {
       error: "No open fiscal period covers today's date.",
     });
     confirmSaleMock.mockResolvedValue({
-      data: { sale: { id: SALE_ID }, total_cogs: 4 },
+      data: {
+        sale_id: SALE_ID,
+        sale: { id: SALE_ID },
+        total_cogs: 4,
+        reloadError: null,
+      },
       error: null,
     });
     getSaleMock.mockResolvedValueOnce({ data: draftSale(), error: null });
@@ -330,8 +344,10 @@ describe("useSale.confirm (accounting posting wiring)", () => {
     });
     confirmSaleAndPostJournalsMock.mockResolvedValue({
       data: {
+        sale_id: SALE_ID,
         sale: { id: SALE_ID },
         total_cogs: 4,
+        reloadError: null,
         posting: null,
         postingError: "Sale confirmed but accounting posting failed.",
       },
@@ -351,5 +367,80 @@ describe("useSale.confirm (accounting posting wiring)", () => {
 
     expect(confirmed).toBe(true);
     expect(reportSkippedPostingMock).not.toHaveBeenCalled();
+  });
+
+  it("shows the page as confirmed when the service could not reload the committed sale (audit D3)", async () => {
+    getCurrentAccountingContextMock.mockResolvedValue({
+      data: ACCOUNTING_CONTEXT,
+      error: null,
+    });
+    confirmSaleAndPostJournalsMock.mockResolvedValue({
+      data: {
+        sale_id: SALE_ID,
+        sale: null,
+        total_cogs: 4,
+        reloadError: "Statement timeout.",
+        posting: { sale: {}, total_cogs: 4, revenue: {}, cogs: {} },
+        postingError: null,
+      },
+      error: null,
+    });
+    getSaleMock.mockResolvedValueOnce({ data: draftSale(), error: null });
+    getSaleMock.mockResolvedValueOnce({ data: confirmedSale(), error: null });
+
+    const { result } = renderHook(() => useSale(SALE_ID));
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    let confirmed: boolean | undefined;
+    await act(async () => {
+      confirmed = await result.current.confirm();
+    });
+
+    expect(confirmed).toBe(true);
+    expect(result.current.actionError).toBeNull();
+    expect(result.current.sale?.status).toBe("confirmed");
+    expect(result.current.postingError).toBe(
+      "Sale confirmed, but it could not be reloaded: Statement timeout.",
+    );
+  });
+
+  it("keeps the confirmation and warns when the page reload after confirm fails (audit D3)", async () => {
+    getCurrentAccountingContextMock.mockResolvedValue({
+      data: ACCOUNTING_CONTEXT,
+      error: null,
+    });
+    confirmSaleAndPostJournalsMock.mockResolvedValue({
+      data: {
+        sale_id: SALE_ID,
+        sale: { id: SALE_ID },
+        total_cogs: 4,
+        reloadError: null,
+        posting: { sale: {}, total_cogs: 4, revenue: {}, cogs: {} },
+        postingError: null,
+      },
+      error: null,
+    });
+    getSaleMock.mockResolvedValueOnce({ data: draftSale(), error: null });
+    getSaleMock.mockResolvedValueOnce({
+      data: null,
+      error: "Failed to load sale",
+    });
+
+    const { result } = renderHook(() => useSale(SALE_ID));
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    let confirmed: boolean | undefined;
+    await act(async () => {
+      confirmed = await result.current.confirm();
+    });
+
+    expect(confirmed).toBe(true);
+    expect(result.current.actionError).toBeNull();
+    expect(result.current.sale?.status).toBe("confirmed");
+    expect(result.current.postingError).toBe(
+      "Sale confirmed, but it could not be reloaded: Failed to load sale",
+    );
   });
 });

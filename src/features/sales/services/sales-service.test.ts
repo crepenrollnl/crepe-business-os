@@ -228,10 +228,10 @@ describe("salesService.confirmSale (DEV-027)", () => {
 
     expect(result.error).toBeNull();
     expect(result.data).not.toBeNull();
-    expect(result.data?.sale.id).toBe(SALE_ID);
-    expect(result.data?.sale.status).toBe("confirmed");
-    expect(result.data?.sale.lines).toHaveLength(1);
-    expect(result.data?.sale.lines[0]?.id).toBe(LINE_ID);
+    expect(result.data?.sale?.id).toBe(SALE_ID);
+    expect(result.data?.sale?.status).toBe("confirmed");
+    expect(result.data?.sale?.lines).toHaveLength(1);
+    expect(result.data?.sale?.lines[0]?.id).toBe(LINE_ID);
     expect(result.data?.total_cogs).toBe(18.75);
 
     expect(supabaseMock.rpc).toHaveBeenCalledTimes(1);
@@ -285,10 +285,10 @@ describe("salesService.confirmSale (DEV-027)", () => {
     expect(result.error).toBeNull();
     expect(result.data?.total_cogs).toBe(42.5);
     // Sale revenue totals are unrelated to COGS; service does not derive COGS from them.
-    expect(result.data?.sale.total).toBe(25);
-    expect(result.data?.total_cogs).not.toBe(result.data?.sale.total);
+    expect(result.data?.sale?.total).toBe(25);
+    expect(result.data?.total_cogs).not.toBe(result.data?.sale?.total);
     expect(result.data?.total_cogs).not.toBe(
-      result.data?.sale.lines[0]?.line_total,
+      result.data?.sale?.lines[0]?.line_total,
     );
   });
 
@@ -1118,7 +1118,7 @@ describe("salesService.confirmSaleAndPostJournals (DEV-109)", () => {
     );
 
     expect(result.error).toBeNull();
-    expect(result.data?.sale.id).toBe(SALE_ID);
+    expect(result.data?.sale?.id).toBe(SALE_ID);
     expect(result.data?.total_cogs).toBe(18.75);
     expect(result.data?.posting).not.toBeNull();
     expect(result.data?.postingError).toBeNull();
@@ -1142,8 +1142,8 @@ describe("salesService.confirmSaleAndPostJournals (DEV-109)", () => {
     );
 
     expect(result.error).toBeNull();
-    expect(result.data?.sale.id).toBe(SALE_ID);
-    expect(result.data?.sale.status).toBe("confirmed");
+    expect(result.data?.sale?.id).toBe(SALE_ID);
+    expect(result.data?.sale?.status).toBe("confirmed");
     expect(result.data?.total_cogs).toBe(18.75);
     expect(result.data?.posting).toBeNull();
     expect(result.data?.postingError).toBe(
@@ -1176,6 +1176,225 @@ describe("salesService.confirmSaleAndPostJournals (DEV-109)", () => {
   });
 });
 
+/**
+ * The sales select fails (e.g. a timeout) on every call — the sale is
+ * already committed by the RPC at that point.
+ */
+function mockSaleReloadFailure(message = "Statement timeout.") {
+  const saleMaybeSingle = vi.fn().mockResolvedValue({
+    data: null,
+    error: { message },
+  });
+  const saleSelect = vi.fn().mockReturnValue({
+    eq: vi.fn().mockReturnValue({ maybeSingle: saleMaybeSingle }),
+  });
+  supabaseMock.from.mockImplementation((table: string) => {
+    if (table === "sales") {
+      return { select: saleSelect };
+    }
+    throw new Error(`Unexpected table: ${table}`);
+  });
+  return { saleSelect, saleMaybeSingle };
+}
+
+describe("salesService confirm after commit never fails (audit D3)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    postJournalsForSaleCompletedMock.mockReset();
+    reportPostingFailureMock.mockReset();
+    supabaseMock.auth.getUser.mockResolvedValue({
+      data: { user: { id: USER_ID } },
+      error: null,
+    });
+  });
+
+  it("confirmSale returns ok with sale null + reloadError when the reload fails", async () => {
+    mockSaleReloadFailure();
+    supabaseMock.rpc.mockResolvedValue({
+      data: rpcConfirmPayload(18.75),
+      error: null,
+    });
+
+    const result = await salesService.confirmSale(SALE_ID);
+
+    expect(result.error).toBeNull();
+    expect(result.data).toEqual({
+      sale_id: SALE_ID,
+      sale: null,
+      total_cogs: 18.75,
+      reloadError: "Statement timeout.",
+    });
+  });
+
+  it("createAndConfirmSale returns ok with sale null when the reload throws", async () => {
+    supabaseMock.from.mockImplementation(() => {
+      throw new Error("boom");
+    });
+    supabaseMock.rpc.mockResolvedValue({
+      data: rpcConfirmPayload(7),
+      error: null,
+    });
+
+    const result = await salesService.createAndConfirmSale({
+      lines: [{ product_id: PRODUCT_ID, quantity: 1, unit_price: 10.9 }],
+    });
+
+    expect(result.error).toBeNull();
+    expect(result.data?.sale_id).toBe(SALE_ID);
+    expect(result.data?.sale).toBeNull();
+    expect(result.data?.total_cogs).toBe(7);
+    expect(result.data?.reloadError).toBe("Failed to reload confirmed sale");
+  });
+
+  it("confirmSale returns sale_id and reloadError null on a normal reload", async () => {
+    mockSaleReload();
+    supabaseMock.rpc.mockResolvedValue({
+      data: rpcConfirmPayload(),
+      error: null,
+    });
+
+    const result = await salesService.confirmSale(SALE_ID);
+
+    expect(result.data?.sale_id).toBe(SALE_ID);
+    expect(result.data?.reloadError).toBeNull();
+  });
+
+  it("confirmSaleAndPostJournals posts from a header-only reload when the full reload failed", async () => {
+    const header = {
+      id: SALE_ID,
+      status: "confirmed",
+      sale_date: "2026-07-22",
+      confirmed_at: "2026-07-22T16:00:00.000Z",
+      subtotal: "22.94",
+      tax_total: "2.06",
+      total: "25.00",
+    };
+    const saleMaybeSingle = vi
+      .fn()
+      .mockResolvedValueOnce({ data: null, error: { message: "Statement timeout." } })
+      .mockResolvedValueOnce({ data: header, error: null });
+    const saleSelect = vi.fn().mockReturnValue({
+      eq: vi.fn().mockReturnValue({ maybeSingle: saleMaybeSingle }),
+    });
+    supabaseMock.from.mockImplementation(() => ({ select: saleSelect }));
+    supabaseMock.rpc.mockResolvedValue({
+      data: rpcConfirmPayload(18.75),
+      error: null,
+    });
+    postJournalsForSaleCompletedMock.mockResolvedValue({
+      data: { sale: { id: SALE_ID }, total_cogs: 18.75, revenue: null, cogs: null },
+      error: null,
+    });
+
+    const result = await salesService.confirmSaleAndPostJournals(
+      SALE_ID,
+      ACCOUNTING_CONTEXT,
+    );
+
+    expect(result.error).toBeNull();
+    expect(result.data?.sale).toBeNull();
+    expect(result.data?.reloadError).toBe("Statement timeout.");
+    expect(result.data?.postingError).toBeNull();
+    expect(saleSelect).toHaveBeenLastCalledWith(
+      "id, status, sale_date, confirmed_at, subtotal, tax_total, total",
+    );
+    expect(postJournalsForSaleCompletedMock).toHaveBeenCalledWith(
+      {
+        sale: {
+          id: SALE_ID,
+          status: "confirmed",
+          sale_date: "2026-07-22",
+          confirmed_at: "2026-07-22T16:00:00.000Z",
+          subtotal: 22.94,
+          tax_total: 2.06,
+          total: 25,
+        },
+        total_cogs: 18.75,
+      },
+      ACCOUNTING_CONTEXT,
+    );
+    expect(reportPostingFailureMock).not.toHaveBeenCalled();
+  });
+
+  it("confirmSaleAndPostJournals records a posting failure when the header cannot be loaded either", async () => {
+    mockSaleReloadFailure();
+    supabaseMock.rpc.mockResolvedValue({
+      data: rpcConfirmPayload(18.75),
+      error: null,
+    });
+
+    const result = await salesService.confirmSaleAndPostJournals(
+      SALE_ID,
+      ACCOUNTING_CONTEXT,
+    );
+
+    expect(result.error).toBeNull();
+    expect(result.data?.sale_id).toBe(SALE_ID);
+    expect(result.data?.posting).toBeNull();
+    expect(result.data?.postingError).toBe(
+      "Sale confirmed but its journals were not posted: Statement timeout.",
+    );
+    expect(postJournalsForSaleCompletedMock).not.toHaveBeenCalled();
+    expect(reportPostingFailureMock).toHaveBeenCalledTimes(1);
+    expect(reportPostingFailureMock).toHaveBeenCalledWith({
+      sourceFlow: "sale_confirm",
+      entityType: "sale",
+      entityId: SALE_ID,
+      businessEventId: expect.any(String),
+      errorMessage:
+        "Sale confirmed but its journals were not posted: Statement timeout.",
+    });
+  });
+
+  it("createAndConfirmSaleAndPostJournals records the failure under its sourceFlow", async () => {
+    mockSaleReloadFailure();
+    supabaseMock.rpc.mockResolvedValue({
+      data: rpcConfirmPayload(18.75),
+      error: null,
+    });
+
+    const result = await salesService.createAndConfirmSaleAndPostJournals(
+      { lines: [{ product_id: PRODUCT_ID, quantity: 1, unit_price: 10.9 }] },
+      ACCOUNTING_CONTEXT,
+      "pos_confirm",
+    );
+
+    expect(result.error).toBeNull();
+    expect(result.data?.sale_id).toBe(SALE_ID);
+    expect(postJournalsForSaleCompletedMock).not.toHaveBeenCalled();
+    expect(reportPostingFailureMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourceFlow: "pos_confirm",
+        entityId: SALE_ID,
+      }),
+    );
+  });
+
+  it("uses the same businessEventId as a normal posting failure (sale_completed:<id>)", async () => {
+    mockSaleReloadFailure();
+    supabaseMock.rpc.mockResolvedValue({
+      data: rpcConfirmPayload(18.75),
+      error: null,
+    });
+    await salesService.confirmSaleAndPostJournals(SALE_ID, ACCOUNTING_CONTEXT);
+    const headerFailureEventId =
+      reportPostingFailureMock.mock.calls[0]?.[0]?.businessEventId;
+
+    reportPostingFailureMock.mockReset();
+    mockSaleReload();
+    postJournalsForSaleCompletedMock.mockResolvedValue({
+      data: null,
+      error: "No open fiscal period covers today's date.",
+    });
+    await salesService.confirmSaleAndPostJournals(SALE_ID, ACCOUNTING_CONTEXT);
+    const postingFailureEventId =
+      reportPostingFailureMock.mock.calls[0]?.[0]?.businessEventId;
+
+    expect(headerFailureEventId).toEqual(expect.any(String));
+    expect(headerFailureEventId).toBe(postingFailureEventId);
+  });
+});
+
 describe("salesService.createAndConfirmSaleAndPostJournals sourceFlow", () => {
   const input = {
     lines: [{ product_id: PRODUCT_ID, quantity: 1, unit_price: 10.9 }],
@@ -1184,8 +1403,10 @@ describe("salesService.createAndConfirmSaleAndPostJournals sourceFlow", () => {
   function spyCreateAndConfirm() {
     return vi.spyOn(salesService, "createAndConfirmSale").mockResolvedValue({
       data: {
+        sale_id: SALE_ID,
         sale: { ...saleRow(), lines: [saleLineRow()] },
         total_cogs: 18.75,
+        reloadError: null,
       },
       error: null,
     });

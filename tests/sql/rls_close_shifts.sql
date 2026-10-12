@@ -161,8 +161,8 @@ BEGIN
   VALUES ('TEST_S1S4b_comp_' || v_tag, 1, 'pcs', true, 'component')
   RETURNING id INTO v_comp;
   PERFORM public.dryrun143_batch(v_comp, 10, 2.00, v_tag);
-  INSERT INTO recipes (name, yield_quantity, yield_unit, is_active, recipe_role)
-  VALUES ('TEST_S1S4b_dish_' || v_tag, 1, 'pcs', true, 'assembly')
+  INSERT INTO recipes (name, yield_quantity, yield_unit, is_active, recipe_role, selling_price)
+  VALUES ('TEST_S1S4b_dish_' || v_tag, 1, 'pcs', true, 'assembly', 10.00)
   RETURNING id INTO v_dish;
   INSERT INTO recipe_components (assembly_recipe_id, component_recipe_id, quantity, unit)
   VALUES (v_dish, v_comp, 1, 'pcs');

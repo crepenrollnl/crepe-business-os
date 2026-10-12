@@ -6,13 +6,28 @@ import {
   formatNumericInput,
   parseNumericInput,
 } from "@/components/ui/numeric-input";
+import { calculateMoneyLineTotal } from "@/lib/money";
 import type { SaleDetailLine } from "../types/sale";
 import { formatSaleMoney } from "../utils/format-sale";
 
+/**
+ * A product the page knows about. selling_price null = no price set in
+ * Recipes: still used to label existing lines, but never offered in the
+ * Add line picker (audit D4 — the price always comes from Recipes).
+ */
 export type SaleProductOption = {
   id: string;
   name: string;
+  selling_price: number | null;
 };
+
+type PricedSaleProductOption = SaleProductOption & { selling_price: number };
+
+function isPriced(
+  product: SaleProductOption,
+): product is PricedSaleProductOption {
+  return product.selling_price !== null;
+}
 
 type SaleLinesSectionProps = {
   lines: SaleDetailLine[];
@@ -64,7 +79,6 @@ export function SaleLinesSection({
   const [prevLines, setPrevLines] = useState(lines);
   const [addProductId, setAddProductId] = useState("");
   const [addQuantity, setAddQuantity] = useState("");
-  const [addUnitPrice, setAddUnitPrice] = useState("");
   const [addError, setAddError] = useState<string | null>(null);
   const [rowError, setRowError] = useState<string | null>(null);
 
@@ -76,6 +90,16 @@ export function SaleLinesSection({
     setPrevLines(lines);
     setQuantityDrafts(buildQuantityDrafts(lines));
   }
+
+  // Same rule as POS / Quick Sale: only products with a price in Recipes.
+  const pricedProducts = products.filter(isPriced);
+  const selectedProduct =
+    pricedProducts.find((product) => product.id === addProductId) ?? null;
+  const previewQuantity = parseNumericInput(addQuantity);
+  const previewLineTotal =
+    selectedProduct && previewQuantity !== null && previewQuantity > 0
+      ? calculateMoneyLineTotal(previewQuantity, selectedProduct.selling_price)
+      : null;
 
   const handleUpdateQuantity = async (lineId: string) => {
     setRowError(null);
@@ -101,34 +125,29 @@ export function SaleLinesSection({
     event.preventDefault();
     setAddError(null);
 
-    if (!addProductId) {
+    if (!selectedProduct) {
       setAddError("Select a product.");
       return;
     }
 
     const quantity = parseNumericInput(addQuantity);
-    const unitPrice = parseNumericInput(addUnitPrice);
 
     if (quantity === null || quantity <= 0) {
       setAddError("Enter a quantity greater than zero.");
       return;
     }
 
-    if (unitPrice === null || unitPrice < 0) {
-      setAddError("Enter a unit price of zero or greater.");
-      return;
-    }
-
+    // The price is never typed here: it is the product's selling_price from
+    // Recipes, and add_sale_line (sql/146) stores that price regardless.
     const ok = await onAddLine({
-      product_id: addProductId,
+      product_id: selectedProduct.id,
       quantity,
-      unit_price: unitPrice,
+      unit_price: selectedProduct.selling_price,
     });
 
     if (ok) {
       setAddProductId("");
       setAddQuantity("");
-      setAddUnitPrice("");
     }
   };
 
@@ -264,15 +283,15 @@ export function SaleLinesSection({
                   setAddProductId(event.target.value);
                   setAddError(null);
                 }}
-                disabled={mutating || products.length === 0}
+                disabled={mutating || pricedProducts.length === 0}
                 className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none transition focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <option value="">
-                  {products.length === 0
-                    ? "No active products available"
+                  {pricedProducts.length === 0
+                    ? "No priced products available"
                     : "Select product"}
                 </option>
-                {products.map((product) => (
+                {pricedProducts.map((product) => (
                   <option key={product.id} value={product.id}>
                     {product.name}
                   </option>
@@ -295,21 +314,32 @@ export function SaleLinesSection({
               />
             </label>
 
-            <label className="block text-sm text-zinc-600">
+            <div className="text-sm text-zinc-600">
               <span className="mb-1.5 block font-medium text-zinc-700">
-                Unit price
+                Price
               </span>
-              <NumericInput
-                value={addUnitPrice}
-                onChange={(value) => {
-                  setAddUnitPrice(value);
-                  setAddError(null);
-                }}
-                disabled={mutating}
-                className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none transition focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20 disabled:cursor-not-allowed disabled:opacity-50"
-              />
-            </label>
+              <p
+                data-testid="add-line-price"
+                className="py-2 text-sm text-zinc-900"
+              >
+                {selectedProduct
+                  ? `${formatSaleMoney(selectedProduct.selling_price)}, set in Recipes`
+                  : "Select a product"}
+              </p>
+              {previewLineTotal !== null ? (
+                <p className="text-xs text-zinc-500">
+                  Line total {formatSaleMoney(previewLineTotal)}
+                </p>
+              ) : null}
+            </div>
           </div>
+
+          {pricedProducts.length === 0 && products.length > 0 ? (
+            <p className="text-sm text-zinc-500">
+              Set a selling price on an active assembly recipe in Recipes to
+              add it here.
+            </p>
+          ) : null}
 
           {addError || rowError ? (
             <p className="text-sm text-red-600">{addError ?? rowError}</p>
@@ -317,7 +347,7 @@ export function SaleLinesSection({
 
           <button
             type="submit"
-            disabled={mutating || products.length === 0}
+            disabled={mutating || pricedProducts.length === 0}
             className="inline-flex items-center justify-center rounded-lg bg-amber-500 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-amber-600 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {mutating ? "Saving..." : "Add line"}

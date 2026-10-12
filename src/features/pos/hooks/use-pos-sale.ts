@@ -9,10 +9,16 @@ import type {
   QuickSaleLineInput,
   SaleDiscountType,
 } from "@/features/sales/types/sale";
+import { confirmWarning } from "@/features/sales/utils/confirm-warning";
 import {
   parseDiscountInput,
   resolveSaleHeaderDiscount,
 } from "@/features/sales/utils/quick-sale-discount";
+import {
+  describeReprice,
+  isPriceChangedError,
+  repriceCart,
+} from "@/features/sales/utils/reprice-cart";
 import {
   sortByProductName,
   sortBySoldQuantity,
@@ -205,6 +211,28 @@ export function usePosSale() {
     [itemsTotal, discountType, discountValue],
   );
 
+  /**
+   * The catalog price changed since the tile was tapped (sql/146 rejects the
+   * stale price). Reload the products, re-price the cart from the fresh
+   * selling_price, drop lines no longer for sale, and say so.
+   */
+  const repriceAfterPriceChange = useCallback(
+    async (priceError: string) => {
+      const fresh = await fetchPosSaleProducts();
+      if (fresh.error) {
+        setActionError(priceError);
+        return;
+      }
+
+      setProducts(fresh.data);
+      const repriced = repriceCart(cart, fresh.data);
+      clientRequestIdRef.current = null;
+      setCart(repriced.cart);
+      setActionError(describeReprice(priceError, repriced.removedNames));
+    },
+    [cart],
+  );
+
   const confirm = useCallback(async () => {
     if (cartLines.length === 0) {
       return false;
@@ -243,23 +271,28 @@ export function usePosSale() {
       });
 
       if (fallback.error || !fallback.data) {
-        setActionError(fallback.error ?? "Failed to confirm sale");
+        const message = fallback.error ?? "Failed to confirm sale";
+        if (isPriceChangedError(message)) {
+          await repriceAfterPriceChange(message);
+        } else {
+          setActionError(message);
+        }
         setConfirming(false);
         return false;
       }
 
-      setLastConfirmedSaleNumber(fallback.data.sale.sale_number);
+      setLastConfirmedSaleNumber(fallback.data.sale?.sale_number ?? null);
       const skippedError =
         contextResult.error ?? "Accounting posting was skipped.";
       salesService.reportSkippedPosting(
-        fallback.data.sale.id,
+        fallback.data.sale_id,
         "pos_confirm",
         skippedError,
       );
-      setPostingError(skippedError);
+      setPostingError(confirmWarning(fallback.data.reloadError, skippedError));
 
       if (sendToQueue) {
-        const queued = await salesService.markSaleQueued(fallback.data.sale.id);
+        const queued = await salesService.markSaleQueued(fallback.data.sale_id);
         if (queued.error) {
           setPostingError(queued.error);
         }
@@ -278,18 +311,27 @@ export function usePosSale() {
       );
 
       if (posted.error || !posted.data) {
-        setActionError(posted.error ?? "Failed to confirm sale");
+        const message = posted.error ?? "Failed to confirm sale";
+        if (isPriceChangedError(message)) {
+          await repriceAfterPriceChange(message);
+        } else {
+          setActionError(message);
+        }
         setConfirming(false);
         return false;
       }
 
-      setLastConfirmedSaleNumber(posted.data.sale.sale_number);
-      setPostingError(posted.data.postingError);
+      setLastConfirmedSaleNumber(posted.data.sale?.sale_number ?? null);
+      const warning = confirmWarning(
+        posted.data.reloadError,
+        posted.data.postingError,
+      );
+      setPostingError(warning);
 
       if (sendToQueue) {
-        const queued = await salesService.markSaleQueued(posted.data.sale.id);
+        const queued = await salesService.markSaleQueued(posted.data.sale_id);
         if (queued.error) {
-          setPostingError(posted.data.postingError ?? queued.error);
+          setPostingError(warning ?? queued.error);
         }
       }
     }
@@ -309,6 +351,7 @@ export function usePosSale() {
     discountPreview.error,
     discountType,
     discountValue,
+    repriceAfterPriceChange,
   ]);
 
   return {
