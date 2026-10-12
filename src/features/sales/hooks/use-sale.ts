@@ -11,6 +11,7 @@ import type { SaleAccountingPostingStatus } from "../types/sale-accounting";
 import type { SaleCostSummary } from "../types/sale-cogs";
 import type { SaleProfitSummary } from "../types/sale-profit";
 import type { SaleDetail } from "../types/sale";
+import { confirmWarning } from "../utils/confirm-warning";
 import {
   reconcileCompletedSaleReview,
   type CompletedSaleReviewRead,
@@ -324,6 +325,8 @@ export function useSale(saleId: string) {
     const contextResult =
       await accountingContextService.getCurrentAccountingContext();
 
+    let warning: string | null;
+
     if (contextResult.error || !contextResult.data) {
       // Accounting infra not ready (e.g. no open fiscal period) — the sale
       // must still confirm; only the journal is skipped, surfaced via
@@ -340,11 +343,11 @@ export function useSale(saleId: string) {
       const skippedError =
         contextResult.error ?? "Accounting posting was skipped.";
       salesService.reportSkippedPosting(
-        fallback.data.sale.id,
+        fallback.data.sale_id,
         "sale_confirm",
         skippedError,
       );
-      setPostingError(skippedError);
+      warning = confirmWarning(fallback.data.reloadError, skippedError);
     } else {
       const posted = await salesService.confirmSaleAndPostJournals(
         saleId,
@@ -358,17 +361,31 @@ export function useSale(saleId: string) {
       }
 
       setLastConfirmCogs(posted.data.total_cogs);
-      setPostingError(posted.data.postingError);
+      warning = confirmWarning(
+        posted.data.reloadError,
+        posted.data.postingError,
+      );
     }
+
+    setPostingError(warning);
 
     const reloadResult = await salesReadService.getSale(saleId);
 
     if (reloadResult.error || !reloadResult.data) {
-      setActionError(
-        reloadResult.error ?? "Sale confirmed but failed to reload",
+      // The sale IS confirmed (committed by confirm_sale) — only the page
+      // refresh failed. Lock the page as confirmed and warn, never report
+      // the confirmation itself as failed (audit D3).
+      setSale((current) =>
+        current ? { ...current, status: "confirmed" } : current,
+      );
+      setPostingError(
+        confirmWarning(
+          reloadResult.error ?? "Failed to reload the sale.",
+          warning,
+        ),
       );
       setConfirming(false);
-      return false;
+      return true;
     }
 
     setSale(reloadResult.data);

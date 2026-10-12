@@ -77,12 +77,15 @@ export function SaleDetailPage({ saleId }: SaleDetailPageProps) {
           // here. confirm_sale / allocate_finished_goods_fifo still
           // support a direct component sale at the RPC level (kept as
           // compatibility); this only narrows what the picker offers.
+          // selling_price is passed through: SaleLinesSection offers only
+          // priced products and adds lines at that price (audit D4).
           .filter(
             (recipe) => recipe.is_active && recipe.recipe_role === "assembly",
           )
           .map((recipe) => ({
             id: recipe.id,
             name: recipe.name,
+            selling_price: recipe.selling_price,
           })),
       );
     })();

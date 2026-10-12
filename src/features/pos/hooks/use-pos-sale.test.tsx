@@ -6,12 +6,16 @@
  * failed retry (so a duplicate request never creates a second sale),
  * invalidated by any cart change before submission, and replaced by a
  * fresh one for the next sale after a successful confirm.
+ *
+ * Audit D3: a sale committed by the RPC is always treated as success, even
+ * when the follow-up reload failed. Audit D4: a "price changed" rejection
+ * (sql/146) re-prices the cart from the fresh selling_price.
  */
 
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { RecipeListItem } from "@/features/recipes/types/recipe";
-import type { SaleWithLines } from "@/features/sales/types/sale";
+import type { ConfirmSaleResult } from "@/features/sales/types/sale";
 
 const {
   getRecipesMock,
@@ -169,8 +173,10 @@ const TOKEN_TEST_PRODUCT = {
   image_url: null,
 };
 
-function confirmedSale(id: string): { sale: SaleWithLines; total_cogs: number } {
+function confirmedSale(id: string): ConfirmSaleResult {
   return {
+    sale_id: id,
+    reloadError: null,
     sale: {
       id,
       sale_number: "S-000001",
@@ -331,6 +337,172 @@ describe("usePosSale client_request_id (sql/118)", () => {
       .client_request_id as string;
 
     expect(secondToken).not.toBe(firstToken);
+  });
+});
+
+describe("usePosSale after-commit success + price change (audit D3/D4)", () => {
+  const PRICE_ERROR =
+    'The price of "Nutella Crepe" is now €7.00. Refresh the screen and try again.';
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    getRecipesMock.mockResolvedValue({
+      data: [
+        recipe({
+          id: TOKEN_TEST_PRODUCT.id,
+          name: TOKEN_TEST_PRODUCT.name,
+          selling_price: TOKEN_TEST_PRODUCT.selling_price,
+        }),
+      ],
+      error: null,
+    });
+    getSoldQuantityByProductIdMock.mockResolvedValue({
+      data: new Map<string, number>(),
+      error: null,
+    });
+    getCurrentAccountingContextMock.mockResolvedValue({
+      data: { fiscalPeriod: { id: "period-1" } },
+      error: null,
+    });
+  });
+
+  async function setupCart() {
+    const { result } = renderHook(() => usePosSale());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    act(() => {
+      result.current.addToCart(TOKEN_TEST_PRODUCT);
+    });
+    return result;
+  }
+
+  it("treats a committed sale whose reload failed as success and warns", async () => {
+    const result = await setupCart();
+    createAndConfirmSaleAndPostJournalsMock.mockResolvedValueOnce({
+      data: {
+        sale_id: "sale-11",
+        sale: null,
+        total_cogs: 2,
+        reloadError: "Statement timeout.",
+        posting: null,
+        postingError: null,
+      },
+      error: null,
+    });
+
+    let confirmed: boolean | undefined;
+    await act(async () => {
+      confirmed = await result.current.confirm();
+    });
+
+    expect(confirmed).toBe(true);
+    expect(result.current.actionError).toBeNull();
+    expect(result.current.cartLines).toEqual([]);
+    expect(result.current.postingError).toBe(
+      "Sale confirmed, but it could not be reloaded: Statement timeout.",
+    );
+  });
+
+  it("re-prices the cart from the fresh selling_price after a price-changed error", async () => {
+    const result = await setupCart();
+    createAndConfirmSaleAndPostJournalsMock.mockResolvedValueOnce({
+      data: null,
+      error: PRICE_ERROR,
+    });
+    getRecipesMock.mockResolvedValueOnce({
+      data: [
+        recipe({
+          id: TOKEN_TEST_PRODUCT.id,
+          name: TOKEN_TEST_PRODUCT.name,
+          selling_price: 7,
+        }),
+      ],
+      error: null,
+    });
+
+    let confirmed: boolean | undefined;
+    await act(async () => {
+      confirmed = await result.current.confirm();
+    });
+
+    expect(confirmed).toBe(false);
+    expect(result.current.actionError).toBe(PRICE_ERROR);
+    expect(result.current.cartLines).toEqual([
+      {
+        product_id: TOKEN_TEST_PRODUCT.id,
+        name: TOKEN_TEST_PRODUCT.name,
+        unit_price: 7,
+        quantity: 1,
+      },
+    ]);
+    expect(result.current.itemsTotal).toBe(7);
+    expect(result.current.products[0]?.selling_price).toBe(7);
+
+    // The re-priced cart is a different cart: confirming again sends the
+    // new price under a fresh idempotency token.
+    const firstToken =
+      createAndConfirmSaleAndPostJournalsMock.mock.calls[0][0].client_request_id;
+    createAndConfirmSaleAndPostJournalsMock.mockResolvedValueOnce({
+      data: {
+        ...confirmedSale("sale-12"),
+        posting: null,
+        postingError: null,
+      },
+      error: null,
+    });
+    await act(async () => {
+      await result.current.confirm();
+    });
+    const retry = createAndConfirmSaleAndPostJournalsMock.mock.calls[1][0];
+    expect(retry.lines).toEqual([
+      { product_id: TOKEN_TEST_PRODUCT.id, quantity: 1, unit_price: 7 },
+    ]);
+    expect(retry.client_request_id).not.toBe(firstToken);
+  });
+
+  it("removes a cart product that is no longer for sale and says so", async () => {
+    const result = await setupCart();
+    createAndConfirmSaleAndPostJournalsMock.mockResolvedValueOnce({
+      data: null,
+      error: PRICE_ERROR,
+    });
+    getRecipesMock.mockResolvedValueOnce({
+      data: [
+        recipe({
+          id: TOKEN_TEST_PRODUCT.id,
+          name: TOKEN_TEST_PRODUCT.name,
+          selling_price: null,
+        }),
+      ],
+      error: null,
+    });
+
+    await act(async () => {
+      await result.current.confirm();
+    });
+
+    expect(result.current.cartLines).toEqual([]);
+    expect(result.current.actionError).toBe(
+      `${PRICE_ERROR} Removed from the cart (no longer for sale): Nutella Crepe.`,
+    );
+  });
+
+  it("shows other confirm errors as before without reloading products", async () => {
+    const result = await setupCart();
+    createAndConfirmSaleAndPostJournalsMock.mockResolvedValueOnce({
+      data: null,
+      error: "Not enough finished goods in stock.",
+    });
+    const recipeCallsBefore = getRecipesMock.mock.calls.length;
+
+    await act(async () => {
+      await result.current.confirm();
+    });
+
+    expect(result.current.actionError).toBe(
+      "Not enough finished goods in stock.",
+    );
+    expect(getRecipesMock.mock.calls.length).toBe(recipeCallsBefore);
+    expect(result.current.cartLines).toHaveLength(1);
   });
 });
 

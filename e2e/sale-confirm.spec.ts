@@ -165,6 +165,9 @@ test("build and execute a component, assemble it, sell it, confirm the sale", as
   // assembly portion; 2 portions sold below still leaves headroom against
   // the 5 units actually produced.
   await componentLine.locator("input").first().fill("1");
+  // A sale line's price always comes from the recipe's selling price
+  // (sql/146, audit D4) -- /sales/[id] no longer has a price input.
+  await assemblyForm.getByLabel("Selling price").fill("9.99");
 
   await assemblyForm.getByRole("button", { name: "Create Recipe" }).click();
   await expect(assemblyForm).toHaveCount(0);
@@ -180,8 +183,16 @@ test("build and execute a component, assemble it, sell it, confirm the sale", as
   const addLineForm = page.locator("form");
   await addLineForm.getByLabel("Product").selectOption({ label: assemblyRecipeName });
   await addLineForm.getByLabel("Quantity").fill("2");
-  await addLineForm.getByLabel("Unit price").fill("9.99");
+  await expect(addLineForm.getByTestId("add-line-price")).toHaveText(
+    "€9.99, set in Recipes",
+  );
   await addLineForm.getByRole("button", { name: "Add line" }).click();
+
+  const saleLineRow = page
+    .getByRole("row")
+    .filter({ hasText: assemblyRecipeName });
+  await expect(saleLineRow).toContainText("€9.99");
+  await expect(saleLineRow).toContainText("€19.98");
 
   // Header "Confirm Sale" opens a confirmation dialog that has its own,
   // second "Confirm Sale" button -- both share the same accessible name

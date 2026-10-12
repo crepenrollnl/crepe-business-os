@@ -27,6 +27,7 @@ import type {
   SaleDetail,
   SaleDetailLine,
   SaleLine,
+  SalePostingHeader,
   SaleStatus,
   SaleWithLines,
   UpdateSaleLineInput,
@@ -42,6 +43,10 @@ const UUID_RE =
 
 const SALE_SELECT =
   "id, sale_number, customer_id, status, sale_date, confirmed_at, paid_at, cancelled_at, fulfilled_at, is_paid, subtotal, tax_total, total, notes, kitchen_note, created_at, updated_at";
+
+/** Header columns posting needs (SalePostingHeader) — D3 fallback reload. */
+const SALE_POSTING_HEADER_SELECT =
+  "id, status, sale_date, confirmed_at, subtotal, tax_total, total";
 
 const SALE_LINE_SELECT =
   "id, sale_id, product_id, quantity, unit_price, line_total, created_at";
@@ -641,6 +646,151 @@ async function reloadConfirmedSale(
   }
 }
 
+/**
+ * Build the result for a sale the RPC already committed. The sale exists
+ * and its stock is consumed, so a failed reload must never turn this into
+ * fail(): it comes back as sale: null + reloadError instead (audit D3).
+ */
+async function buildConfirmedSaleResult(rpcResult: {
+  sale_id: string;
+  total_cogs: number;
+}): Promise<ConfirmSaleResult> {
+  let reloadError: string;
+
+  try {
+    const saleResult = await reloadConfirmedSale(rpcResult.sale_id);
+    if (!saleResult.error && saleResult.data) {
+      return {
+        sale_id: rpcResult.sale_id,
+        sale: saleResult.data,
+        total_cogs: rpcResult.total_cogs,
+        reloadError: null,
+      };
+    }
+    reloadError = saleResult.error ?? "Failed to reload confirmed sale";
+  } catch {
+    reloadError = "Failed to reload confirmed sale";
+  }
+
+  return {
+    sale_id: rpcResult.sale_id,
+    sale: null,
+    total_cogs: rpcResult.total_cogs,
+    reloadError,
+  };
+}
+
+/**
+ * Load only the header fields posting needs, for a confirmed sale whose
+ * full reload failed (audit D3). One attempt; never throws.
+ */
+async function loadSalePostingHeader(
+  saleId: string,
+): Promise<ServiceResult<SalePostingHeader>> {
+  try {
+    const { data, error } = await supabase
+      .from("sales")
+      .select(SALE_POSTING_HEADER_SELECT)
+      .eq("id", saleId)
+      .maybeSingle();
+
+    if (error) {
+      return fail(toUserError(error, "Failed to load the confirmed sale"));
+    }
+
+    if (!data) {
+      return fail("Sale was not found.");
+    }
+
+    const row = data as Pick<
+      SaleRow,
+      | "id"
+      | "status"
+      | "sale_date"
+      | "confirmed_at"
+      | "subtotal"
+      | "tax_total"
+      | "total"
+    >;
+
+    if (!isSaleStatus(row.status)) {
+      return fail("Confirmed sale response was invalid.");
+    }
+
+    return ok({
+      id: row.id,
+      status: row.status,
+      sale_date: row.sale_date,
+      confirmed_at: row.confirmed_at,
+      subtotal: toNumber(row.subtotal),
+      tax_total: toNumber(row.tax_total),
+      total: toNumber(row.total),
+    });
+  } catch {
+    return fail("Failed to load the confirmed sale");
+  }
+}
+
+/** Result of a confirm + journal posting call (sale + posting outcome). */
+export interface ConfirmSaleWithPostingResult extends ConfirmSaleResult {
+  posting: SaleJournalPostings | null;
+  postingError: string | null;
+}
+
+/**
+ * Post journals for a sale that is already committed. Never fails: a
+ * missing header (reload failed twice) or a posting error comes back as
+ * postingError and is recorded via reportPostingFailure, so the gap always
+ * shows in posting_failures (audit D3).
+ */
+async function postConfirmedSaleJournals(
+  confirmed: ConfirmSaleResult,
+  accounting: SaleAccountingContext,
+  sourceFlow: Extract<
+    PostingFailureSourceFlow,
+    "sale_confirm" | "quick_sale_confirm" | "pos_confirm"
+  >,
+): Promise<ConfirmSaleWithPostingResult> {
+  const reportFailure = (errorMessage: string) => {
+    void reportPostingFailure({
+      sourceFlow,
+      entityType: "sale",
+      entityId: confirmed.sale_id,
+      businessEventId: stableBusinessEventId(
+        `sale_completed:${confirmed.sale_id}`,
+      ),
+      errorMessage,
+    });
+  };
+
+  let header: SalePostingHeader | null = confirmed.sale;
+  if (!header) {
+    const headerResult = await loadSalePostingHeader(confirmed.sale_id);
+    if (headerResult.error || !headerResult.data) {
+      const postingError = `Sale confirmed but its journals were not posted: ${
+        headerResult.error ?? "the sale could not be reloaded"
+      }`;
+      reportFailure(postingError);
+      return { ...confirmed, posting: null, postingError };
+    }
+    header = headerResult.data;
+  }
+
+  const posting = await saleAccountingService.postJournalsForSaleCompleted(
+    { sale: header, total_cogs: confirmed.total_cogs },
+    accounting,
+  );
+
+  if (posting.error || !posting.data) {
+    const postingError =
+      posting.error ?? "Sale confirmed but accounting posting failed.";
+    reportFailure(postingError);
+    return { ...confirmed, posting: null, postingError };
+  }
+
+  return { ...confirmed, posting: posting.data, postingError: null };
+}
+
 export const salesService = {
   /**
    * Create a draft sale header via create_draft_sale RPC.
@@ -856,15 +1006,7 @@ export const salesService = {
         return fail("Sale confirmed but the response was invalid.");
       }
 
-      const saleResult = await reloadConfirmedSale(rpcResult.sale_id);
-      if (saleResult.error || !saleResult.data) {
-        return fail(saleResult.error ?? "Failed to reload confirmed sale");
-      }
-
-      return ok({
-        sale: saleResult.data,
-        total_cogs: rpcResult.total_cogs,
-      });
+      return ok(await buildConfirmedSaleResult(rpcResult));
     } catch (error) {
       return fail(mapConfirmSaleError(error, "Failed to confirm sale."));
     }
@@ -882,55 +1024,26 @@ export const salesService = {
    * caller's point of view). So this only ever returns fail(...) when
    * confirmSale itself fails; once that succeeds, the result is always
    * ok(...), with posting/postingError reporting whether the accounting
-   * entry was actually created.
+   * entry was actually created. If the post-confirm reload failed (sale
+   * null), posting reloads the header once; if that fails too the gap is
+   * recorded via reportPostingFailure (audit D3).
    */
   async confirmSaleAndPostJournals(
     saleId: string,
     accounting: SaleAccountingContext,
-  ): Promise<
-    ServiceResult<{
-      sale: SaleWithLines;
-      total_cogs: number;
-      posting: SaleJournalPostings | null;
-      postingError: string | null;
-    }>
-  > {
+  ): Promise<ServiceResult<ConfirmSaleWithPostingResult>> {
     const confirmed = await this.confirmSale(saleId);
     if (confirmed.error || !confirmed.data) {
       return fail(confirmed.error ?? "Failed to confirm sale.");
     }
 
-    const posting = await saleAccountingService.postJournalsForSaleCompleted(
-      confirmed.data,
-      accounting,
+    return ok(
+      await postConfirmedSaleJournals(
+        confirmed.data,
+        accounting,
+        "sale_confirm",
+      ),
     );
-
-    if (posting.error || !posting.data) {
-      const postingError =
-        posting.error ?? "Sale confirmed but accounting posting failed.";
-      void reportPostingFailure({
-        sourceFlow: "sale_confirm",
-        entityType: "sale",
-        entityId: confirmed.data.sale.id,
-        businessEventId: stableBusinessEventId(
-          `sale_completed:${confirmed.data.sale.id}`,
-        ),
-        errorMessage: postingError,
-      });
-      return ok({
-        sale: confirmed.data.sale,
-        total_cogs: confirmed.data.total_cogs,
-        posting: null,
-        postingError,
-      });
-    }
-
-    return ok({
-      sale: confirmed.data.sale,
-      total_cogs: confirmed.data.total_cogs,
-      posting: posting.data,
-      postingError: null,
-    });
   },
 
   /**
@@ -1001,15 +1114,7 @@ export const salesService = {
         return fail("Sale confirmed but the response was invalid.");
       }
 
-      const saleResult = await reloadConfirmedSale(rpcResult.sale_id);
-      if (saleResult.error || !saleResult.data) {
-        return fail(saleResult.error ?? "Failed to reload confirmed sale");
-      }
-
-      return ok({
-        sale: saleResult.data,
-        total_cogs: rpcResult.total_cogs,
-      });
+      return ok(await buildConfirmedSaleResult(rpcResult));
     } catch (error) {
       return fail(mapConfirmSaleError(error, "Failed to complete quick sale."));
     }
@@ -1027,50 +1132,15 @@ export const salesService = {
       PostingFailureSourceFlow,
       "quick_sale_confirm" | "pos_confirm"
     > = "quick_sale_confirm",
-  ): Promise<
-    ServiceResult<{
-      sale: SaleWithLines;
-      total_cogs: number;
-      posting: SaleJournalPostings | null;
-      postingError: string | null;
-    }>
-  > {
+  ): Promise<ServiceResult<ConfirmSaleWithPostingResult>> {
     const confirmed = await this.createAndConfirmSale(input);
     if (confirmed.error || !confirmed.data) {
       return fail(confirmed.error ?? "Failed to complete quick sale.");
     }
 
-    const posting = await saleAccountingService.postJournalsForSaleCompleted(
-      confirmed.data,
-      accounting,
+    return ok(
+      await postConfirmedSaleJournals(confirmed.data, accounting, sourceFlow),
     );
-
-    if (posting.error || !posting.data) {
-      const postingError =
-        posting.error ?? "Sale confirmed but accounting posting failed.";
-      void reportPostingFailure({
-        sourceFlow,
-        entityType: "sale",
-        entityId: confirmed.data.sale.id,
-        businessEventId: stableBusinessEventId(
-          `sale_completed:${confirmed.data.sale.id}`,
-        ),
-        errorMessage: postingError,
-      });
-      return ok({
-        sale: confirmed.data.sale,
-        total_cogs: confirmed.data.total_cogs,
-        posting: null,
-        postingError,
-      });
-    }
-
-    return ok({
-      sale: confirmed.data.sale,
-      total_cogs: confirmed.data.total_cogs,
-      posting: posting.data,
-      postingError: null,
-    });
   },
 
   /**

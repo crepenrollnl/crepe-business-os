@@ -1,11 +1,15 @@
 /**
  * Quick Sale tiles rank by sold quantity; recipe load still owns the list error.
+ *
+ * Audit D3: a committed sale is success even when its reload failed, and
+ * the client_request_id token (sql/118) is reused across a failed retry.
+ * Audit D4: a "price changed" rejection (sql/146) re-prices the cart.
  */
 
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { RecipeListItem } from "@/features/recipes/types/recipe";
-import type { SaleWithLines } from "@/features/sales/types/sale";
+import type { ConfirmSaleResult } from "@/features/sales/types/sale";
 
 const {
   getRecipesMock,
@@ -181,8 +185,10 @@ describe("useQuickSale posting-failure recording (audit D1)", () => {
     rateDate: "2026-09-14",
   };
 
-  function confirmedSale(id: string): { sale: SaleWithLines; total_cogs: number } {
+  function confirmedSale(id: string): ConfirmSaleResult {
     return {
+      sale_id: id,
+      reloadError: null,
       sale: {
         id,
         sale_number: "S-000042",
@@ -281,5 +287,292 @@ describe("useQuickSale posting-failure recording (audit D1)", () => {
     expect(result.current.postingError).toBe(
       "Sale confirmed but accounting posting failed.",
     );
+  });
+
+  it("treats a committed sale whose reload failed as success and warns", async () => {
+    getCurrentAccountingContextMock.mockResolvedValue({
+      data: ACCOUNTING_CONTEXT,
+      error: null,
+    });
+    createAndConfirmSaleAndPostJournalsMock.mockResolvedValue({
+      data: {
+        sale_id: "sale-44",
+        sale: null,
+        total_cogs: 4,
+        reloadError: "Statement timeout.",
+        posting: null,
+        postingError: null,
+      },
+      error: null,
+    });
+
+    const { result, confirmed } = await confirmOneItem();
+
+    expect(confirmed).toBe(true);
+    expect(result.current.actionError).toBeNull();
+    expect(result.current.cartLines).toEqual([]);
+    expect(result.current.postingError).toBe(
+      "Sale confirmed, but it could not be reloaded: Statement timeout.",
+    );
+  });
+
+  it("uses the sale_id for the skipped-posting record when the reload failed", async () => {
+    getCurrentAccountingContextMock.mockResolvedValue({
+      data: null,
+      error: "No open fiscal period covers today's date.",
+    });
+    createAndConfirmSaleMock.mockResolvedValue({
+      data: {
+        sale_id: "sale-45",
+        sale: null,
+        total_cogs: 4,
+        reloadError: "Statement timeout.",
+      },
+      error: null,
+    });
+
+    const { result, confirmed } = await confirmOneItem();
+
+    expect(confirmed).toBe(true);
+    expect(reportSkippedPostingMock).toHaveBeenCalledWith(
+      "sale-45",
+      "quick_sale_confirm",
+      "No open fiscal period covers today's date.",
+    );
+    expect(result.current.postingError).toBe(
+      "Sale confirmed, but it could not be reloaded: Statement timeout. No open fiscal period covers today's date.",
+    );
+  });
+});
+
+describe("useQuickSale client_request_id (sql/118, audit D3)", () => {
+  const PRODUCT = {
+    id: CHICKEN_ID,
+    name: "Chicken crepe",
+    selling_price: 10,
+    image_url: null,
+  };
+
+  function confirmed(id: string): ConfirmSaleResult {
+    return { sale_id: id, sale: null, total_cogs: 4, reloadError: null };
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    getRecipesMock.mockResolvedValue({
+      data: [recipe({ id: CHICKEN_ID, name: "Chicken crepe" })],
+      error: null,
+    });
+    getSoldQuantityByProductIdMock.mockResolvedValue({
+      data: new Map<string, number>(),
+      error: null,
+    });
+    // Fallback path: both createAndConfirmSale calls must carry the token.
+    getCurrentAccountingContextMock.mockResolvedValue({
+      data: null,
+      error: "Accounting not configured.",
+    });
+  });
+
+  async function setupCart() {
+    const { result } = renderHook(() => useQuickSale());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    act(() => {
+      result.current.addToCart(PRODUCT);
+    });
+    return result;
+  }
+
+  function tokenOf(call: number): string {
+    return createAndConfirmSaleMock.mock.calls[call][0]
+      .client_request_id as string;
+  }
+
+  it("sends a token and reuses it across a failed retry", async () => {
+    const result = await setupCart();
+    createAndConfirmSaleMock.mockResolvedValueOnce({
+      data: null,
+      error: "Network error. Please check your connection and try again.",
+    });
+    await act(async () => {
+      await result.current.confirm();
+    });
+
+    createAndConfirmSaleMock.mockResolvedValueOnce({
+      data: confirmed("sale-1"),
+      error: null,
+    });
+    await act(async () => {
+      await result.current.confirm();
+    });
+
+    expect(tokenOf(0)).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+    );
+    expect(tokenOf(1)).toBe(tokenOf(0));
+  });
+
+  it("passes the token on the posting path too", async () => {
+    getCurrentAccountingContextMock.mockResolvedValue({
+      data: { fiscalPeriod: { id: "period-1" } },
+      error: null,
+    });
+    const result = await setupCart();
+    createAndConfirmSaleAndPostJournalsMock.mockResolvedValueOnce({
+      data: { ...confirmed("sale-1"), posting: null, postingError: null },
+      error: null,
+    });
+    await act(async () => {
+      await result.current.confirm();
+    });
+
+    expect(
+      createAndConfirmSaleAndPostJournalsMock.mock.calls[0][0].client_request_id,
+    ).toEqual(expect.any(String));
+  });
+
+  it("uses a fresh token after a success", async () => {
+    const result = await setupCart();
+    createAndConfirmSaleMock.mockResolvedValue({
+      data: confirmed("sale-1"),
+      error: null,
+    });
+    await act(async () => {
+      await result.current.confirm();
+    });
+    act(() => {
+      result.current.addToCart(PRODUCT);
+    });
+    await act(async () => {
+      await result.current.confirm();
+    });
+
+    expect(tokenOf(1)).not.toBe(tokenOf(0));
+  });
+
+  it("invalidates the pending token when the cart changes before a retry", async () => {
+    const result = await setupCart();
+    createAndConfirmSaleMock.mockResolvedValueOnce({ data: null, error: "boom" });
+    await act(async () => {
+      await result.current.confirm();
+    });
+    act(() => {
+      result.current.incrementLine(CHICKEN_ID);
+    });
+    createAndConfirmSaleMock.mockResolvedValueOnce({
+      data: confirmed("sale-2"),
+      error: null,
+    });
+    await act(async () => {
+      await result.current.confirm();
+    });
+
+    expect(tokenOf(1)).not.toBe(tokenOf(0));
+  });
+});
+
+describe("useQuickSale price change (audit D4)", () => {
+  const PRODUCT = {
+    id: CHICKEN_ID,
+    name: "Chicken crepe",
+    selling_price: 10,
+    image_url: null,
+  };
+  const PRICE_ERROR =
+    'The price of "Chicken crepe" is now €12.00. Refresh the screen and try again.';
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    getRecipesMock.mockResolvedValue({
+      data: [recipe({ id: CHICKEN_ID, name: "Chicken crepe" })],
+      error: null,
+    });
+    getSoldQuantityByProductIdMock.mockResolvedValue({
+      data: new Map<string, number>(),
+      error: null,
+    });
+    getCurrentAccountingContextMock.mockResolvedValue({
+      data: null,
+      error: "Accounting not configured.",
+    });
+  });
+
+  async function setupCart() {
+    const { result } = renderHook(() => useQuickSale());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    act(() => {
+      result.current.addToCart(PRODUCT);
+      result.current.addToCart(PRODUCT);
+    });
+    return result;
+  }
+
+  it("re-prices the cart and shows the message", async () => {
+    const result = await setupCart();
+    createAndConfirmSaleMock.mockResolvedValueOnce({
+      data: null,
+      error: PRICE_ERROR,
+    });
+    getRecipesMock.mockResolvedValueOnce({
+      data: [recipe({ id: CHICKEN_ID, name: "Chicken crepe", selling_price: 12 })],
+      error: null,
+    });
+
+    let ok: boolean | undefined;
+    await act(async () => {
+      ok = await result.current.confirm();
+    });
+
+    expect(ok).toBe(false);
+    expect(result.current.actionError).toBe(PRICE_ERROR);
+    expect(result.current.cartLines).toEqual([
+      {
+        product_id: CHICKEN_ID,
+        name: "Chicken crepe",
+        unit_price: 12,
+        quantity: 2,
+      },
+    ]);
+    expect(result.current.itemsTotal).toBe(24);
+  });
+
+  it("removes a product that became inactive and says so", async () => {
+    const result = await setupCart();
+    createAndConfirmSaleMock.mockResolvedValueOnce({
+      data: null,
+      error: PRICE_ERROR,
+    });
+    getRecipesMock.mockResolvedValueOnce({
+      data: [recipe({ id: CHICKEN_ID, name: "Chicken crepe", is_active: false })],
+      error: null,
+    });
+
+    await act(async () => {
+      await result.current.confirm();
+    });
+
+    expect(result.current.cartLines).toEqual([]);
+    expect(result.current.actionError).toBe(
+      `${PRICE_ERROR} Removed from the cart (no longer for sale): Chicken crepe.`,
+    );
+  });
+
+  it("keeps the cart and the message when the product reload fails", async () => {
+    const result = await setupCart();
+    createAndConfirmSaleMock.mockResolvedValueOnce({
+      data: null,
+      error: PRICE_ERROR,
+    });
+    getRecipesMock.mockResolvedValueOnce({
+      data: null,
+      error: "Failed to load recipes",
+    });
+
+    await act(async () => {
+      await result.current.confirm();
+    });
+
+    expect(result.current.actionError).toBe(PRICE_ERROR);
+    expect(result.current.cartLines[0]?.unit_price).toBe(10);
   });
 });

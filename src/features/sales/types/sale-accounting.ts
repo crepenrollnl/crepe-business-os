@@ -16,7 +16,7 @@ import type {
 } from "@/types/accounting";
 import type { OperationalPostingResult } from "@/features/accounting/types/operational-integration";
 import type { SaleRevenueDebitRole } from "@/features/accounting/rules/sale-completed-posting-rule";
-import type { ConfirmSaleResult, SaleWithLines } from "./sale";
+import type { SalePostingHeader } from "./sale";
 
 /**
  * Accounting inputs required to propose / post journals for a completed sale.
@@ -58,7 +58,7 @@ export interface SaleAccountingContext {
  * Either side may be null when amount is zero and skipped.
  */
 export interface SaleJournalProposals {
-  sale: SaleWithLines;
+  sale: SalePostingHeader;
   total_cogs: number;
   revenue: OperationalPostingResult | null;
   cogs: OperationalPostingResult | null;
@@ -67,7 +67,14 @@ export interface SaleJournalProposals {
 /** Persisted posting result (DEV-109). Same shape; mode is "post". */
 export type SaleJournalPostings = SaleJournalProposals;
 
-export type SaleAccountingSource = ConfirmSaleResult;
+/**
+ * Money facts posting reads: the confirmed sale header + frozen COGS.
+ * Lines are not needed, so a header-only reload is enough (audit D3).
+ */
+export interface SaleAccountingSource {
+  sale: SalePostingHeader;
+  total_cogs: number;
+}
 
 /** Sale-level accounting journal status (DEV-109 / DEV-111). */
 export type SaleAccountingPostingStatus = "posted" | "pending";
