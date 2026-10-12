@@ -15,8 +15,8 @@
 --   D — owner record_write_off still writes write_offs + stock_movements
 --   E — a SELLER still sells: create_and_confirm_sale writes sales, sale_lines,
 --       FIFO consumptions and the ingredient sale_out movement
---   F — a seller adds a customer via create_customer but cannot write
---       customers / sale_lines directly
+--   F — a seller cannot write customers / sale_lines directly, and since
+--       sql/144 cannot call create_customer either
 --   G — anon can neither read nor write
 -- Sequence counters (sale / batch / customer numbers) are restored at the end.
 
@@ -310,18 +310,20 @@ BEGIN
   END IF;
 
   -- ------------------------------------------------------------------
-  -- F. A seller still adds a customer through the RPC, but cannot write
-  --    customers or sale_lines directly.
+  -- F. A seller cannot write customers or sale_lines directly. Since
+  --    sql/144 the create_customer RPC is closed to signed-in users too.
   -- ------------------------------------------------------------------
   SET LOCAL ROLE authenticated;
-  PERFORM create_customer('TEST_S1_customer_' || v_tag, NULL, NULL, NULL, NULL);
+  PERFORM public.dryrun138_expect('SCENARIO F seller create_customer', '42501',
+    'permission denied for function%',
+    format('SELECT public.create_customer(%L, NULL, NULL, NULL, NULL)', 'TEST_S1_customer_' || v_tag));
   PERFORM public.dryrun138_expect('SCENARIO F seller customers', '42501', 'permission denied%',
     format('UPDATE public.customers SET name = name WHERE name = %L', 'TEST_S1_customer_' || v_tag));
   PERFORM public.dryrun138_expect('SCENARIO F seller sale_lines', '42501', 'permission denied%',
     format('DELETE FROM public.sale_lines WHERE sale_id = %L', v_sale));
   RESET ROLE;
-  IF NOT EXISTS (SELECT 1 FROM customers WHERE name = 'TEST_S1_customer_' || v_tag) THEN
-    RAISE EXCEPTION 'SCENARIO F FAIL: create_customer wrote nothing';
+  IF EXISTS (SELECT 1 FROM customers WHERE name = 'TEST_S1_customer_' || v_tag) THEN
+    RAISE EXCEPTION 'SCENARIO F FAIL: a customer row was written';
   END IF;
 
   UPDATE profiles SET role = v_original_role WHERE auth_user_id = v_actor;
