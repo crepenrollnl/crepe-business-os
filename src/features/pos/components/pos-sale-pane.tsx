@@ -20,7 +20,7 @@ export function PosSalePane() {
     discountError,
     confirming,
     actionError,
-    postingError,
+    warning,
     lastConfirmedSaleNumber,
     sendToQueue,
     kitchenNote,
@@ -51,7 +51,7 @@ export function PosSalePane() {
         discountError={discountError}
         confirming={confirming}
         actionError={actionError}
-        postingError={postingError}
+        warning={warning}
         lastConfirmedSaleNumber={lastConfirmedSaleNumber}
         sendToQueue={sendToQueue}
         kitchenNote={kitchenNote}

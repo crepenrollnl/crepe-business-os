@@ -10,6 +10,8 @@
  * Audit D3: a sale committed by the RPC is always treated as success, even
  * when the follow-up reload failed. Audit D4: a "price changed" rejection
  * (sql/146) re-prices the cart from the fresh selling_price.
+ * Audit D2/K3: confirm is the RPC only -- the database posts the journals
+ * (sql/147), so the hook never loads an accounting context or posts.
  */
 
 import { act, renderHook, waitFor } from "@testing-library/react";
@@ -22,17 +24,13 @@ const {
   getSoldQuantityByProductIdMock,
   getCurrentAccountingContextMock,
   createAndConfirmSaleMock,
-  createAndConfirmSaleAndPostJournalsMock,
   markSaleQueuedMock,
-  reportSkippedPostingMock,
 } = vi.hoisted(() => ({
   getRecipesMock: vi.fn(),
   getSoldQuantityByProductIdMock: vi.fn(),
   getCurrentAccountingContextMock: vi.fn(),
   createAndConfirmSaleMock: vi.fn(),
-  createAndConfirmSaleAndPostJournalsMock: vi.fn(),
   markSaleQueuedMock: vi.fn(),
-  reportSkippedPostingMock: vi.fn(),
 }));
 
 vi.mock("@/features/recipes/services/recipe-service", () => ({
@@ -52,14 +50,11 @@ vi.mock("@/features/sales/services/sales-service", () => ({
   salesService: {
     createAndConfirmSale: (...args: unknown[]) =>
       createAndConfirmSaleMock(...args),
-    createAndConfirmSaleAndPostJournals: (...args: unknown[]) =>
-      createAndConfirmSaleAndPostJournalsMock(...args),
     markSaleQueued: (...args: unknown[]) => markSaleQueuedMock(...args),
-    reportSkippedPosting: (...args: unknown[]) =>
-      reportSkippedPostingMock(...args),
   },
 }));
 
+// Kept only to prove confirm never loads an accounting context (sql/147).
 vi.mock("@/features/accounting/services/accounting-context-service", () => ({
   accountingContextService: {
     getCurrentAccountingContext: (...args: unknown[]) =>
@@ -218,12 +213,6 @@ describe("usePosSale client_request_id (sql/118)", () => {
       data: new Map<string, number>(),
       error: null,
     });
-    // Force the fallback (non-posting) createAndConfirmSale path so these
-    // tests only need to mock one RPC wrapper.
-    getCurrentAccountingContextMock.mockResolvedValue({
-      data: null,
-      error: "Accounting not configured.",
-    });
   });
 
   async function setupCartWithOneItem() {
@@ -360,10 +349,6 @@ describe("usePosSale after-commit success + price change (audit D3/D4)", () => {
       data: new Map<string, number>(),
       error: null,
     });
-    getCurrentAccountingContextMock.mockResolvedValue({
-      data: { fiscalPeriod: { id: "period-1" } },
-      error: null,
-    });
   });
 
   async function setupCart() {
@@ -377,14 +362,12 @@ describe("usePosSale after-commit success + price change (audit D3/D4)", () => {
 
   it("treats a committed sale whose reload failed as success and warns", async () => {
     const result = await setupCart();
-    createAndConfirmSaleAndPostJournalsMock.mockResolvedValueOnce({
+    createAndConfirmSaleMock.mockResolvedValueOnce({
       data: {
         sale_id: "sale-11",
         sale: null,
         total_cogs: 2,
         reloadError: "Statement timeout.",
-        posting: null,
-        postingError: null,
       },
       error: null,
     });
@@ -397,14 +380,14 @@ describe("usePosSale after-commit success + price change (audit D3/D4)", () => {
     expect(confirmed).toBe(true);
     expect(result.current.actionError).toBeNull();
     expect(result.current.cartLines).toEqual([]);
-    expect(result.current.postingError).toBe(
+    expect(result.current.warning).toBe(
       "Sale confirmed, but it could not be reloaded: Statement timeout.",
     );
   });
 
   it("re-prices the cart from the fresh selling_price after a price-changed error", async () => {
     const result = await setupCart();
-    createAndConfirmSaleAndPostJournalsMock.mockResolvedValueOnce({
+    createAndConfirmSaleMock.mockResolvedValueOnce({
       data: null,
       error: PRICE_ERROR,
     });
@@ -440,19 +423,15 @@ describe("usePosSale after-commit success + price change (audit D3/D4)", () => {
     // The re-priced cart is a different cart: confirming again sends the
     // new price under a fresh idempotency token.
     const firstToken =
-      createAndConfirmSaleAndPostJournalsMock.mock.calls[0][0].client_request_id;
-    createAndConfirmSaleAndPostJournalsMock.mockResolvedValueOnce({
-      data: {
-        ...confirmedSale("sale-12"),
-        posting: null,
-        postingError: null,
-      },
+      createAndConfirmSaleMock.mock.calls[0][0].client_request_id;
+    createAndConfirmSaleMock.mockResolvedValueOnce({
+      data: confirmedSale("sale-12"),
       error: null,
     });
     await act(async () => {
       await result.current.confirm();
     });
-    const retry = createAndConfirmSaleAndPostJournalsMock.mock.calls[1][0];
+    const retry = createAndConfirmSaleMock.mock.calls[1][0];
     expect(retry.lines).toEqual([
       { product_id: TOKEN_TEST_PRODUCT.id, quantity: 1, unit_price: 7 },
     ]);
@@ -461,7 +440,7 @@ describe("usePosSale after-commit success + price change (audit D3/D4)", () => {
 
   it("removes a cart product that is no longer for sale and says so", async () => {
     const result = await setupCart();
-    createAndConfirmSaleAndPostJournalsMock.mockResolvedValueOnce({
+    createAndConfirmSaleMock.mockResolvedValueOnce({
       data: null,
       error: PRICE_ERROR,
     });
@@ -488,7 +467,7 @@ describe("usePosSale after-commit success + price change (audit D3/D4)", () => {
 
   it("shows other confirm errors as before without reloading products", async () => {
     const result = await setupCart();
-    createAndConfirmSaleAndPostJournalsMock.mockResolvedValueOnce({
+    createAndConfirmSaleMock.mockResolvedValueOnce({
       data: null,
       error: "Not enough finished goods in stock.",
     });
@@ -506,24 +485,7 @@ describe("usePosSale after-commit success + price change (audit D3/D4)", () => {
   });
 });
 
-describe("usePosSale posting-failure recording (audit D1)", () => {
-  const ACCOUNTING_CONTEXT = {
-    fiscalPeriod: {
-      id: "period-1",
-      name: "FY2026",
-      start_date: "2026-01-01",
-      end_date: "2026-12-31",
-      status: "open",
-      closed_at: null,
-      created_at: "2026-01-01T00:00:00.000Z",
-    },
-    accountRoleBindings: [],
-    baseCurrency: "EUR",
-    transactionCurrency: "EUR",
-    exchangeRate: 1,
-    rateDate: "2026-09-14",
-  };
-
+describe("usePosSale confirm without app-side posting (audit D2/K3)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     getRecipesMock.mockResolvedValue({
@@ -542,13 +504,16 @@ describe("usePosSale posting-failure recording (audit D1)", () => {
     });
   });
 
-  async function confirmOneItem() {
+  async function confirmOneItem(options?: { sendToQueue?: boolean }) {
     const { result } = renderHook(() => usePosSale());
 
     await waitFor(() => expect(result.current.loading).toBe(false));
 
     act(() => {
       result.current.addToCart(TOKEN_TEST_PRODUCT);
+      if (options?.sendToQueue) {
+        result.current.setSendToQueue(true);
+      }
     });
 
     let confirmed: boolean | undefined;
@@ -559,11 +524,7 @@ describe("usePosSale posting-failure recording (audit D1)", () => {
     return { result, confirmed };
   }
 
-  it("records a pos_confirm posting failure once when the accounting context cannot be loaded", async () => {
-    getCurrentAccountingContextMock.mockResolvedValue({
-      data: null,
-      error: "No open fiscal period covers today's date.",
-    });
+  it("confirms through the RPC only and never loads an accounting context", async () => {
     createAndConfirmSaleMock.mockResolvedValue({
       data: confirmedSale("sale-9"),
       error: null,
@@ -572,41 +533,25 @@ describe("usePosSale posting-failure recording (audit D1)", () => {
     const { result, confirmed } = await confirmOneItem();
 
     expect(confirmed).toBe(true);
+    expect(createAndConfirmSaleMock).toHaveBeenCalledTimes(1);
+    expect(getCurrentAccountingContextMock).not.toHaveBeenCalled();
     expect(result.current.lastConfirmedSaleNumber).toBe("S-000001");
-    expect(reportSkippedPostingMock).toHaveBeenCalledTimes(1);
-    expect(reportSkippedPostingMock).toHaveBeenCalledWith(
-      "sale-9",
-      "pos_confirm",
-      "No open fiscal period covers today's date.",
-    );
-    expect(result.current.postingError).toBe(
-      "No open fiscal period covers today's date.",
-    );
+    expect(result.current.warning).toBeNull();
+    expect(result.current.actionError).toBeNull();
   });
 
-  it("does not record a second failure when the post itself fails (the service already did)", async () => {
-    getCurrentAccountingContextMock.mockResolvedValue({
-      data: ACCOUNTING_CONTEXT,
+  it("shows a send-to-queue failure as a warning, the sale stays confirmed", async () => {
+    createAndConfirmSaleMock.mockResolvedValue({
+      data: confirmedSale("sale-10"),
       error: null,
     });
-    createAndConfirmSaleAndPostJournalsMock.mockResolvedValue({
-      data: {
-        ...confirmedSale("sale-10"),
-        posting: null,
-        postingError: "Sale confirmed but accounting posting failed.",
-      },
-      error: null,
-    });
+    markSaleQueuedMock.mockResolvedValue({ data: null, error: "Queue is down." });
 
-    const { result, confirmed } = await confirmOneItem();
+    const { result, confirmed } = await confirmOneItem({ sendToQueue: true });
 
     expect(confirmed).toBe(true);
-    expect(createAndConfirmSaleAndPostJournalsMock.mock.calls[0][2]).toBe(
-      "pos_confirm",
-    );
-    expect(reportSkippedPostingMock).not.toHaveBeenCalled();
-    expect(result.current.postingError).toBe(
-      "Sale confirmed but accounting posting failed.",
-    );
+    expect(markSaleQueuedMock).toHaveBeenCalledWith("sale-10");
+    expect(result.current.warning).toBe("Queue is down.");
+    expect(result.current.cartLines).toEqual([]);
   });
 });

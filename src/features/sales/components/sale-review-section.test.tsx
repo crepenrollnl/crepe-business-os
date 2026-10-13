@@ -101,6 +101,7 @@ describe("SaleReviewSection (DEV-111)", () => {
         cogsSummary={cogsSummary()}
         profitSummary={profitSummary()}
         accountingPostingStatus="posted"
+        showAccountingStatus
       />,
     );
 
@@ -171,6 +172,7 @@ describe("SaleReviewSection (DEV-111)", () => {
         })}
         profitSummary={profitSummary({ cogs: 10.15, gross_profit: 89.85 })}
         accountingPostingStatus="posted"
+        showAccountingStatus
       />,
     );
 
@@ -209,6 +211,7 @@ describe("SaleReviewSection (DEV-111)", () => {
         cogsSummary={cogsSummary()}
         profitSummary={profitSummary()}
         accountingPostingStatus="pending"
+        showAccountingStatus
       />,
     );
 
@@ -226,6 +229,7 @@ describe("SaleReviewSection (DEV-111)", () => {
         cogsError="Sale has no Finished Goods consumption layers for COGS."
         profitError="Failed to load sale profit"
         accountingPostingStatus="pending"
+        showAccountingStatus
       />,
     );
 
@@ -262,6 +266,7 @@ describe("SaleReviewSection (DEV-111)", () => {
           gross_margin_percent: 68.75,
         })}
         accountingPostingStatus="posted"
+        showAccountingStatus
       />,
     );
 
@@ -280,14 +285,15 @@ describe("SaleReviewSection (DEV-111)", () => {
     );
   });
 
-  it("renders postingError next to accounting status in the same amber pattern", () => {
+  it("renders the confirm warning in the same amber pattern", () => {
     render(
       <SaleReviewSection
         sale={sale()}
         cogsSummary={cogsSummary()}
         profitSummary={profitSummary()}
         accountingPostingStatus="pending"
-        postingError="Sale confirmed but accounting posting failed."
+        showAccountingStatus
+        warning="Sale confirmed, but it could not be reloaded: Statement timeout."
       />,
     );
 
@@ -295,8 +301,26 @@ describe("SaleReviewSection (DEV-111)", () => {
       "Pending",
     );
     expect(
-      screen.getByText("Sale confirmed but accounting posting failed."),
+      screen.getByText(
+        "Sale confirmed, but it could not be reloaded: Statement timeout.",
+      ),
     ).toHaveClass("text-sm", "text-amber-700");
+  });
+
+  it("hides the accounting posting status unless enabled (sellers, audit D2/K3)", () => {
+    render(
+      <SaleReviewSection
+        sale={sale()}
+        cogsSummary={cogsSummary()}
+        profitSummary={profitSummary()}
+        accountingPostingStatus="posted"
+      />,
+    );
+
+    expect(
+      screen.queryByTestId("review-accounting-status"),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText(/accounting posting status/i)).toBeNull();
   });
 
   it("shows typed discount and resolved amount on a completed sale", () => {
@@ -313,6 +337,7 @@ describe("SaleReviewSection (DEV-111)", () => {
         cogsSummary={cogsSummary()}
         profitSummary={profitSummary({ net_revenue: 18 })}
         accountingPostingStatus="posted"
+        showAccountingStatus
       />,
     );
 

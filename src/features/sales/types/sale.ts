@@ -59,15 +59,6 @@ export interface SaleWithLines extends Sale {
 }
 
 /**
- * Sale header fields Accounting needs to post a confirmed sale (audit D3).
- * A full SaleWithLines satisfies it; a header-only reload does too.
- */
-export type SalePostingHeader = Pick<
-  Sale,
-  "id" | "status" | "sale_date" | "confirmed_at" | "subtotal" | "tax_total" | "total"
->;
-
-/**
  * confirmSale result.
  * total_cogs comes from confirm_sale RPC only — never calculated in TypeScript.
  *
