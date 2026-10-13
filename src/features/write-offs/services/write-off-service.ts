@@ -4,8 +4,10 @@
  * recordWriteOff wraps record_write_off (sql/115) — physical stock only.
  * recordDishWriteOff wraps record_dish_write_off (sql/136): one dish is
  * written off as its recipe_components, one record_write_off row per part,
- * in one transaction. Neither RPC posts journals — they are posted
- * afterwards by write-off-accounting-service, one per write-off row.
+ * in one transaction. The app never posts journals for write-offs: since
+ * sql/148 a deferred trigger on write_offs posts the waste journal at COMMIT
+ * (one per single write-off, one per item type for a dish write-off) and
+ * records any failure in posting_failures (audit D2/K3).
  */
 
 import { finishedGoodsListService } from "@/features/finished-goods/services/finished-goods-list-service";

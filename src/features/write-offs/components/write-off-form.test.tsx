@@ -6,7 +6,6 @@ import type {
   WriteOffIngredientOption,
   WriteOffProductOption,
 } from "../types/write-off";
-import { WRITE_OFF_ZERO_COST_ACCOUNTING_NOTE } from "../types/write-off";
 
 const INGREDIENTS: WriteOffIngredientOption[] = [
   { id: "ing-1", name: "Chicken", unit: "kg" },
@@ -21,8 +20,6 @@ const PRODUCTS: WriteOffProductOption[] = [
 function renderForm(overrides?: {
   error?: string | null;
   lastSuccess?: string | null;
-  postingWarning?: string | null;
-  accountingNote?: string | null;
   prefillItemType?: "ingredient" | "finished_good" | null;
   prefillItemId?: string | null;
   onSubmit?: (input: unknown) => Promise<boolean>;
@@ -37,8 +34,6 @@ function renderForm(overrides?: {
       isSaving={false}
       error={overrides?.error ?? null}
       lastSuccess={overrides?.lastSuccess ?? null}
-      postingWarning={overrides?.postingWarning ?? null}
-      accountingNote={overrides?.accountingNote ?? null}
       prefillItemType={overrides?.prefillItemType}
       prefillItemId={overrides?.prefillItemId}
       onSubmit={onSubmit}
@@ -167,17 +162,11 @@ describe("WriteOffForm", () => {
     expect(screen.queryByText("kg")).not.toBeInTheDocument();
   });
 
-  it("shows a neutral note when no accounting entry was created", () => {
-    renderForm({
-      accountingNote: WRITE_OFF_ZERO_COST_ACCOUNTING_NOTE,
-    });
+  it("shows the success message with no accounting wording (sql/148)", () => {
+    renderForm({ lastSuccess: "Write-off recorded." });
 
-    expect(
-      screen.getByText(WRITE_OFF_ZERO_COST_ACCOUNTING_NOTE),
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByText(/^Write-off recorded\.$/),
-    ).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Write-off recorded.");
+    expect(screen.queryByText(/accounting/i)).not.toBeInTheDocument();
   });
 });
 
@@ -202,8 +191,6 @@ describe("WriteOffForm dish", () => {
         isSaving={false}
         error={null}
         lastSuccess={null}
-        postingWarning={null}
-        accountingNote={null}
         onSubmit={onSubmit}
         onSubmitDish={onSubmitDish}
         onDismissSuccess={vi.fn()}

@@ -29,8 +29,6 @@ export function WriteOffsPage({
     isSaving,
     formError,
     lastSuccess,
-    postingWarning,
-    accountingNote,
     periodFrom,
     periodTo,
     setPeriodFrom,
@@ -60,8 +58,6 @@ export function WriteOffsPage({
         isSaving={isSaving}
         error={formError}
         lastSuccess={lastSuccess}
-        postingWarning={postingWarning}
-        accountingNote={accountingNote}
         prefillItemType={prefillItemType}
         prefillItemId={prefillItemId}
         onSubmit={submitWriteOff}

@@ -2,7 +2,6 @@
 
 import { useCallback, useState } from "react";
 import { useAsyncEffect } from "@/hooks/use-async-effect";
-import { writeOffAccountingService } from "../services/write-off-accounting-service";
 import { writeOffService } from "../services/write-off-service";
 import type {
   RecordDishWriteOffInput,
@@ -24,8 +23,6 @@ interface UseWriteOffsState {
   isSaving: boolean;
   formError: string | null;
   lastSuccess: string | null;
-  postingWarning: string | null;
-  accountingNote: string | null;
   periodFrom: string;
   periodTo: string;
 }
@@ -67,8 +64,6 @@ export function useWriteOffs() {
     isSaving: false,
     formError: null,
     lastSuccess: null,
-    postingWarning: null,
-    accountingNote: null,
     periodFrom: defaultPeriod.from,
     periodTo: defaultPeriod.to,
   });
@@ -89,17 +84,17 @@ export function useWriteOffs() {
 
   useAsyncEffect(load, [load]);
 
+  // Recording is the RPC only: the database posts the waste journal at
+  // COMMIT (sql/148, audit D2/K3).
   const submitWriteOff = useCallback(async (input: RecordWriteOffInput) => {
     setState((prev) => ({
       ...prev,
       isSaving: true,
       formError: null,
       lastSuccess: null,
-      postingWarning: null,
-      accountingNote: null,
     }));
 
-    const result = await writeOffAccountingService.recordWriteOffAndPost(input);
+    const result = await writeOffService.recordWriteOff(input);
 
     if (result.error !== null || !result.data) {
       setState((prev) => ({
@@ -116,11 +111,7 @@ export function useWriteOffs() {
       ...prev,
       isSaving: false,
       formError: null,
-      lastSuccess: result.data.accountingNote
-        ? null
-        : "Write-off recorded.",
-      postingWarning: result.data.postingError,
-      accountingNote: result.data.accountingNote,
+      lastSuccess: "Write-off recorded.",
       writeOffs: writeOffsResult.error
         ? prev.writeOffs
         : (writeOffsResult.data ?? []),
@@ -136,12 +127,9 @@ export function useWriteOffs() {
         isSaving: true,
         formError: null,
         lastSuccess: null,
-        postingWarning: null,
-        accountingNote: null,
       }));
 
-      const result =
-        await writeOffAccountingService.recordDishWriteOffAndPost(input);
+      const result = await writeOffService.recordDishWriteOff(input);
 
       if (result.error !== null || !result.data) {
         setState((prev) => ({
@@ -153,17 +141,13 @@ export function useWriteOffs() {
       }
 
       const writeOffsResult = await writeOffService.listWriteOffs();
-      const { dishWriteOff, postingErrors, accountingNote } = result.data;
+      const dishWriteOff = result.data;
 
       setState((prev) => ({
         ...prev,
         isSaving: false,
         formError: null,
-        lastSuccess: accountingNote
-          ? null
-          : `Dish write-off recorded: ${dishWriteOff.write_offs.length} items written off.`,
-        postingWarning: postingErrors.length > 0 ? postingErrors.join("; ") : null,
-        accountingNote,
+        lastSuccess: `Dish write-off recorded: ${dishWriteOff.write_offs.length} items written off.`,
         writeOffs: writeOffsResult.error
           ? prev.writeOffs
           : (writeOffsResult.data ?? []),
@@ -178,8 +162,6 @@ export function useWriteOffs() {
     setState((prev) => ({
       ...prev,
       lastSuccess: null,
-      postingWarning: null,
-      accountingNote: null,
     }));
   }, []);
 
@@ -201,8 +183,6 @@ export function useWriteOffs() {
     isSaving: state.isSaving,
     formError: state.formError,
     lastSuccess: state.lastSuccess,
-    postingWarning: state.postingWarning,
-    accountingNote: state.accountingNote,
     periodFrom: state.periodFrom,
     periodTo: state.periodTo,
     setPeriodFrom,
