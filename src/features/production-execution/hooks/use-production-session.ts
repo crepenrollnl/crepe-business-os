@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { accountingContextService } from "@/features/accounting/services/accounting-context-service";
 import { useAsyncEffect } from "@/hooks/use-async-effect";
 import { productionSessionService } from "../services/production-session-service";
 import type {
@@ -120,7 +119,6 @@ export function useProductionSession(sessionId: string) {
   const [saving, setSaving] = useState(false);
   const [finishing, setFinishing] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [postingError, setPostingError] = useState<string | null>(null);
   const [completionBoms, setCompletionBoms] = useState<Map<
     string,
     CompleteProductionRecipeBom
@@ -523,40 +521,14 @@ export function useProductionSession(sessionId: string) {
 
     setFinishing(true);
     setActionError(null);
-    setPostingError(null);
 
-    const contextResult =
-      await accountingContextService.getCurrentAccountingContext();
-
-    if (contextResult.error || !contextResult.data) {
-      // Accounting infra not ready (e.g. no open fiscal period) — the
-      // production session must still complete; only the journal is
-      // skipped, surfaced via postingError rather than blocking the
-      // physical completion of production.
-      const fallback = await productionSessionService.completeSession(
-        sessionId,
-        payload,
-      );
-
-      if (fallback.error || !fallback.data) {
-        setActionError(fallback.error ?? "Failed to finish production session");
-        setFinishing(false);
-        return false;
-      }
-
-      applySession(fallback.data);
-      const skippedError =
-        contextResult.error ?? "Accounting posting was skipped.";
-      productionSessionService.reportSkippedPosting(sessionId, skippedError);
-      setPostingError(skippedError);
-      setFinishing(false);
-      return true;
-    }
-
-    const result = await productionSessionService.completeSessionAndPostJournal(
+    // Completion is the RPC only: the database posts the production journal
+    // at COMMIT and logs any failure in posting_failures itself (sql/149).
+    // completeSession reloads the session after that commit, so its
+    // accounting_posting_status is already current.
+    const result = await productionSessionService.completeSession(
       sessionId,
       payload,
-      contextResult.data,
     );
 
     if (result.error || !result.data) {
@@ -565,19 +537,7 @@ export function useProductionSession(sessionId: string) {
       return false;
     }
 
-    // Reload: the session snapshot inside result.data is taken before
-    // posting runs, so accounting_posting_status on it is always stale
-    // ("pending") even when posting just succeeded.
-    const reloadResult = await productionSessionService.getSessionById(
-      sessionId,
-    );
-
-    applySession(
-      !reloadResult.error && reloadResult.data
-        ? reloadResult.data
-        : result.data.session,
-    );
-    setPostingError(result.data.postingError);
+    applySession(result.data);
     setFinishing(false);
     return true;
   }, [
@@ -610,7 +570,6 @@ export function useProductionSession(sessionId: string) {
     saving,
     finishing,
     actionError,
-    postingError,
     zeroCostWarning,
     onNotesChange,
     onProducedChange,

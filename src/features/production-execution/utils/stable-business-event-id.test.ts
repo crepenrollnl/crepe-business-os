@@ -11,6 +11,19 @@ describe("stableBusinessEventId (DEV-105)", () => {
     );
   });
 
+  it("matches the ids the database trigger posts under (same vectors as sql/149)", () => {
+    expect(
+      stableBusinessEventId(
+        "production_completed:00000000-0000-4000-8000-000000000001",
+      ),
+    ).toBe("00804158-d7b6-554b-8cc3-1c7e5d386f1e");
+    expect(
+      stableBusinessEventId(
+        "production_completed:00000000-0000-4000-8000-000000000002",
+      ),
+    ).toBe("9cc3e665-f3aa-50b7-8b15-d38bbc3b0c64");
+  });
+
   it("returns different ids for different keys", () => {
     expect(stableBusinessEventId("production_completed:a")).not.toBe(
       stableBusinessEventId("production_completed:b"),

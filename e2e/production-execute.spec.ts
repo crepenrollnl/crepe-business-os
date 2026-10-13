@@ -8,7 +8,8 @@ import { test, expect } from "@playwright/test";
  * session, finish it, and confirm raw stock was actually deducted. This is
  * the first step in the critical path that both mutates
  * ingredients.current_stock for real (complete_production_session) and can
- * post a real accounting journal entry (completeSessionAndPostJournal) --
+ * post a real accounting journal entry (posted by the database at COMMIT
+ * of complete_production_session, sql/149) --
  * both accepted for TEST data in the shared dev project (see investigation
  * notes: the real business's accounting now lives in a separate Vercel
  * Production Supabase project, so this no longer touches real books).

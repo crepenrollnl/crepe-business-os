@@ -23,10 +23,6 @@ import type {
 } from "../types/production-session";
 import { OPEN_PRODUCTION_SESSION_STATUSES } from "../types/production-session";
 import type { CompleteProductionSessionResult } from "../types/production-batch";
-import type {
-  ProductionAccountingContext,
-  ProductionJournalPosting,
-} from "../types/production-accounting";
 import { productionAccountingService } from "./production-accounting-service";
 import { productionBatchService } from "./production-batch-service";
 import {
@@ -41,9 +37,7 @@ import {
   validateInventoryForCompletion,
   type CompleteProductionRecipeBom,
 } from "../utils/complete-production";
-import { reportPostingFailure } from "@/features/accounting/utils/report-posting-failure";
 import { collectFirstLevelRawIngredients } from "../utils/collect-first-level-raw-ingredients";
-import { stableBusinessEventId } from "../utils/stable-business-event-id";
 import {
   toSessionLineView,
   validateSessionLinesForComplete,
@@ -884,6 +878,10 @@ export const productionSessionService = {
    *   registration → session COMPLETED (completed_at / completed_by).
    *
    * Uses Actual Produced Quantity only. Never Planned Quantity.
+   *
+   * The production journal is posted by the database at COMMIT of that
+   * transaction (sql/149); failures go to posting_failures. The app never
+   * posts production journals.
    */
   async completeSession(
     sessionId: string,
@@ -1005,104 +1003,5 @@ export const productionSessionService = {
         mapCompletionError(error, "Failed to finish production session"),
       );
     }
-  },
-
-  /**
-   * Complete production then post the Accounting journal (DEV-105).
-   *
-   * Uses frozen RPC / plan total_cost — never recalculates.
-   * Existing completeSession (hooks/UI) remains unchanged.
-   *
-   * completeSession has already succeeded and is durable by the time
-   * posting is attempted — a posting failure must never look like the
-   * whole operation failed (that would silently discard a real completed
-   * session from the caller's point of view). So this only ever returns
-   * fail(...) when completeSession itself fails; once that succeeds, the
-   * result is always ok(...), with posting/postingError reporting whether
-   * the accounting entry was actually created.
-   */
-  async completeSessionAndPostJournal(
-    sessionId: string,
-    input: CompleteProductionSessionInput,
-    accounting: ProductionAccountingContext,
-  ): Promise<
-    ServiceResult<{
-      session: ProductionSessionWithRelations;
-      posting: ProductionJournalPosting | null;
-      postingError: string | null;
-    }>
-  > {
-    const completed = await this.completeSession(sessionId, input);
-    if (completed.error || !completed.data) {
-      return fail(completed.error ?? "Failed to finish production session");
-    }
-
-    const producedQuantity = completed.data.batches?.reduce(
-      (sum, batch) => sum + batch.produced_quantity,
-      0,
-    );
-    const batchIds =
-      completed.data.batches?.map((batch) => batch.id) ?? [];
-    const totalCost =
-      completed.data.batches?.reduce(
-        (sum, batch) => sum + batch.total_cost,
-        0,
-      ) ?? 0;
-
-    const posting = await productionAccountingService.postJournalForProductionCompleted(
-      {
-        session_id: sessionId,
-        transaction_id: null,
-        completed_at:
-          completed.data.completed_at ?? new Date().toISOString(),
-        total_cost: totalCost,
-        total_produced_quantity: producedQuantity ?? 0,
-        batch_count: batchIds.length,
-        batch_ids: batchIds,
-        session_status: "completed",
-      },
-      accounting,
-    );
-
-    if (posting.error || !posting.data) {
-      const postingError =
-        posting.error ??
-        "Production completed but accounting posting failed.";
-      void reportPostingFailure({
-        sourceFlow: "production_complete",
-        entityType: "production_session",
-        entityId: sessionId,
-        businessEventId: stableBusinessEventId(
-          `production_completed:${sessionId}`,
-        ),
-        errorMessage: postingError,
-      });
-      return ok({
-        session: completed.data,
-        posting: null,
-        postingError,
-      });
-    }
-
-    return ok({
-      session: completed.data,
-      posting: posting.data,
-      postingError: null,
-    });
-  },
-
-  /**
-   * Records that a completed session's journal was skipped before posting
-   * started (e.g. the accounting context could not be loaded), so the gap
-   * shows in posting_failures. Fire-and-forget; never touches the session.
-   */
-  reportSkippedPosting(sessionId: string, errorMessage: string): void {
-    void reportPostingFailure({
-      sourceFlow: "production_complete",
-      entityType: "production_session",
-      entityId: sessionId,
-      businessEventId: null,
-      errorMessage,
-    });
   },
 };
