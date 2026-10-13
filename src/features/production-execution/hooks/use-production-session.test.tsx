@@ -1,10 +1,10 @@
 /**
- * Hook coverage for useProductionSession's finishProduction (DEV-105 wiring).
+ * Hook coverage for useProductionSession's finishProduction.
  *
- * completeSession has already succeeded and is durable by the time posting
- * is attempted — a posting/context failure must never look like the whole
- * finish action failed. The session must still apply; postingError is the
- * only signal that the accounting entry was skipped or failed.
+ * Since sql/149 the database posts the production journal at COMMIT and
+ * logs failures in posting_failures itself, so finishing is the
+ * complete_production_session RPC only: no accounting context, no posting,
+ * no failure reporting from the browser (audit D2).
  */
 
 import { act, renderHook, waitFor } from "@testing-library/react";
@@ -14,39 +14,32 @@ import type { ProductionSessionWithRelations } from "../types/production-session
 const {
   getSessionByIdMock,
   completeSessionMock,
-  completeSessionAndPostJournalMock,
   getCurrentAccountingContextMock,
   loadRecipeBomsForCompletionMock,
   loadRecipeCompletionLookupsMock,
   saveSessionProgressMock,
-  reportSkippedPostingMock,
 } = vi.hoisted(() => ({
   getSessionByIdMock: vi.fn(),
   completeSessionMock: vi.fn(),
-  completeSessionAndPostJournalMock: vi.fn(),
   getCurrentAccountingContextMock: vi.fn(),
   loadRecipeBomsForCompletionMock: vi.fn(),
   loadRecipeCompletionLookupsMock: vi.fn(),
   saveSessionProgressMock: vi.fn(),
-  reportSkippedPostingMock: vi.fn(),
 }));
 
 vi.mock("../services/production-session-service", () => ({
   productionSessionService: {
     getSessionById: (...args: unknown[]) => getSessionByIdMock(...args),
     completeSession: (...args: unknown[]) => completeSessionMock(...args),
-    completeSessionAndPostJournal: (...args: unknown[]) =>
-      completeSessionAndPostJournalMock(...args),
     loadRecipeBomsForCompletion: (...args: unknown[]) =>
       loadRecipeBomsForCompletionMock(...args),
     loadRecipeCompletionLookups: (...args: unknown[]) =>
       loadRecipeCompletionLookupsMock(...args),
     saveSessionProgress: (...args: unknown[]) => saveSessionProgressMock(...args),
-    reportSkippedPosting: (...args: unknown[]) =>
-      reportSkippedPostingMock(...args),
   },
 }));
 
+// Kept only to prove finishing never loads an accounting context (sql/149).
 vi.mock("@/features/accounting/services/accounting-context-service", () => ({
   accountingContextService: {
     getCurrentAccountingContext: (...args: unknown[]) =>
@@ -57,23 +50,6 @@ vi.mock("@/features/accounting/services/accounting-context-service", () => ({
 import { useProductionSession } from "./use-production-session";
 
 const SESSION_ID = "session-1";
-const ACCOUNTING_CONTEXT = {
-  fiscalPeriod: {
-    id: "period-1",
-    name: "FY2026",
-    start_date: "2026-01-01",
-    end_date: "2026-12-31",
-    status: "open",
-    closed_at: null,
-    created_at: "2026-01-01T00:00:00.000Z",
-  },
-  accountRoleBindings: [],
-  baseCurrency: "EUR",
-  transactionCurrency: "EUR",
-  exchangeRate: 1,
-  rateDate: "2026-08-03",
-};
-
 function sessionFixture(
   overrides?: Partial<ProductionSessionWithRelations>,
 ): ProductionSessionWithRelations {
@@ -116,16 +92,14 @@ function completedFixture(): ProductionSessionWithRelations {
   });
 }
 
-describe("useProductionSession.finishProduction (accounting posting wiring)", () => {
+describe("useProductionSession.finishProduction (sql/149: database posts the journal)", () => {
   beforeEach(() => {
     getSessionByIdMock.mockReset();
     completeSessionMock.mockReset();
-    completeSessionAndPostJournalMock.mockReset();
     getCurrentAccountingContextMock.mockReset();
     loadRecipeBomsForCompletionMock.mockReset();
     loadRecipeCompletionLookupsMock.mockReset();
     saveSessionProgressMock.mockReset();
-    reportSkippedPostingMock.mockReset();
 
     getSessionByIdMock.mockResolvedValue({ data: sessionFixture(), error: null });
     loadRecipeBomsForCompletionMock.mockResolvedValue({
@@ -141,22 +115,8 @@ describe("useProductionSession.finishProduction (accounting posting wiring)", ()
     });
   });
 
-  it("applies the completed session and clears postingError when posting succeeds", async () => {
-    getCurrentAccountingContextMock.mockResolvedValue({
-      data: ACCOUNTING_CONTEXT,
-      error: null,
-    });
-    completeSessionAndPostJournalMock.mockResolvedValue({
-      data: {
-        session: completedFixture(),
-        posting: { source_document_id: "s1", event_type: "production_completed", postingResult: {}, batch_ids: [] },
-        postingError: null,
-      },
-      error: null,
-    });
-    // Post-posting reload picks up the fresh accounting_posting_status.
-    getSessionByIdMock.mockResolvedValueOnce({ data: sessionFixture(), error: null });
-    getSessionByIdMock.mockResolvedValueOnce({
+  it("finishes through completeSession only and never loads an accounting context", async () => {
+    completeSessionMock.mockResolvedValue({
       data: { ...completedFixture(), accounting_posting_status: "posted" },
       error: null,
     });
@@ -171,146 +131,46 @@ describe("useProductionSession.finishProduction (accounting posting wiring)", ()
     });
 
     expect(ok).toBe(true);
-    expect(completeSessionAndPostJournalMock).toHaveBeenCalledTimes(1);
-    expect(completeSessionMock).not.toHaveBeenCalled();
+    expect(completeSessionMock).toHaveBeenCalledTimes(1);
+    expect(completeSessionMock.mock.calls[0]?.[0]).toBe(SESSION_ID);
+    expect(getCurrentAccountingContextMock).not.toHaveBeenCalled();
     expect(result.current.session?.status).toBe("completed");
-    expect(result.current.session?.accounting_posting_status).toBe("posted");
-    expect(result.current.postingError).toBeNull();
     expect(result.current.actionError).toBeNull();
     expect(result.current.finishing).toBe(false);
   });
 
-  it("still applies the completed session when posting itself fails, and surfaces postingError", async () => {
-    getCurrentAccountingContextMock.mockResolvedValue({
-      data: ACCOUNTING_CONTEXT,
-      error: null,
-    });
-    completeSessionAndPostJournalMock.mockResolvedValue({
-      data: {
-        session: completedFixture(),
-        posting: null,
-        postingError: "Production completed but accounting posting failed.",
-      },
-      error: null,
-    });
-    getSessionByIdMock.mockResolvedValueOnce({ data: sessionFixture(), error: null });
-    getSessionByIdMock.mockResolvedValueOnce({ data: completedFixture(), error: null });
-
-    const { result } = renderHook(() => useProductionSession(SESSION_ID));
-
-    await waitFor(() => expect(result.current.loading).toBe(false));
-
-    let ok: boolean | undefined;
-    await act(async () => {
-      ok = await result.current.finishProduction();
-    });
-
-    expect(ok).toBe(true);
-    expect(result.current.session?.status).toBe("completed");
-    expect(result.current.postingError).toBe(
-      "Production completed but accounting posting failed.",
-    );
-    expect(result.current.actionError).toBeNull();
-  });
-
-  it("falls back to plain completeSession and still applies the session when the accounting context cannot be built", async () => {
-    getCurrentAccountingContextMock.mockResolvedValue({
-      data: null,
-      error: "No open fiscal period covers today's date.",
-    });
+  it("shows the accounting status returned with the completed session, without a second reload", async () => {
     completeSessionMock.mockResolvedValue({
-      data: completedFixture(),
+      data: { ...completedFixture(), accounting_posting_status: "posted" },
       error: null,
     });
-    getSessionByIdMock.mockResolvedValueOnce({ data: sessionFixture(), error: null });
 
     const { result } = renderHook(() => useProductionSession(SESSION_ID));
 
     await waitFor(() => expect(result.current.loading).toBe(false));
+    const loadsBeforeFinish = getSessionByIdMock.mock.calls.length;
 
-    let ok: boolean | undefined;
     await act(async () => {
-      ok = await result.current.finishProduction();
+      await result.current.finishProduction();
     });
 
-    expect(ok).toBe(true);
-    expect(completeSessionMock).toHaveBeenCalledTimes(1);
-    expect(completeSessionAndPostJournalMock).not.toHaveBeenCalled();
-    expect(result.current.session?.status).toBe("completed");
-    expect(result.current.postingError).toBe(
-      "No open fiscal period covers today's date.",
-    );
-    expect(result.current.actionError).toBeNull();
+    expect(result.current.session?.accounting_posting_status).toBe("posted");
+    expect(getSessionByIdMock.mock.calls.length).toBe(loadsBeforeFinish);
   });
 
-  it("records a posting failure once when the accounting context cannot be loaded", async () => {
-    getCurrentAccountingContextMock.mockResolvedValue({
-      data: null,
-      error: "No open fiscal period covers today's date.",
-    });
-    completeSessionMock.mockResolvedValue({
-      data: completedFixture(),
-      error: null,
-    });
-    getSessionByIdMock.mockResolvedValueOnce({ data: sessionFixture(), error: null });
-
+  it("exposes no postingError field any more (failures live in posting_failures)", async () => {
     const { result } = renderHook(() => useProductionSession(SESSION_ID));
 
     await waitFor(() => expect(result.current.loading).toBe(false));
 
-    let ok: boolean | undefined;
-    await act(async () => {
-      ok = await result.current.finishProduction();
-    });
-
-    expect(ok).toBe(true);
-    expect(result.current.session?.status).toBe("completed");
-    expect(reportSkippedPostingMock).toHaveBeenCalledTimes(1);
-    expect(reportSkippedPostingMock).toHaveBeenCalledWith(
-      SESSION_ID,
-      "No open fiscal period covers today's date.",
-    );
-  });
-
-  it("does not record a second failure when the post itself fails (the service already did)", async () => {
-    getCurrentAccountingContextMock.mockResolvedValue({
-      data: ACCOUNTING_CONTEXT,
-      error: null,
-    });
-    completeSessionAndPostJournalMock.mockResolvedValue({
-      data: {
-        session: completedFixture(),
-        posting: null,
-        postingError: "Production completed but accounting posting failed.",
-      },
-      error: null,
-    });
-    getSessionByIdMock.mockResolvedValueOnce({ data: sessionFixture(), error: null });
-    getSessionByIdMock.mockResolvedValueOnce({ data: completedFixture(), error: null });
-
-    const { result } = renderHook(() => useProductionSession(SESSION_ID));
-
-    await waitFor(() => expect(result.current.loading).toBe(false));
-
-    let ok: boolean | undefined;
-    await act(async () => {
-      ok = await result.current.finishProduction();
-    });
-
-    expect(ok).toBe(true);
-    expect(reportSkippedPostingMock).not.toHaveBeenCalled();
+    expect("postingError" in result.current).toBe(false);
   });
 
   it("does not apply any session and surfaces actionError when completeSession itself fails", async () => {
-    getCurrentAccountingContextMock.mockResolvedValue({
-      data: ACCOUNTING_CONTEXT,
-      error: null,
-    });
-    completeSessionAndPostJournalMock.mockResolvedValue({
+    completeSessionMock.mockResolvedValue({
       data: null,
       error: "Insufficient stock for Chicken Crepe.",
     });
-    getSessionByIdMock.mockResolvedValueOnce({ data: sessionFixture(), error: null });
 
     const { result } = renderHook(() => useProductionSession(SESSION_ID));
 
@@ -324,7 +184,6 @@ describe("useProductionSession.finishProduction (accounting posting wiring)", ()
     expect(ok).toBe(false);
     expect(result.current.session?.status).toBe("in_progress");
     expect(result.current.actionError).toBe("Insufficient stock for Chicken Crepe.");
-    expect(result.current.postingError).toBeNull();
   });
 
   it("surfaces a zero-cost warning from loaded BOMs without blocking finish", async () => {
