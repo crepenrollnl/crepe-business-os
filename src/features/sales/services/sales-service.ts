@@ -7,15 +7,15 @@
  * markSalePaid goes through set_sale_paid_flag and updates is_paid only.
  * Does NOT implement FIFO, COGS math, remaining quantity, ledger writes,
  * Finished Goods updates, or commercial total/tax calculation in TypeScript.
+ *
+ * Does NOT post accounting journals: since sql/147 a deferred trigger on
+ * sales posts sale_completed + cogs_recognized at COMMIT of the
+ * confirmation and records any failure in posting_failures (audit D2/K3).
  */
 
 import { toUserError } from "@/lib/service-errors";
 import { supabase } from "@/lib/supabase";
 import { fail, ok, type ServiceResult } from "@/types/service";
-import type {
-  SaleAccountingContext,
-  SaleJournalPostings,
-} from "../types/sale-accounting";
 import type {
   AddSaleLineInput,
   ConfirmSaleResult,
@@ -27,26 +27,17 @@ import type {
   SaleDetail,
   SaleDetailLine,
   SaleLine,
-  SalePostingHeader,
   SaleStatus,
   SaleWithLines,
   UpdateSaleLineInput,
 } from "../types/sale";
 import { SALE_STATUSES } from "../types/sale";
-import { reportPostingFailure } from "@/features/accounting/utils/report-posting-failure";
-import { saleAccountingService } from "./sale-accounting-service";
-import { stableBusinessEventId } from "../utils/stable-business-event-id";
-import type { PostingFailureSourceFlow } from "@/features/accounting/types/posting-failure";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const SALE_SELECT =
   "id, sale_number, customer_id, status, sale_date, confirmed_at, paid_at, cancelled_at, fulfilled_at, is_paid, subtotal, tax_total, total, notes, kitchen_note, created_at, updated_at";
-
-/** Header columns posting needs (SalePostingHeader) — D3 fallback reload. */
-const SALE_POSTING_HEADER_SELECT =
-  "id, status, sale_date, confirmed_at, subtotal, tax_total, total";
 
 const SALE_LINE_SELECT =
   "id, sale_id, product_id, quantity, unit_price, line_total, created_at";
@@ -680,117 +671,6 @@ async function buildConfirmedSaleResult(rpcResult: {
   };
 }
 
-/**
- * Load only the header fields posting needs, for a confirmed sale whose
- * full reload failed (audit D3). One attempt; never throws.
- */
-async function loadSalePostingHeader(
-  saleId: string,
-): Promise<ServiceResult<SalePostingHeader>> {
-  try {
-    const { data, error } = await supabase
-      .from("sales")
-      .select(SALE_POSTING_HEADER_SELECT)
-      .eq("id", saleId)
-      .maybeSingle();
-
-    if (error) {
-      return fail(toUserError(error, "Failed to load the confirmed sale"));
-    }
-
-    if (!data) {
-      return fail("Sale was not found.");
-    }
-
-    const row = data as Pick<
-      SaleRow,
-      | "id"
-      | "status"
-      | "sale_date"
-      | "confirmed_at"
-      | "subtotal"
-      | "tax_total"
-      | "total"
-    >;
-
-    if (!isSaleStatus(row.status)) {
-      return fail("Confirmed sale response was invalid.");
-    }
-
-    return ok({
-      id: row.id,
-      status: row.status,
-      sale_date: row.sale_date,
-      confirmed_at: row.confirmed_at,
-      subtotal: toNumber(row.subtotal),
-      tax_total: toNumber(row.tax_total),
-      total: toNumber(row.total),
-    });
-  } catch {
-    return fail("Failed to load the confirmed sale");
-  }
-}
-
-/** Result of a confirm + journal posting call (sale + posting outcome). */
-export interface ConfirmSaleWithPostingResult extends ConfirmSaleResult {
-  posting: SaleJournalPostings | null;
-  postingError: string | null;
-}
-
-/**
- * Post journals for a sale that is already committed. Never fails: a
- * missing header (reload failed twice) or a posting error comes back as
- * postingError and is recorded via reportPostingFailure, so the gap always
- * shows in posting_failures (audit D3).
- */
-async function postConfirmedSaleJournals(
-  confirmed: ConfirmSaleResult,
-  accounting: SaleAccountingContext,
-  sourceFlow: Extract<
-    PostingFailureSourceFlow,
-    "sale_confirm" | "quick_sale_confirm" | "pos_confirm"
-  >,
-): Promise<ConfirmSaleWithPostingResult> {
-  const reportFailure = (errorMessage: string) => {
-    void reportPostingFailure({
-      sourceFlow,
-      entityType: "sale",
-      entityId: confirmed.sale_id,
-      businessEventId: stableBusinessEventId(
-        `sale_completed:${confirmed.sale_id}`,
-      ),
-      errorMessage,
-    });
-  };
-
-  let header: SalePostingHeader | null = confirmed.sale;
-  if (!header) {
-    const headerResult = await loadSalePostingHeader(confirmed.sale_id);
-    if (headerResult.error || !headerResult.data) {
-      const postingError = `Sale confirmed but its journals were not posted: ${
-        headerResult.error ?? "the sale could not be reloaded"
-      }`;
-      reportFailure(postingError);
-      return { ...confirmed, posting: null, postingError };
-    }
-    header = headerResult.data;
-  }
-
-  const posting = await saleAccountingService.postJournalsForSaleCompleted(
-    { sale: header, total_cogs: confirmed.total_cogs },
-    accounting,
-  );
-
-  if (posting.error || !posting.data) {
-    const postingError =
-      posting.error ?? "Sale confirmed but accounting posting failed.";
-    reportFailure(postingError);
-    return { ...confirmed, posting: null, postingError };
-  }
-
-  return { ...confirmed, posting: posting.data, postingError: null };
-}
-
 export const salesService = {
   /**
    * Create a draft sale header via create_draft_sale RPC.
@@ -1013,40 +893,6 @@ export const salesService = {
   },
 
   /**
-   * Confirm a sale then post Accounting journals (DEV-109).
-   *
-   * Uses frozen confirm_sale COGS + sale commercial totals — never recalculates.
-   * Existing confirmSale (hooks/UI) remains unchanged.
-   *
-   * confirmSale has already succeeded and is durable by the time posting is
-   * attempted — a posting failure must never look like the whole operation
-   * failed (that would silently discard a real confirmed sale from the
-   * caller's point of view). So this only ever returns fail(...) when
-   * confirmSale itself fails; once that succeeds, the result is always
-   * ok(...), with posting/postingError reporting whether the accounting
-   * entry was actually created. If the post-confirm reload failed (sale
-   * null), posting reloads the header once; if that fails too the gap is
-   * recorded via reportPostingFailure (audit D3).
-   */
-  async confirmSaleAndPostJournals(
-    saleId: string,
-    accounting: SaleAccountingContext,
-  ): Promise<ServiceResult<ConfirmSaleWithPostingResult>> {
-    const confirmed = await this.confirmSale(saleId);
-    if (confirmed.error || !confirmed.data) {
-      return fail(confirmed.error ?? "Failed to confirm sale.");
-    }
-
-    return ok(
-      await postConfirmedSaleJournals(
-        confirmed.data,
-        accounting,
-        "sale_confirm",
-      ),
-    );
-  },
-
-  /**
    * One-tap sale (DEV-112 / sql/086_quick_sale.sql): create + add every
    * cart line + confirm in a single RPC call, instead of separate
    * createDraftSale / addSaleLine / confirmSale round trips. Reuses the
@@ -1118,51 +964,6 @@ export const salesService = {
     } catch (error) {
       return fail(mapConfirmSaleError(error, "Failed to complete quick sale."));
     }
-  },
-
-  /**
-   * Quick sale + Accounting journals, same posting-failure-is-non-fatal
-   * contract as confirmSaleAndPostJournals: once createAndConfirmSale
-   * succeeds the sale is durable, so this only fails before that point.
-   */
-  async createAndConfirmSaleAndPostJournals(
-    input: CreateAndConfirmSaleInput,
-    accounting: SaleAccountingContext,
-    sourceFlow: Extract<
-      PostingFailureSourceFlow,
-      "quick_sale_confirm" | "pos_confirm"
-    > = "quick_sale_confirm",
-  ): Promise<ServiceResult<ConfirmSaleWithPostingResult>> {
-    const confirmed = await this.createAndConfirmSale(input);
-    if (confirmed.error || !confirmed.data) {
-      return fail(confirmed.error ?? "Failed to complete quick sale.");
-    }
-
-    return ok(
-      await postConfirmedSaleJournals(confirmed.data, accounting, sourceFlow),
-    );
-  },
-
-  /**
-   * Records that a confirmed sale's journals were skipped before posting
-   * started (e.g. the accounting context could not be loaded), so the gap
-   * shows in posting_failures. Fire-and-forget; never touches the sale.
-   */
-  reportSkippedPosting(
-    saleId: string,
-    sourceFlow: Extract<
-      PostingFailureSourceFlow,
-      "sale_confirm" | "quick_sale_confirm" | "pos_confirm"
-    >,
-    errorMessage: string,
-  ): void {
-    void reportPostingFailure({
-      sourceFlow,
-      entityType: "sale",
-      entityId: saleId,
-      businessEventId: null,
-      errorMessage,
-    });
   },
 
   /**

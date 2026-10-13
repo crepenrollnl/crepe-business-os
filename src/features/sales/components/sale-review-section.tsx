@@ -20,7 +20,12 @@ type SaleReviewSectionProps = {
   cogsSummary?: SaleCostSummary | null;
   profitSummary?: SaleProfitSummary | null;
   accountingPostingStatus?: SaleAccountingPostingStatus;
-  postingError?: string | null;
+  /**
+   * Journal status is accounting data: shown to owner/partner only
+   * (useSale().showAccountingStatus). Hidden unless explicitly enabled.
+   */
+  showAccountingStatus?: boolean;
+  warning?: string | null;
   cogsError?: string | null;
   profitError?: string | null;
   loading?: boolean;
@@ -92,7 +97,8 @@ export function SaleReviewSection({
   cogsSummary = null,
   profitSummary = null,
   accountingPostingStatus = "pending",
-  postingError = null,
+  showAccountingStatus = false,
+  warning = null,
   cogsError = null,
   profitError = null,
   loading = false,
@@ -250,21 +256,23 @@ export function SaleReviewSection({
                 {formatSaleDateTime(completionDate)}
               </dd>
             </div>
-            <div>
-              <dt className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
-                Accounting Posting Status
-              </dt>
-              <dd
-                className="mt-0.5 text-zinc-800"
-                data-testid="review-accounting-status"
-              >
-                {postingLabel}
-              </dd>
-            </div>
+            {showAccountingStatus ? (
+              <div>
+                <dt className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                  Accounting Posting Status
+                </dt>
+                <dd
+                  className="mt-0.5 text-zinc-800"
+                  data-testid="review-accounting-status"
+                >
+                  {postingLabel}
+                </dd>
+              </div>
+            ) : null}
           </dl>
 
-          {postingError ? (
-            <p className="mt-3 text-sm text-amber-700">{postingError}</p>
+          {warning ? (
+            <p className="mt-3 text-sm text-amber-700">{warning}</p>
           ) : null}
 
           {cogsError ? (

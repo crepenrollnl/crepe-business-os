@@ -6,7 +6,7 @@ type QuickSaleCartSharedProps = {
   lines: QuickSaleCartLine[];
   confirming: boolean;
   actionError: string | null;
-  postingError: string | null;
+  warning: string | null;
   lastConfirmedSaleNumber: string | null;
   sendToQueue: boolean;
   kitchenNote: string;
@@ -64,7 +64,7 @@ export function QuickSaleCart({
   discountError,
   confirming,
   actionError,
-  postingError,
+  warning,
   lastConfirmedSaleNumber,
   sendToQueue,
   kitchenNote,
@@ -88,8 +88,8 @@ export function QuickSaleCart({
         </div>
       ) : null}
 
-      {postingError ? (
-        <p className="text-sm text-amber-700">{postingError}</p>
+      {warning ? (
+        <p className="text-sm text-amber-700">{warning}</p>
       ) : null}
 
       {lines.length === 0 ? (

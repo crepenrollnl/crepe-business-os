@@ -36,7 +36,7 @@ export function SaleDetailPage({ saleId }: SaleDetailPageProps) {
     confirming,
     mutating,
     actionError,
-    postingError,
+    warning,
     cogsSummary,
     cogsLoading,
     cogsError,
@@ -44,6 +44,7 @@ export function SaleDetailPage({ saleId }: SaleDetailPageProps) {
     profitLoading,
     profitError,
     accountingPostingStatus,
+    showAccountingStatus,
     reviewLoading,
     addSaleLine,
     updateSaleLine,
@@ -186,7 +187,8 @@ export function SaleDetailPage({ saleId }: SaleDetailPageProps) {
                 cogsSummary={cogsSummary}
                 profitSummary={profitSummary}
                 accountingPostingStatus={accountingPostingStatus}
-                postingError={postingError}
+                showAccountingStatus={showAccountingStatus}
+                warning={warning}
                 cogsError={cogsError}
                 profitError={profitError}
                 loading={

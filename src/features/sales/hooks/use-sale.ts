@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { accountingContextService } from "@/features/accounting/services/accounting-context-service";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { authService } from "@/features/auth/services/auth-service";
+import { useAsyncEffect } from "@/hooks/use-async-effect";
 import { saleAccountingService } from "../services/sale-accounting-service";
 import { saleCogsService } from "../services/sale-cogs-service";
 import { saleProfitService } from "../services/sale-profit-service";
@@ -17,6 +18,11 @@ import {
   type CompletedSaleReviewRead,
 } from "../utils/completed-sale-review-builder";
 
+/** Only owner/partner see accounting (journal) status; sellers never do. */
+function canSeeSaleAccounting(role: string | null): boolean {
+  return role === "owner" || role === "partner";
+}
+
 function isCompletedSale(sale: SaleDetail | null): boolean {
   return sale?.status === "confirmed" || sale?.status === "paid";
 }
@@ -28,7 +34,7 @@ export function useSale(saleId: string) {
   const [confirming, setConfirming] = useState(false);
   const [mutating, setMutating] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [postingError, setPostingError] = useState<string | null>(null);
+  const [warning, setWarning] = useState<string | null>(null);
   const [lastConfirmCogs, setLastConfirmCogs] = useState<number | null>(null);
   const [cogsSummary, setCogsSummary] = useState<SaleCostSummary | null>(null);
   const [cogsLoading, setCogsLoading] = useState(false);
@@ -41,6 +47,23 @@ export function useSale(saleId: string) {
   const [accountingPostingStatus, setAccountingPostingStatus] =
     useState<SaleAccountingPostingStatus>("pending");
   const [reviewLoading, setReviewLoading] = useState(false);
+  const [showAccountingStatus, setShowAccountingStatus] = useState(false);
+
+  /**
+   * The viewer's role, read once (get_my_role). Gates the journal-status
+   * read below so a seller never queries or sees accounting state.
+   */
+  const rolePromiseRef = useRef<Promise<string | null> | null>(null);
+  const getRole = useCallback(() => {
+    rolePromiseRef.current ??= authService.getMyRole();
+    return rolePromiseRef.current;
+  }, []);
+
+  const loadAccountingVisibility = useCallback(async () => {
+    setShowAccountingStatus(canSeeSaleAccounting(await getRole()));
+  }, [getRole]);
+
+  useAsyncEffect(loadAccountingVisibility, [loadAccountingVisibility]);
 
   /**
    * Loads COGS on its own but does not commit it to state — the sale
@@ -116,7 +139,7 @@ export function useSale(saleId: string) {
   );
 
   const loadAccountingStatus = useCallback(async (detail: SaleDetail) => {
-    if (!isCompletedSale(detail)) {
+    if (!isCompletedSale(detail) || !canSeeSaleAccounting(await getRole())) {
       setAccountingPostingStatus("pending");
       return;
     }
@@ -125,7 +148,7 @@ export function useSale(saleId: string) {
       detail.sale_id,
     );
     setAccountingPostingStatus(result.data ?? "pending");
-  }, []);
+  }, [getRole]);
 
   const loadCompletedReview = useCallback(
     async (
@@ -320,54 +343,21 @@ export function useSale(saleId: string) {
   const confirm = useCallback(async () => {
     setConfirming(true);
     setActionError(null);
-    setPostingError(null);
+    setWarning(null);
 
-    const contextResult =
-      await accountingContextService.getCurrentAccountingContext();
+    // Journals are posted by the database at COMMIT of the confirmation
+    // (sql/147, audit D2/K3): the app only calls confirm_sale.
+    const confirmed = await salesService.confirmSale(saleId);
 
-    let warning: string | null;
-
-    if (contextResult.error || !contextResult.data) {
-      // Accounting infra not ready (e.g. no open fiscal period) — the sale
-      // must still confirm; only the journal is skipped, surfaced via
-      // postingError rather than blocking the confirmation itself.
-      const fallback = await salesService.confirmSale(saleId);
-
-      if (fallback.error || !fallback.data) {
-        setActionError(fallback.error ?? "Failed to confirm sale");
-        setConfirming(false);
-        return false;
-      }
-
-      setLastConfirmCogs(fallback.data.total_cogs);
-      const skippedError =
-        contextResult.error ?? "Accounting posting was skipped.";
-      salesService.reportSkippedPosting(
-        fallback.data.sale_id,
-        "sale_confirm",
-        skippedError,
-      );
-      warning = confirmWarning(fallback.data.reloadError, skippedError);
-    } else {
-      const posted = await salesService.confirmSaleAndPostJournals(
-        saleId,
-        contextResult.data,
-      );
-
-      if (posted.error || !posted.data) {
-        setActionError(posted.error ?? "Failed to confirm sale");
-        setConfirming(false);
-        return false;
-      }
-
-      setLastConfirmCogs(posted.data.total_cogs);
-      warning = confirmWarning(
-        posted.data.reloadError,
-        posted.data.postingError,
-      );
+    if (confirmed.error || !confirmed.data) {
+      setActionError(confirmed.error ?? "Failed to confirm sale");
+      setConfirming(false);
+      return false;
     }
 
-    setPostingError(warning);
+    setLastConfirmCogs(confirmed.data.total_cogs);
+    const reloadWarning = confirmWarning(confirmed.data.reloadError, null);
+    setWarning(reloadWarning);
 
     const reloadResult = await salesReadService.getSale(saleId);
 
@@ -378,10 +368,10 @@ export function useSale(saleId: string) {
       setSale((current) =>
         current ? { ...current, status: "confirmed" } : current,
       );
-      setPostingError(
+      setWarning(
         confirmWarning(
           reloadResult.error ?? "Failed to reload the sale.",
-          warning,
+          reloadWarning,
         ),
       );
       setConfirming(false);
@@ -404,7 +394,7 @@ export function useSale(saleId: string) {
     confirming,
     mutating,
     actionError,
-    postingError,
+    warning,
     lastConfirmCogs,
     cogsSummary,
     cogsLoading,
@@ -413,6 +403,7 @@ export function useSale(saleId: string) {
     profitLoading,
     profitError,
     accountingPostingStatus,
+    showAccountingStatus,
     reviewLoading,
     addSaleLine,
     updateSaleLine,

@@ -4,6 +4,8 @@
  * Audit D3: a committed sale is success even when its reload failed, and
  * the client_request_id token (sql/118) is reused across a failed retry.
  * Audit D4: a "price changed" rejection (sql/146) re-prices the cart.
+ * Audit D2/K3: confirm is the RPC only -- the database posts the journals
+ * (sql/147), so the hook never loads an accounting context or posts.
  */
 
 import { act, renderHook, waitFor } from "@testing-library/react";
@@ -16,17 +18,13 @@ const {
   getSoldQuantityByProductIdMock,
   getCurrentAccountingContextMock,
   createAndConfirmSaleMock,
-  createAndConfirmSaleAndPostJournalsMock,
   markSaleQueuedMock,
-  reportSkippedPostingMock,
 } = vi.hoisted(() => ({
   getRecipesMock: vi.fn(),
   getSoldQuantityByProductIdMock: vi.fn(),
   getCurrentAccountingContextMock: vi.fn(),
   createAndConfirmSaleMock: vi.fn(),
-  createAndConfirmSaleAndPostJournalsMock: vi.fn(),
   markSaleQueuedMock: vi.fn(),
-  reportSkippedPostingMock: vi.fn(),
 }));
 
 vi.mock("@/features/recipes/services/recipe-service", () => ({
@@ -46,14 +44,11 @@ vi.mock("@/features/sales/services/sales-service", () => ({
   salesService: {
     createAndConfirmSale: (...args: unknown[]) =>
       createAndConfirmSaleMock(...args),
-    createAndConfirmSaleAndPostJournals: (...args: unknown[]) =>
-      createAndConfirmSaleAndPostJournalsMock(...args),
     markSaleQueued: (...args: unknown[]) => markSaleQueuedMock(...args),
-    reportSkippedPosting: (...args: unknown[]) =>
-      reportSkippedPostingMock(...args),
   },
 }));
 
+// Kept only to prove confirm never loads an accounting context (sql/147).
 vi.mock("@/features/accounting/services/accounting-context-service", () => ({
   accountingContextService: {
     getCurrentAccountingContext: (...args: unknown[]) =>
@@ -160,29 +155,12 @@ describe("useQuickSale product ranking", () => {
   });
 });
 
-describe("useQuickSale posting-failure recording (audit D1)", () => {
+describe("useQuickSale confirm without app-side posting (audit D2/K3)", () => {
   const PRODUCT = {
     id: CHICKEN_ID,
     name: "Chicken crepe",
     selling_price: 10,
     image_url: null,
-  };
-
-  const ACCOUNTING_CONTEXT = {
-    fiscalPeriod: {
-      id: "period-1",
-      name: "FY2026",
-      start_date: "2026-01-01",
-      end_date: "2026-12-31",
-      status: "open",
-      closed_at: null,
-      created_at: "2026-01-01T00:00:00.000Z",
-    },
-    accountRoleBindings: [],
-    baseCurrency: "EUR",
-    transactionCurrency: "EUR",
-    exchangeRate: 1,
-    rateDate: "2026-09-14",
   };
 
   function confirmedSale(id: string): ConfirmSaleResult {
@@ -224,13 +202,16 @@ describe("useQuickSale posting-failure recording (audit D1)", () => {
     });
   });
 
-  async function confirmOneItem() {
+  async function confirmOneItem(options?: { sendToQueue?: boolean }) {
     const { result } = renderHook(() => useQuickSale());
 
     await waitFor(() => expect(result.current.loading).toBe(false));
 
     act(() => {
       result.current.addToCart(PRODUCT);
+      if (options?.sendToQueue) {
+        result.current.setSendToQueue(true);
+      }
     });
 
     let confirmed: boolean | undefined;
@@ -241,11 +222,7 @@ describe("useQuickSale posting-failure recording (audit D1)", () => {
     return { result, confirmed };
   }
 
-  it("records a quick_sale_confirm posting failure once when the accounting context cannot be loaded", async () => {
-    getCurrentAccountingContextMock.mockResolvedValue({
-      data: null,
-      error: "No open fiscal period covers today's date.",
-    });
+  it("confirms through the RPC only and never loads an accounting context", async () => {
     createAndConfirmSaleMock.mockResolvedValue({
       data: confirmedSale("sale-42"),
       error: null,
@@ -254,54 +231,20 @@ describe("useQuickSale posting-failure recording (audit D1)", () => {
     const { result, confirmed } = await confirmOneItem();
 
     expect(confirmed).toBe(true);
+    expect(createAndConfirmSaleMock).toHaveBeenCalledTimes(1);
+    expect(getCurrentAccountingContextMock).not.toHaveBeenCalled();
     expect(result.current.lastConfirmedSaleNumber).toBe("S-000042");
-    expect(reportSkippedPostingMock).toHaveBeenCalledTimes(1);
-    expect(reportSkippedPostingMock).toHaveBeenCalledWith(
-      "sale-42",
-      "quick_sale_confirm",
-      "No open fiscal period covers today's date.",
-    );
-    expect(result.current.postingError).toBe(
-      "No open fiscal period covers today's date.",
-    );
-  });
-
-  it("does not record a second failure when the post itself fails (the service already did)", async () => {
-    getCurrentAccountingContextMock.mockResolvedValue({
-      data: ACCOUNTING_CONTEXT,
-      error: null,
-    });
-    createAndConfirmSaleAndPostJournalsMock.mockResolvedValue({
-      data: {
-        ...confirmedSale("sale-43"),
-        posting: null,
-        postingError: "Sale confirmed but accounting posting failed.",
-      },
-      error: null,
-    });
-
-    const { result, confirmed } = await confirmOneItem();
-
-    expect(confirmed).toBe(true);
-    expect(reportSkippedPostingMock).not.toHaveBeenCalled();
-    expect(result.current.postingError).toBe(
-      "Sale confirmed but accounting posting failed.",
-    );
+    expect(result.current.warning).toBeNull();
+    expect(result.current.actionError).toBeNull();
   });
 
   it("treats a committed sale whose reload failed as success and warns", async () => {
-    getCurrentAccountingContextMock.mockResolvedValue({
-      data: ACCOUNTING_CONTEXT,
-      error: null,
-    });
-    createAndConfirmSaleAndPostJournalsMock.mockResolvedValue({
+    createAndConfirmSaleMock.mockResolvedValue({
       data: {
         sale_id: "sale-44",
         sale: null,
         total_cogs: 4,
         reloadError: "Statement timeout.",
-        posting: null,
-        postingError: null,
       },
       error: null,
     });
@@ -311,16 +254,12 @@ describe("useQuickSale posting-failure recording (audit D1)", () => {
     expect(confirmed).toBe(true);
     expect(result.current.actionError).toBeNull();
     expect(result.current.cartLines).toEqual([]);
-    expect(result.current.postingError).toBe(
+    expect(result.current.warning).toBe(
       "Sale confirmed, but it could not be reloaded: Statement timeout.",
     );
   });
 
-  it("uses the sale_id for the skipped-posting record when the reload failed", async () => {
-    getCurrentAccountingContextMock.mockResolvedValue({
-      data: null,
-      error: "No open fiscal period covers today's date.",
-    });
+  it("queues by sale_id and shows a queue failure as a warning", async () => {
     createAndConfirmSaleMock.mockResolvedValue({
       data: {
         sale_id: "sale-45",
@@ -330,17 +269,14 @@ describe("useQuickSale posting-failure recording (audit D1)", () => {
       },
       error: null,
     });
+    markSaleQueuedMock.mockResolvedValue({ data: null, error: "Queue is down." });
 
-    const { result, confirmed } = await confirmOneItem();
+    const { result, confirmed } = await confirmOneItem({ sendToQueue: true });
 
     expect(confirmed).toBe(true);
-    expect(reportSkippedPostingMock).toHaveBeenCalledWith(
-      "sale-45",
-      "quick_sale_confirm",
-      "No open fiscal period covers today's date.",
-    );
-    expect(result.current.postingError).toBe(
-      "Sale confirmed, but it could not be reloaded: Statement timeout. No open fiscal period covers today's date.",
+    expect(markSaleQueuedMock).toHaveBeenCalledWith("sale-45");
+    expect(result.current.warning).toBe(
+      "Sale confirmed, but it could not be reloaded: Statement timeout. Queue is down.",
     );
   });
 });
@@ -366,11 +302,6 @@ describe("useQuickSale client_request_id (sql/118, audit D3)", () => {
     getSoldQuantityByProductIdMock.mockResolvedValue({
       data: new Map<string, number>(),
       error: null,
-    });
-    // Fallback path: both createAndConfirmSale calls must carry the token.
-    getCurrentAccountingContextMock.mockResolvedValue({
-      data: null,
-      error: "Accounting not configured.",
     });
   });
 
@@ -410,25 +341,6 @@ describe("useQuickSale client_request_id (sql/118, audit D3)", () => {
       /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
     );
     expect(tokenOf(1)).toBe(tokenOf(0));
-  });
-
-  it("passes the token on the posting path too", async () => {
-    getCurrentAccountingContextMock.mockResolvedValue({
-      data: { fiscalPeriod: { id: "period-1" } },
-      error: null,
-    });
-    const result = await setupCart();
-    createAndConfirmSaleAndPostJournalsMock.mockResolvedValueOnce({
-      data: { ...confirmed("sale-1"), posting: null, postingError: null },
-      error: null,
-    });
-    await act(async () => {
-      await result.current.confirm();
-    });
-
-    expect(
-      createAndConfirmSaleAndPostJournalsMock.mock.calls[0][0].client_request_id,
-    ).toEqual(expect.any(String));
   });
 
   it("uses a fresh token after a success", async () => {
@@ -490,10 +402,6 @@ describe("useQuickSale price change (audit D4)", () => {
     getSoldQuantityByProductIdMock.mockResolvedValue({
       data: new Map<string, number>(),
       error: null,
-    });
-    getCurrentAccountingContextMock.mockResolvedValue({
-      data: null,
-      error: "Accounting not configured.",
     });
   });
 

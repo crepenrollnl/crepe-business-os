@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useMemo, useRef, useState } from "react";
-import { accountingContextService } from "@/features/accounting/services/accounting-context-service";
 import { recipeService } from "@/features/recipes/services/recipe-service";
 import { salesReadService } from "@/features/sales/services/sales-read-service";
 import { salesService } from "@/features/sales/services/sales-service";
@@ -82,7 +81,7 @@ export function usePosSale() {
   const [cart, setCart] = useState<Record<string, PosSaleCartLine>>({});
   const [confirming, setConfirming] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [postingError, setPostingError] = useState<string | null>(null);
+  const [warning, setWarning] = useState<string | null>(null);
   const [lastConfirmedSaleNumber, setLastConfirmedSaleNumber] = useState<
     string | null
   >(null);
@@ -245,7 +244,7 @@ export function usePosSale() {
 
     setConfirming(true);
     setActionError(null);
-    setPostingError(null);
+    setWarning(null);
 
     if (!clientRequestIdRef.current) {
       clientRequestIdRef.current = crypto.randomUUID();
@@ -258,83 +257,35 @@ export function usePosSale() {
       unit_price: line.unit_price,
     }));
 
-    const contextResult =
-      await accountingContextService.getCurrentAccountingContext();
+    // Journals are posted by the database at COMMIT of the confirmation
+    // (sql/147, audit D2/K3): the app only calls the confirm RPC.
+    const confirmed = await salesService.createAndConfirmSale({
+      lines,
+      kitchen_note: kitchenNote,
+      discount_type: discountValue === null ? null : discountType,
+      discount_value: discountValue,
+      client_request_id: clientRequestId,
+    });
 
-    if (contextResult.error || !contextResult.data) {
-      const fallback = await salesService.createAndConfirmSale({
-        lines,
-        kitchen_note: kitchenNote,
-        discount_type: discountValue === null ? null : discountType,
-        discount_value: discountValue,
-        client_request_id: clientRequestId,
-      });
-
-      if (fallback.error || !fallback.data) {
-        const message = fallback.error ?? "Failed to confirm sale";
-        if (isPriceChangedError(message)) {
-          await repriceAfterPriceChange(message);
-        } else {
-          setActionError(message);
-        }
-        setConfirming(false);
-        return false;
+    if (confirmed.error || !confirmed.data) {
+      const message = confirmed.error ?? "Failed to confirm sale";
+      if (isPriceChangedError(message)) {
+        await repriceAfterPriceChange(message);
+      } else {
+        setActionError(message);
       }
-
-      setLastConfirmedSaleNumber(fallback.data.sale?.sale_number ?? null);
-      const skippedError =
-        contextResult.error ?? "Accounting posting was skipped.";
-      salesService.reportSkippedPosting(
-        fallback.data.sale_id,
-        "pos_confirm",
-        skippedError,
-      );
-      setPostingError(confirmWarning(fallback.data.reloadError, skippedError));
-
-      if (sendToQueue) {
-        const queued = await salesService.markSaleQueued(fallback.data.sale_id);
-        if (queued.error) {
-          setPostingError(queued.error);
-        }
-      }
-    } else {
-      const posted = await salesService.createAndConfirmSaleAndPostJournals(
-        {
-          lines,
-          kitchen_note: kitchenNote,
-          discount_type: discountValue === null ? null : discountType,
-          discount_value: discountValue,
-          client_request_id: clientRequestId,
-        },
-        contextResult.data,
-        "pos_confirm",
-      );
-
-      if (posted.error || !posted.data) {
-        const message = posted.error ?? "Failed to confirm sale";
-        if (isPriceChangedError(message)) {
-          await repriceAfterPriceChange(message);
-        } else {
-          setActionError(message);
-        }
-        setConfirming(false);
-        return false;
-      }
-
-      setLastConfirmedSaleNumber(posted.data.sale?.sale_number ?? null);
-      const warning = confirmWarning(
-        posted.data.reloadError,
-        posted.data.postingError,
-      );
-      setPostingError(warning);
-
-      if (sendToQueue) {
-        const queued = await salesService.markSaleQueued(posted.data.sale_id);
-        if (queued.error) {
-          setPostingError(warning ?? queued.error);
-        }
-      }
+      setConfirming(false);
+      return false;
     }
+
+    setLastConfirmedSaleNumber(confirmed.data.sale?.sale_number ?? null);
+
+    let queueError: string | null = null;
+    if (sendToQueue) {
+      const queued = await salesService.markSaleQueued(confirmed.data.sale_id);
+      queueError = queued.error;
+    }
+    setWarning(confirmWarning(confirmed.data.reloadError, queueError));
 
     clientRequestIdRef.current = null;
     setCart({});
@@ -369,7 +320,7 @@ export function usePosSale() {
     discountError: discountPreview.error,
     confirming,
     actionError,
-    postingError,
+    warning,
     lastConfirmedSaleNumber,
     sendToQueue,
     kitchenNote,

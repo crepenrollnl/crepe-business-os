@@ -15,8 +15,9 @@ import { test, expect } from "@playwright/test";
  * /shift or shift.spec.ts's flow directly.
  *
  * Stock deduction (FIFO allocation of the component's finished-goods
- * batch) and a possible real accounting journal entry
- * (confirmSaleAndPostJournals) are both accepted for TEST data in the
+ * batch) and a possible real accounting journal entry (posted by the
+ * database at COMMIT of the confirmation, sql/147) are both accepted for
+ * TEST data in the
  * shared dev project -- same decision already made for
  * production-execute.spec.ts, not reconsidered here.
  *

@@ -22,7 +22,7 @@ export function QuickSalePage() {
     discountError,
     confirming,
     actionError,
-    postingError,
+    warning,
     lastConfirmedSaleNumber,
     sendToQueue,
     kitchenNote,
@@ -68,7 +68,7 @@ export function QuickSalePage() {
             discountError={discountError}
             confirming={confirming}
             actionError={actionError}
-            postingError={postingError}
+            warning={warning}
             lastConfirmedSaleNumber={lastConfirmedSaleNumber}
             sendToQueue={sendToQueue}
             kitchenNote={kitchenNote}

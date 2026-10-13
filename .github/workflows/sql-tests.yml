@@ -1157,3 +1157,17 @@ jobs:
             echo "::error file=tests/sql/sale_price_from_recipe.sql,title=psql failed on sale_price_from_recipe::${err}"
             exit "$status"
           fi
+
+      - name: sale_auto_posting
+        run: |
+          set -euo pipefail
+          set +e
+          output=$(psql -v ON_ERROR_STOP=1 -f tests/sql/sale_auto_posting.sql 2>&1)
+          status=$?
+          set -e
+          echo "$output"
+          if [ "$status" -ne 0 ]; then
+            err=$(printf '%s' "$output" | tr '\n' ' | ')
+            echo "::error file=tests/sql/sale_auto_posting.sql,title=psql failed on sale_auto_posting::${err}"
+            exit "$status"
+          fi
