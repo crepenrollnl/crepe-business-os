@@ -114,8 +114,6 @@ interface WriteOffFormProps {
   isSaving: boolean;
   error: string | null;
   lastSuccess: string | null;
-  postingWarning: string | null;
-  accountingNote: string | null;
   prefillItemType?: WriteOffItemType | null;
   prefillItemId?: string | null;
   onSubmit: (input: RecordWriteOffInput) => Promise<boolean>;
@@ -133,8 +131,6 @@ export function WriteOffForm({
   isSaving,
   error,
   lastSuccess,
-  postingWarning,
-  accountingNote,
   prefillItemType,
   prefillItemId,
   onSubmit,
@@ -256,31 +252,6 @@ export function WriteOffForm({
           >
             Dismiss
           </button>
-        </div>
-      )}
-
-      {accountingNote && (
-        <div
-          role="status"
-          className="mt-4 flex items-center justify-between gap-3 rounded-lg border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm text-zinc-700"
-        >
-          <span>{accountingNote}</span>
-          <button
-            type="button"
-            onClick={onDismissSuccess}
-            className="text-zinc-600 underline hover:text-zinc-900"
-          >
-            Dismiss
-          </button>
-        </div>
-      )}
-
-      {postingWarning && (
-        <div
-          role="status"
-          className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800"
-        >
-          Write-off recorded, but accounting posting failed: {postingWarning}
         </div>
       )}
 

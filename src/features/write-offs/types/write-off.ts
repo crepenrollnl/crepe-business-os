@@ -91,28 +91,6 @@ export interface RecordDishWriteOffRpcResult {
   write_offs: RecordWriteOffRpcResult[];
 }
 
-export const WRITE_OFF_ZERO_COST_ACCOUNTING_NOTE =
-  "Write-off recorded. No cost is on record for this item, so no accounting entry was created.";
-
-/** total_value > 0 but rounds to 0.00 (e.g. 3 g of salt): nothing to put in the ledger. */
-export const WRITE_OFF_BELOW_ONE_CENT_ACCOUNTING_NOTE =
-  "Write-off recorded. Its value is below one cent, so no accounting entry was created.";
-
-export interface RecordWriteOffAndPostResult {
-  writeOff: RecordWriteOffRpcResult;
-  postingError: string | null;
-  /** Expected skip of the journal when total_value is 0 — not a posting failure. */
-  accountingNote: string | null;
-}
-
-export interface RecordDishWriteOffAndPostResult {
-  dishWriteOff: RecordDishWriteOffRpcResult;
-  /** Distinct posting failures across the parts; the stock change stands regardless. */
-  postingErrors: string[];
-  /** Set only when no part carried a cost, so no journal was expected. */
-  accountingNote: string | null;
-}
-
 export interface WriteOffPeriodTotals {
   totalValue: number;
   byReason: Record<WriteOffReason, number>;

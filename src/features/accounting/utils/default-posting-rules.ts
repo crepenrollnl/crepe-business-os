@@ -35,8 +35,8 @@ export function resolveDefaultPostingRules(
       return [createProductionCompletedPostingRule()];
     case "production_adjusted":
       return [createProductionAdjustedPostingRule()];
-    // waste_recognized is resolved explicitly in
-    // write-off-accounting-service (credit account depends on item_type).
+    // waste_recognized is posted by the database (sql/148, trigger on
+    // write_offs), not through these TS rules.
     // Future:
     // case "inventory_adjusted":
     default:
