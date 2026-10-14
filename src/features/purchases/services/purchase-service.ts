@@ -16,11 +16,7 @@ import type {
   PurchaseWithRelations,
   SavePurchaseInput,
 } from "../types/purchase";
-import type {
-  PurchaseAccountingContext,
-  PurchaseJournalPosting,
-} from "../types/purchase-accounting";
-import type { PurchaseTaxDocument, PurchaseTaxResult } from "../types/purchase-tax";
+import type { PurchaseTaxDocument } from "../types/purchase-tax";
 import {
   DEFAULT_COMPANY_ID,
   DEFAULT_TAX_COUNTRY,
@@ -30,10 +26,7 @@ import type {
   LastPurchaseLineSnapshot,
 } from "../utils/apply-last-purchase-prefill";
 import { toNetPurchaseLines } from "../utils/to-net-purchase-lines";
-import { reportPostingFailure } from "@/features/accounting/utils/report-posting-failure";
-import { purchaseAccountingService } from "./purchase-accounting-service";
 import { purchaseTaxService } from "./purchase-tax-service";
-import { stableBusinessEventId } from "../utils/stable-business-event-id";
 
 interface PurchaseRow {
   id: string;
@@ -1001,6 +994,8 @@ export const purchaseService = {
       // purchase row, re-checks status = draft under that lock, and either
       // applies every line and flips the status, or raises and rolls back
       // the whole thing. No manual per-line reversal is needed here.
+      // The purchase journal is posted by the database at COMMIT of that
+      // RPC (sql/150); the app never posts purchase journals.
       const saved = await persistPurchase(input, "draft");
 
       if (saved.error || !saved.data) {
@@ -1025,94 +1020,5 @@ export const purchaseService = {
         error: toUserError(error, "Failed to receive purchase"),
       };
     }
-  },
-
-  /**
-   * Receive a purchase, then post the Accounting journal (audit finding #3).
-   *
-   * Requires a precomputed PurchaseTaxResult (DEV-100).
-   * Accounting never recalculates taxes.
-   *
-   * receivePurchase has already succeeded and is durable by the time
-   * posting is attempted — a posting failure must never look like the
-   * whole operation failed (that would silently discard a real received
-   * purchase from the caller's point of view). So this only ever returns
-   * an error when receivePurchase itself fails; once that succeeds, the
-   * result is always ok(...), with posting/postingError reporting whether
-   * the accounting entry was actually created. Same pattern as
-   * completeSessionAndPostJournal (Production) / confirmSaleAndPostJournals
-   * (Sales).
-   */
-  async receivePurchaseAndPostJournal(
-    input: SavePurchaseInput,
-    accounting: PurchaseAccountingContext,
-    tax: PurchaseTaxResult,
-  ): Promise<
-    ServiceResult<{
-      purchase: PurchaseWithRelations;
-      posting: PurchaseJournalPosting | null;
-      postingError: string | null;
-    }>
-  > {
-    const received = await purchaseService.receivePurchase(input);
-
-    if (received.error || !received.data) {
-      return {
-        data: null,
-        error: received.error ?? "Failed to receive purchase",
-      };
-    }
-
-    const posting = await purchaseAccountingService.postJournalForPurchaseReceived(
-      received.data,
-      accounting,
-      tax,
-    );
-
-    if (posting.error || !posting.data) {
-      const postingError =
-        posting.error ?? "Purchase received but accounting posting failed.";
-      void reportPostingFailure({
-        sourceFlow: "purchase_receive",
-        entityType: "purchase",
-        entityId: received.data.id,
-        businessEventId: stableBusinessEventId(
-          `purchase_received:${received.data.id}`,
-        ),
-        errorMessage: postingError,
-      });
-      return {
-        data: {
-          purchase: received.data,
-          posting: null,
-          postingError,
-        },
-        error: null,
-      };
-    }
-
-    return {
-      data: {
-        purchase: received.data,
-        posting: posting.data,
-        postingError: null,
-      },
-      error: null,
-    };
-  },
-
-  /**
-   * Records that a received purchase's journal was skipped before posting
-   * started (e.g. the accounting context could not be loaded), so the gap
-   * shows in posting_failures. Fire-and-forget; never touches the purchase.
-   */
-  reportSkippedPosting(purchaseId: string, errorMessage: string): void {
-    void reportPostingFailure({
-      sourceFlow: "purchase_receive",
-      entityType: "purchase",
-      entityId: purchaseId,
-      businessEventId: null,
-      errorMessage,
-    });
   },
 };

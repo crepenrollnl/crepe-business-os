@@ -17,13 +17,9 @@ import type {
 import type { PurchaseAccountingPreviewData } from "../types/purchase-accounting-preview";
 import type { PurchaseReceiptCard } from "../types/purchase-receipt";
 import type { PurchaseTaxResult } from "../types/purchase-tax";
-import { accountingContextService } from "@/features/accounting/services/accounting-context-service";
 import { buildPurchaseTaxDocument } from "../utils/build-purchase-tax-document";
 import { purchaseToFormValues } from "../utils/map-purchase-form-values";
-import {
-  mapPurchaseJournalPostingToPreview,
-  mapPurchaseTotalsToAccountingPreview,
-} from "../utils/map-purchase-accounting-preview";
+import { mapPurchaseTotalsToAccountingPreview } from "../utils/map-purchase-accounting-preview";
 import { toNetPurchaseLines } from "../utils/to-net-purchase-lines";
 
 function comparePurchases(
@@ -133,7 +129,6 @@ export function usePurchases() {
   const [isLoadingPurchase, setIsLoadingPurchase] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [postingError, setPostingError] = useState<string | null>(null);
   const [accountingPreview, setAccountingPreview] =
     useState<PurchaseAccountingPreviewData | null>(null);
   const [sourceReceipt, setSourceReceipt] = useState<PurchaseReceiptCard | null>(null);
@@ -234,7 +229,6 @@ export function usePurchases() {
     setEditingPurchase(null);
     setAccountingPreview(null);
     setActionError(null);
-    setPostingError(null);
     setIsModalOpen(true);
   }, []);
 
@@ -245,7 +239,6 @@ export function usePurchases() {
         setCreateInitialValues(null);
       }
       setActionError(null);
-      setPostingError(null);
       setEditingPurchase(null);
       setAccountingPreview(null);
       setIsLoadingPurchase(true);
@@ -304,7 +297,6 @@ export function usePurchases() {
     setEditingPurchase(null);
     setAccountingPreview(null);
     setActionError(null);
-    setPostingError(null);
     setIsModalOpen(true);
   }, []);
 
@@ -348,7 +340,6 @@ export function usePurchases() {
     setEditingPurchase(null);
     setAccountingPreview(null);
     setActionError(null);
-    setPostingError(null);
     setIsLoadingPurchase(false);
     setSourceReceipt(null);
     setCreateInitialValues(null);
@@ -451,7 +442,6 @@ export function usePurchases() {
       const receiptToLink = sourceReceipt;
       setIsSaving(true);
       setActionError(null);
-      setPostingError(null);
 
       const resolved = await resolvePurchaseTax(values);
       if (resolved.error || !resolved.tax) {
@@ -492,38 +482,11 @@ export function usePurchases() {
         }
       };
 
-      const contextResult =
-        await accountingContextService.getCurrentAccountingContext();
-
-      if (contextResult.error || !contextResult.data) {
-        // Accounting infra not ready (e.g. no open fiscal period) — the
-        // purchase must still receive; only the journal is skipped,
-        // surfaced via postingError rather than blocking the receive itself.
-        const fallback = await purchaseService.receivePurchase(receiveInput);
-
-        if (fallback.error || !fallback.data) {
-          setActionError(fallback.error ?? "Failed to receive purchase");
-          setIsSaving(false);
-          return false;
-        }
-
-        await attachSourceReceipt(fallback.data.id);
-        setEditingPurchase(fallback.data);
-        setAccountingPreview(mapPurchaseTotalsToAccountingPreview(fallback.data));
-        const skippedError =
-          contextResult.error ?? "Accounting posting was skipped.";
-        purchaseService.reportSkippedPosting(fallback.data.id, skippedError);
-        setPostingError(skippedError);
-        await loadPurchases({ silent: true });
-        setIsSaving(false);
-        return true;
-      }
-
-      const result = await purchaseService.receivePurchaseAndPostJournal(
-        receiveInput,
-        contextResult.data,
-        tax,
-      );
+      // Receive is the RPC only: the database posts the purchase journal at
+      // COMMIT of receive_purchase and logs any failure in posting_failures
+      // itself (sql/150). The preview shows the stored totals, which are
+      // exactly the amounts the database posts.
+      const result = await purchaseService.receivePurchase(receiveInput);
 
       if (result.error || !result.data) {
         setActionError(result.error ?? "Failed to receive purchase");
@@ -531,15 +494,10 @@ export function usePurchases() {
         return false;
       }
 
-      await attachSourceReceipt(result.data.purchase.id);
-      // Keep modal open so the owner can verify totals + the posted journal.
-      setEditingPurchase(result.data.purchase);
-      setAccountingPreview(
-        result.data.posting
-          ? mapPurchaseJournalPostingToPreview(result.data.posting)
-          : mapPurchaseTotalsToAccountingPreview(result.data.purchase),
-      );
-      setPostingError(result.data.postingError);
+      await attachSourceReceipt(result.data.id);
+      // Keep modal open so the owner can verify the received totals.
+      setEditingPurchase(result.data);
+      setAccountingPreview(mapPurchaseTotalsToAccountingPreview(result.data));
       await loadPurchases({ silent: true });
       setIsSaving(false);
       return true;
@@ -576,7 +534,6 @@ export function usePurchases() {
     isLoadingPurchase,
     isSaving,
     actionError,
-    postingError,
     accountingPreview,
     sourceReceipt,
     receiptNotice,

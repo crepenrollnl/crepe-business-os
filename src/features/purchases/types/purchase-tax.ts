@@ -145,8 +145,9 @@ export interface PurchaseTaxLineView {
 
 /**
  * Flat per-tax breakdown line from calculate_purchase_taxes, one row per
- * (purchase line, resolved tax) pair. Used by purchase-accounting-service.ts
- * to build Accounting event tax facts.
+ * (purchase line, resolved tax) pair. Kept on PurchaseTaxResult for display;
+ * the purchase journal is posted by the database from the stored totals
+ * (sql/150), not from this breakdown.
  */
 export interface PurchaseTaxBreakdownLine {
   tax_code: string;

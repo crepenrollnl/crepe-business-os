@@ -34,7 +34,6 @@ export function PurchasesPage() {
     isLoadingPurchase,
     isSaving,
     actionError,
-    postingError,
     accountingPreview,
     sourceReceipt,
     receiptNotice,
@@ -119,7 +118,6 @@ export function PurchasesPage() {
           isSaving={isSaving}
           error={actionError}
           accountingPreview={accountingPreview}
-          postingError={postingError}
           sourceReceipt={sourceReceipt}
           onClose={() => {
             const returnToReceipts = cameFromReceipt && !isSaving;
