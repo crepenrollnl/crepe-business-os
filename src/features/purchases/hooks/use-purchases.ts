@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { purchasePostingStatusService } from "../services/purchase-posting-status-service";
 import { purchaseService } from "../services/purchase-service";
 import { purchaseReceiptService } from "../services/purchase-receipt-service";
 import { purchaseTaxService } from "../services/purchase-tax-service";
@@ -14,7 +15,10 @@ import type {
   PurchaseSupplier,
   PurchaseWithRelations,
 } from "../types/purchase";
-import type { PurchaseAccountingPreviewData } from "../types/purchase-accounting-preview";
+import type {
+  PurchaseAccountingPreviewData,
+  PurchasePostingStatus,
+} from "../types/purchase-accounting-preview";
 import type { PurchaseReceiptCard } from "../types/purchase-receipt";
 import type { PurchaseTaxResult } from "../types/purchase-tax";
 import { buildPurchaseTaxDocument } from "../utils/build-purchase-tax-document";
@@ -85,6 +89,18 @@ function removeFromReceiptParam(): void {
     "",
     `${url.pathname}${url.search}${url.hash}`,
   );
+}
+
+/**
+ * Whether the database posted this received purchase's journal (sql/150).
+ * A failed read is shown as not posted yet (Draft Proposal), never as an error.
+ */
+async function loadReceivedPostingStatus(
+  purchaseId: string,
+): Promise<PurchasePostingStatus> {
+  const result =
+    await purchasePostingStatusService.getPurchaseReceivedPostingStatus(purchaseId);
+  return result.data ?? "pending";
 }
 
 function emptyFormValues(): PurchaseFormValues {
@@ -265,8 +281,14 @@ export function usePurchases() {
       // moment the user adds/edits a line in a reopened draft.
       const isEditable =
         result.data.status !== "received" && result.data.status !== "cancelled";
+      const postingStatus =
+        result.data.status === "received"
+          ? await loadReceivedPostingStatus(result.data.id)
+          : undefined;
       setAccountingPreview(
-        isEditable ? null : mapPurchaseTotalsToAccountingPreview(result.data),
+        isEditable
+          ? null
+          : mapPurchaseTotalsToAccountingPreview(result.data, postingStatus),
       );
       setIsLoadingPurchase(false);
     },
@@ -485,7 +507,8 @@ export function usePurchases() {
       // Receive is the RPC only: the database posts the purchase journal at
       // COMMIT of receive_purchase and logs any failure in posting_failures
       // itself (sql/150). The preview shows the stored totals, which are
-      // exactly the amounts the database posts.
+      // exactly the amounts the database posts, marked Posted once the
+      // journal exists.
       const result = await purchaseService.receivePurchase(receiveInput);
 
       if (result.error || !result.data) {
@@ -497,7 +520,10 @@ export function usePurchases() {
       await attachSourceReceipt(result.data.id);
       // Keep modal open so the owner can verify the received totals.
       setEditingPurchase(result.data);
-      setAccountingPreview(mapPurchaseTotalsToAccountingPreview(result.data));
+      const postingStatus = await loadReceivedPostingStatus(result.data.id);
+      setAccountingPreview(
+        mapPurchaseTotalsToAccountingPreview(result.data, postingStatus),
+      );
       await loadPurchases({ silent: true });
       setIsSaving(false);
       return true;

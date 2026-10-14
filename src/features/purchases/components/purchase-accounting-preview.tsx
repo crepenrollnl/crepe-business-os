@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import type { PurchaseAccountingPreviewData } from "../types/purchase-accounting-preview";
+import { postedPurchaseJournalLines } from "../utils/posted-purchase-journal-lines";
 
 type PurchaseAccountingPreviewProps = {
   preview: PurchaseAccountingPreviewData;
@@ -28,6 +29,14 @@ export function PurchaseAccountingPreview({
   defaultOpen = false,
 }: PurchaseAccountingPreviewProps) {
   const [open, setOpen] = useState(defaultOpen);
+  // A posted purchase without proposal lines shows the journal the database
+  // posted from the same stored totals (sql/150).
+  const lines =
+    preview.has_proposal && preview.lines.length > 0
+      ? preview.lines
+      : preview.status === "posted"
+        ? postedPurchaseJournalLines(preview)
+        : [];
 
   return (
     <section
@@ -117,7 +126,7 @@ export function PurchaseAccountingPreview({
               </span>
             </div>
 
-            {!preview.has_proposal || preview.lines.length === 0 ? (
+            {lines.length === 0 ? (
               <p
                 className="rounded-lg border border-dashed border-zinc-200 bg-zinc-50 px-3 py-3 text-sm text-zinc-500"
                 data-testid="purchase-accounting-preview-empty"
@@ -144,7 +153,7 @@ export function PurchaseAccountingPreview({
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-zinc-100 bg-white">
-                    {preview.lines.map((line, index) => (
+                    {lines.map((line, index) => (
                       <tr key={`${line.account_role}-${index}`}>
                         <td className="px-3 py-2 font-medium text-zinc-900">
                           {line.account_role}

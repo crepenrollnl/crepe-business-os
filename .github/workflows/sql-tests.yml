@@ -1213,3 +1213,17 @@ jobs:
             echo "::error file=tests/sql/purchase_auto_posting.sql,title=psql failed on purchase_auto_posting::${err}"
             exit "$status"
           fi
+
+      - name: repost_posting_failure
+        run: |
+          set -euo pipefail
+          set +e
+          output=$(psql -v ON_ERROR_STOP=1 -f tests/sql/repost_posting_failure.sql 2>&1)
+          status=$?
+          set -e
+          echo "$output"
+          if [ "$status" -ne 0 ]; then
+            err=$(printf '%s' "$output" | tr '\n' ' | ')
+            echo "::error file=tests/sql/repost_posting_failure.sql,title=psql failed on repost_posting_failure::${err}"
+            exit "$status"
+          fi

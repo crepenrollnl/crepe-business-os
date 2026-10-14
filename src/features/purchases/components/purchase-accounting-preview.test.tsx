@@ -136,6 +136,59 @@ describe("PurchaseAccountingPreview (DEV-101)", () => {
     expect(screen.queryByText("inventory_asset")).not.toBeInTheDocument();
   });
 
+  it("shows the posted journal from the totals for a posted purchase", () => {
+    render(
+      <PurchaseAccountingPreview
+        preview={{
+          net_amount: 100,
+          tax_total: 21,
+          grand_total: 121,
+          currency: "EUR",
+          status: "posted",
+          has_proposal: false,
+          lines: [],
+        }}
+        defaultOpen
+      />,
+    );
+
+    expect(
+      screen.queryByTestId("purchase-accounting-preview-empty"),
+    ).not.toBeInTheDocument();
+    const rows = screen.getAllByRole("row").slice(1);
+    expect(rows.map((row) => row.textContent)).toEqual([
+      "Inventory100.00—EUR",
+      "Recoverable tax21.00—EUR",
+      "Cash / Bank—121.00EUR",
+    ]);
+    expect(screen.queryByText("Draft Proposal")).not.toBeInTheDocument();
+  });
+
+  it("omits the Recoverable tax line for a posted purchase without tax", () => {
+    render(
+      <PurchaseAccountingPreview
+        preview={{ ...previewWithoutProposal(), status: "posted" }}
+        defaultOpen
+      />,
+    );
+
+    const rows = screen.getAllByRole("row").slice(1);
+    expect(rows.map((row) => row.textContent)).toEqual([
+      "Inventory80.00—EUR",
+      "Cash / Bank—80.00EUR",
+    ]);
+  });
+
+  it("keeps Draft Proposal and no lines for a totals-only preview not yet posted", () => {
+    render(
+      <PurchaseAccountingPreview preview={previewWithoutProposal()} defaultOpen />,
+    );
+
+    expect(screen.getAllByText("Draft Proposal").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Inventory")).not.toBeInTheDocument();
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+  });
+
   it("expands and collapses on header click", () => {
     render(<PurchaseAccountingPreview preview={previewWithProposal()} />);
 

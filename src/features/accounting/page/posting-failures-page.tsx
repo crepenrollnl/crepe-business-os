@@ -9,9 +9,14 @@ export function PostingFailuresPage() {
     items,
     loading,
     error,
+    access,
     resolvingId,
+    repostingId,
     actionError,
+    rowErrors,
+    notice,
     resolve,
+    repost,
     retry,
   } = usePostingFailures();
 
@@ -28,17 +33,32 @@ export function PostingFailuresPage() {
           </p>
         </div>
 
-        <PostingFailuresList
-          items={items}
-          loading={loading}
-          error={error}
-          resolvingId={resolvingId}
-          actionError={actionError}
-          onRetry={() => {
-            void retry();
-          }}
-          onResolve={resolve}
-        />
+        {access === "denied" ? (
+          <div
+            className="rounded-xl border border-zinc-200 bg-white px-4 py-16 text-center shadow-sm"
+            data-testid="posting-failures-denied"
+          >
+            <p className="text-base font-medium text-zinc-900">
+              Only the owner or a partner can see posting failures.
+            </p>
+          </div>
+        ) : (
+          <PostingFailuresList
+            items={items}
+            loading={loading}
+            error={error}
+            resolvingId={resolvingId}
+            repostingId={repostingId}
+            actionError={actionError}
+            rowErrors={rowErrors}
+            notice={notice}
+            onRetry={() => {
+              void retry();
+            }}
+            onResolve={resolve}
+            onRepost={repost}
+          />
+        )}
       </div>
     </DashboardLayout>
   );

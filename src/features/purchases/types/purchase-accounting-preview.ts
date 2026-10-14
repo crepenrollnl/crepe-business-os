@@ -7,6 +7,9 @@
 
 export type PurchaseAccountingPreviewStatus = "draft_proposal" | "posted";
 
+/** Whether the database has posted the purchase_received journal (sql/150). */
+export type PurchasePostingStatus = "posted" | "pending";
+
 export interface PurchaseAccountingPreviewLine {
   account_role: string;
   debit: number;

@@ -88,10 +88,6 @@ type PurchaseDocumentModalProps = {
   error: string | null;
   /** Existing in-memory / document-derived accounting preview (display only). */
   accountingPreview?: PurchaseAccountingPreviewData | null;
-  /**
-   * Set only when Receive succeeded but posting the Accounting journal
-   * failed — the purchase and its stock are already updated regardless.
-   */
   onClose: () => void;
   onSaveDraft: (values: PurchaseFormValues) => Promise<boolean>;
   onReceiveGoods: (values: PurchaseFormValues) => Promise<boolean>;

@@ -51,4 +51,15 @@ describe("mapPurchaseTotalsToAccountingPreview (DEV-101)", () => {
     expect(preview.tax_total).toBe(0);
     expect(preview.grand_total).toBe(preview.net_amount);
   });
+
+  it("marks the preview Posted when the database journal exists", () => {
+    const stored = { subtotal: 100, tax_total: 21, total: 121, currency: "EUR" };
+
+    expect(mapPurchaseTotalsToAccountingPreview(stored, "posted").status).toBe(
+      "posted",
+    );
+    expect(mapPurchaseTotalsToAccountingPreview(stored, "pending").status).toBe(
+      "draft_proposal",
+    );
+  });
 });

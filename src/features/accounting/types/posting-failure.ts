@@ -42,6 +42,13 @@ export interface PostingFailure {
   resolutionNote: string | null;
 }
 
+/** Result of "Post again" (repost_posting_failure, sql/154). */
+export interface RepostPostingFailureResult {
+  status: "posted" | "nothing_to_post";
+  /** Open rows of the same operation the database closed (≥ 1). */
+  resolved: number;
+}
+
 export interface ReportPostingFailureInput {
   sourceFlow: PostingFailureSourceFlow;
   entityType: string;

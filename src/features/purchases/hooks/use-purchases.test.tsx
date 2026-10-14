@@ -16,6 +16,7 @@ const {
   linkToPurchase,
   calculatePurchaseTaxes,
   getCurrentAccountingContext,
+  getPurchaseReceivedPostingStatus,
 } = vi.hoisted(() => ({
   getPurchases: vi.fn(),
   getSuppliers: vi.fn(),
@@ -27,6 +28,7 @@ const {
   linkToPurchase: vi.fn(),
   calculatePurchaseTaxes: vi.fn(),
   getCurrentAccountingContext: vi.fn(),
+  getPurchaseReceivedPostingStatus: vi.fn(),
 }));
 
 vi.mock("../services/purchase-service", () => ({
@@ -37,6 +39,15 @@ vi.mock("../services/purchase-service", () => ({
     getPurchaseById: (id: string) => getPurchaseById(id),
     saveDraft: (input: unknown) => saveDraft(input),
     receivePurchase: (input: unknown) => receivePurchase(input),
+  },
+}));
+
+// Unconfigured → "pending" (journal not found), like a fresh database.
+vi.mock("../services/purchase-posting-status-service", () => ({
+  purchasePostingStatusService: {
+    getPurchaseReceivedPostingStatus: (id: string) =>
+      getPurchaseReceivedPostingStatus(id) ??
+      Promise.resolve({ data: "pending", error: null }),
   },
 }));
 
@@ -158,6 +169,7 @@ describe("usePurchases from a receipt", () => {
   afterEach(() => {
     cleanup();
     vi.clearAllMocks();
+    getPurchaseReceivedPostingStatus.mockReset();
     setUrl("");
   });
 
@@ -320,6 +332,7 @@ describe("usePurchases.receiveGoods (sql/150: database posts the journal)", () =
   afterEach(() => {
     cleanup();
     vi.clearAllMocks();
+    getPurchaseReceivedPostingStatus.mockReset();
     setUrl("");
   });
 
@@ -373,6 +386,33 @@ describe("usePurchases.receiveGoods (sql/150: database posts the journal)", () =
     });
   });
 
+  it("marks the preview Posted when the database journal exists", async () => {
+    receivePurchase.mockResolvedValue({
+      data: { ...savedPurchase("received"), subtotal: 100, tax_total: 21, total: 121 },
+      error: null,
+    });
+    getPurchaseReceivedPostingStatus.mockResolvedValue({ data: "posted", error: null });
+
+    const { result } = await receiveNewPurchase();
+
+    expect(getPurchaseReceivedPostingStatus).toHaveBeenCalledWith(NEW_PURCHASE_ID);
+    expect(result.current.accountingPreview?.status).toBe("posted");
+    expect(result.current.actionError).toBeNull();
+  });
+
+  it("keeps Draft Proposal without an error when the status read fails", async () => {
+    receivePurchase.mockResolvedValue({ data: savedPurchase("received"), error: null });
+    getPurchaseReceivedPostingStatus.mockResolvedValue({
+      data: null,
+      error: "Failed to load purchase accounting status",
+    });
+
+    const { result } = await receiveNewPurchase();
+
+    expect(result.current.accountingPreview?.status).toBe("draft_proposal");
+    expect(result.current.actionError).toBeNull();
+  });
+
   it("keeps the modal on the draft and surfaces actionError when the receive fails", async () => {
     receivePurchase.mockResolvedValue({
       data: null,
@@ -385,6 +425,68 @@ describe("usePurchases.receiveGoods (sql/150: database posts the journal)", () =
     expect(result.current.actionError).toBe(
       "This purchase has already been received.",
     );
+    expect(result.current.accountingPreview).toBeNull();
+    expect(getPurchaseReceivedPostingStatus).not.toHaveBeenCalled();
+  });
+});
+
+describe("usePurchases opening a purchase (posting status)", () => {
+  beforeEach(() => {
+    getPurchases.mockResolvedValue({ data: [], error: null });
+    getSuppliers.mockResolvedValue({ data: [], error: null });
+    getIngredients.mockResolvedValue({ data: [], error: null });
+    calculatePurchaseTaxes.mockResolvedValue({ data: TAX, error: null });
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.clearAllMocks();
+    getPurchaseReceivedPostingStatus.mockReset();
+    setUrl("");
+  });
+
+  async function openFromUrl(purchase: PurchaseWithRelations) {
+    setUrl(`?open=${purchase.id}`);
+    getPurchaseById.mockResolvedValue({ data: purchase, error: null });
+    const hook = renderHook(() => usePurchases());
+    await waitFor(() => {
+      expect(hook.result.current.editingPurchase?.id).toBe(purchase.id);
+      expect(hook.result.current.isLoadingPurchase).toBe(false);
+    });
+    return hook;
+  }
+
+  it("shows a received purchase as Posted when its journal exists", async () => {
+    getPurchaseReceivedPostingStatus.mockResolvedValue({ data: "posted", error: null });
+
+    const { result } = await openFromUrl(savedPurchase("received"));
+
+    expect(getPurchaseReceivedPostingStatus).toHaveBeenCalledWith(NEW_PURCHASE_ID);
+    expect(result.current.accountingPreview?.status).toBe("posted");
+  });
+
+  it("keeps a received purchase without a journal as Draft Proposal", async () => {
+    getPurchaseReceivedPostingStatus.mockResolvedValue({ data: "pending", error: null });
+
+    const { result } = await openFromUrl(savedPurchase("received"));
+
+    expect(result.current.accountingPreview?.status).toBe("draft_proposal");
+  });
+
+  it("does not read the posting status for a cancelled purchase", async () => {
+    const { result } = await openFromUrl({
+      ...savedPurchase("draft"),
+      status: "cancelled",
+    });
+
+    expect(getPurchaseReceivedPostingStatus).not.toHaveBeenCalled();
+    expect(result.current.accountingPreview?.status).toBe("draft_proposal");
+  });
+
+  it("does not read the posting status for a draft", async () => {
+    const { result } = await openFromUrl(savedPurchase("draft"));
+
+    expect(getPurchaseReceivedPostingStatus).not.toHaveBeenCalled();
     expect(result.current.accountingPreview).toBeNull();
   });
 });
