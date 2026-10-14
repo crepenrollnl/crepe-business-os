@@ -34,6 +34,33 @@ function renderShell() {
   );
 }
 
+describe("PosShell Back to OS link", () => {
+  afterEach(() => {
+    cleanup();
+    useRoleMock.mockReset();
+  });
+
+  it.each(["owner", "partner"])("goes to the dashboard (/) for %s", (role) => {
+    asRole(role);
+    renderShell();
+
+    expect(screen.getByRole("link", { name: "Back to OS" })).toHaveAttribute(
+      "href",
+      "/",
+    );
+  });
+
+  it("goes to /sales for a seller (\"/\" would bounce back to /pos)", () => {
+    asRole("seller");
+    renderShell();
+
+    expect(screen.getByRole("link", { name: "Back to OS" })).toHaveAttribute(
+      "href",
+      "/sales",
+    );
+  });
+});
+
 describe("PosShell receipts link", () => {
   afterEach(() => {
     cleanup();

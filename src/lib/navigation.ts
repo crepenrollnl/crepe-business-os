@@ -14,6 +14,9 @@ export interface RouteAccess {
 /** Where a seller starts, and where "no access" sends people. */
 export const SELLER_HOME_PATH = "/pos";
 
+/** Sidebar page a seller reaches from full-screen POS ("Back to OS"). */
+export const SELLER_MENU_PATH = "/sales";
+
 /**
  * Who may open which page — the one source of truth for the menu
  * (isNavItemVisible) and the page guard (RoleGuard). The longest matching
@@ -79,6 +82,15 @@ export function canAccessPath(pathname: string, role: string | null): boolean {
 
 export function isNavItemVisible(item: NavItem, role: string | null): boolean {
   return canAccessPath(item.href, role);
+}
+
+/**
+ * Target of "Back to OS" on full-screen POS: the dashboard for roles that
+ * may open it, otherwise the Sales list (a page with the sidebar). Sending a
+ * seller to "/" would only bounce them back to /pos (RoleGuard).
+ */
+export function osHomePathForRole(role: string | null): string {
+  return canAccessPath("/", role) ? "/" : SELLER_MENU_PATH;
 }
 
 export const navItems: NavItem[] = [

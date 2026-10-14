@@ -3,7 +3,9 @@ import {
   canAccessPath,
   isNavItemVisible,
   navItems,
+  osHomePathForRole,
   rolesForPath,
+  SELLER_HOME_PATH,
 } from "./navigation";
 import { canSeeCosts } from "./roles";
 
@@ -63,6 +65,14 @@ describe("route table (src/lib/navigation.ts)", () => {
         expect(isNavItemVisible(item, role)).toBe(canAccessPath(item.href, role));
       }
     }
+  });
+
+  it("Back to OS: dashboard for owner/partner, Sales (a seller page with the menu) for a seller", () => {
+    expect(osHomePathForRole("owner")).toBe("/");
+    expect(osHomePathForRole("partner")).toBe("/");
+    expect(osHomePathForRole("seller")).toBe("/sales");
+    expect(canAccessPath(osHomePathForRole("seller"), "seller")).toBe(true);
+    expect(canAccessPath(SELLER_HOME_PATH, "seller")).toBe(true);
   });
 
   it("canSeeCosts is owner and partner only", () => {
