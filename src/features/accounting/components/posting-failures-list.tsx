@@ -12,9 +12,15 @@ interface PostingFailuresListProps {
   loading: boolean;
   error: string | null;
   resolvingId: string | null;
+  repostingId: string | null;
   actionError: string | null;
+  /** Per-row "Post again" errors; the row stays in the list. */
+  rowErrors: Readonly<Record<string, string>>;
+  /** Short success note after "Post again" (the row is gone by then). */
+  notice: string | null;
   onRetry: () => void;
   onResolve: (id: string, note: string) => Promise<boolean>;
+  onRepost: (id: string) => Promise<boolean>;
 }
 
 function PostingFailuresSkeleton() {
@@ -36,13 +42,20 @@ function PostingFailuresSkeleton() {
 function PostingFailureRow({
   item,
   resolving,
+  reposting,
+  rowError,
   onResolve,
+  onRepost,
 }: {
   item: PostingFailure;
   resolving: boolean;
+  reposting: boolean;
+  rowError: string | null;
   onResolve: (id: string, note: string) => Promise<boolean>;
+  onRepost: (id: string) => Promise<boolean>;
 }) {
   const [note, setNote] = useState("");
+  const busy = resolving || reposting;
 
   return (
     <tr className="border-t border-zinc-200 align-top">
@@ -55,7 +68,18 @@ function PostingFailureRow({
           {item.entityType} · {item.entityId}
         </div>
       </td>
-      <td className="px-4 py-4 text-sm text-amber-800">{item.errorMessage}</td>
+      <td className="px-4 py-4 text-sm text-amber-800">
+        {item.errorMessage}
+        {rowError ? (
+          <p
+            role="alert"
+            className="mt-2 text-sm text-red-700"
+            data-testid={`posting-failure-row-error-${item.id}`}
+          >
+            {rowError}
+          </p>
+        ) : null}
+      </td>
       <td className="px-4 py-4">
         <label className="sr-only" htmlFor={`resolution-note-${item.id}`}>
           Resolution note for {item.id}
@@ -66,14 +90,24 @@ function PostingFailureRow({
           value={note}
           onChange={(event) => setNote(event.target.value)}
           placeholder="Optional note"
-          disabled={resolving}
+          disabled={busy}
           className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-900 shadow-sm focus:border-zinc-500 focus:outline-none"
         />
       </td>
-      <td className="px-4 py-4 text-right">
+      <td className="space-y-2 px-4 py-4 text-right">
         <button
           type="button"
-          disabled={resolving}
+          disabled={busy}
+          onClick={() => {
+            void onRepost(item.id);
+          }}
+          className="mr-2 rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-semibold text-zinc-900 transition-colors hover:bg-zinc-50 disabled:cursor-not-allowed disabled:text-zinc-400"
+        >
+          {reposting ? "Posting…" : "Post again"}
+        </button>
+        <button
+          type="button"
+          disabled={busy}
           onClick={() => {
             void onResolve(item.id, note);
           }}
@@ -91,9 +125,13 @@ export function PostingFailuresList({
   loading,
   error,
   resolvingId,
+  repostingId,
   actionError,
+  rowErrors,
+  notice,
   onRetry,
   onResolve,
+  onRepost,
 }: PostingFailuresListProps) {
   if (error) {
     return (
@@ -115,6 +153,14 @@ export function PostingFailuresList({
 
   return (
     <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-sm">
+      {notice ? (
+        <p
+          role="status"
+          className="border-b border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800"
+        >
+          {notice}
+        </p>
+      ) : null}
       {actionError ? (
         <p className="border-b border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
           {actionError}
@@ -154,7 +200,10 @@ export function PostingFailuresList({
                   key={item.id}
                   item={item}
                   resolving={resolvingId === item.id}
+                  reposting={repostingId === item.id}
+                  rowError={rowErrors[item.id] ?? null}
                   onResolve={onResolve}
+                  onRepost={onRepost}
                 />
               ))
             )}

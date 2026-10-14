@@ -131,3 +131,96 @@ describe("postingFailuresService.resolve", () => {
     expect(result.error).toBe("This posting failure is already resolved.");
   });
 });
+
+describe("postingFailuresService.repost (sql/154)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("calls repost_posting_failure and returns the outcome", async () => {
+    supabaseMock.rpc.mockResolvedValue({
+      data: { status: "posted", resolved: 3 },
+      error: null,
+    });
+
+    const result = await postingFailuresService.repost(FAILURE_ID);
+
+    expect(supabaseMock.rpc).toHaveBeenCalledWith("repost_posting_failure", {
+      p_id: FAILURE_ID,
+    });
+    expect(result.error).toBeNull();
+    expect(result.data).toEqual({ status: "posted", resolved: 3 });
+  });
+
+  it("returns nothing_to_post as a success", async () => {
+    supabaseMock.rpc.mockResolvedValue({
+      data: { status: "nothing_to_post", resolved: 1 },
+      error: null,
+    });
+
+    const result = await postingFailuresService.repost(FAILURE_ID);
+
+    expect(result.data).toEqual({ status: "nothing_to_post", resolved: 1 });
+  });
+
+  it("rejects an invalid id without calling the RPC", async () => {
+    const result = await postingFailuresService.repost("not-a-uuid");
+
+    expect(result.error).toBe("Posting failure id is required.");
+    expect(supabaseMock.rpc).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    "Posting again failed: No open fiscal period covers 2026-09-01.",
+    "Posting again failed: Purchase cccccccc-cccc-4ccc-8ccc-cccccccccccc was not found.",
+    "This write-off failure was recorded before automatic posting. Check its journal by hand and use Mark resolved.",
+    "Posting failures of type purchase_receive/sale cannot be posted again automatically.",
+  ])("passes the database message through verbatim: %s", async (message) => {
+    supabaseMock.rpc.mockResolvedValue({
+      data: null,
+      error: { message, code: "P0001" },
+    });
+
+    const result = await postingFailuresService.repost(FAILURE_ID);
+
+    expect(result.data).toBeNull();
+    expect(result.error).toBe(message);
+  });
+
+  it("maps the already-resolved message", async () => {
+    supabaseMock.rpc.mockResolvedValue({
+      data: null,
+      error: { message: "This posting failure is already resolved.", code: "P0001" },
+    });
+
+    const result = await postingFailuresService.repost(FAILURE_ID);
+
+    expect(result.error).toBe("This posting failure is already resolved.");
+  });
+
+  it("maps the role guard (42501) to a post-again permission message", async () => {
+    supabaseMock.rpc.mockResolvedValue({
+      data: null,
+      error: {
+        message: "Insufficient permissions for this action (role: seller).",
+        code: "42501",
+      },
+    });
+
+    const result = await postingFailuresService.repost(FAILURE_ID);
+
+    expect(result.error).toBe("Only the owner or a partner can post again.");
+  });
+
+  it("rejects an unexpected response shape", async () => {
+    supabaseMock.rpc.mockResolvedValue({
+      data: { status: "done" },
+      error: null,
+    });
+
+    const result = await postingFailuresService.repost(FAILURE_ID);
+
+    expect(result.data).toBeNull();
+    expect(result.error).toBe("Post again response was invalid.");
+  });
+});

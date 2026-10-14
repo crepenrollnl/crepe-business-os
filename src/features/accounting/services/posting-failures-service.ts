@@ -3,6 +3,8 @@
  *
  * Reads unresolved rows from posting_failures (RLS: owner/partner).
  * Resolves through resolve_posting_failure only — never updates the table.
+ * "Post again" goes through repost_posting_failure (sql/154): the database
+ * re-runs its own poster and closes every open row of that operation.
  */
 
 import { toUserError } from "@/lib/service-errors";
@@ -12,6 +14,7 @@ import {
   POSTING_FAILURE_SOURCE_FLOWS,
   type PostingFailure,
   type PostingFailureSourceFlow,
+  type RepostPostingFailureResult,
 } from "../types/posting-failure";
 
 const TABLE = "posting_failures";
@@ -58,24 +61,55 @@ function mapRow(row: PostingFailureSqlRow): PostingFailure {
   };
 }
 
-function mapError(error: unknown, fallback: string): string {
+/**
+ * repost_posting_failure (sql/154) raises readable P0001 messages that must
+ * reach the user verbatim — including the poster's own reason after
+ * "Posting again failed: ", which may contain words the generic mapping
+ * below would otherwise rewrite ("was not found", raw constraint text …).
+ */
+const REPOST_MESSAGE_PREFIXES = [
+  "posting again failed:",
+  "this write-off failure was recorded before automatic posting.",
+  "posting failures of type ",
+] as const;
+
+function readMessage(err: unknown): string | null {
+  if (typeof err === "string") {
+    return err;
+  }
+  if (
+    typeof err === "object" &&
+    err !== null &&
+    "message" in err &&
+    typeof (err as { message: unknown }).message === "string"
+  ) {
+    return (err as { message: string }).message;
+  }
+  return null;
+}
+
+function mapError(
+  error: unknown,
+  fallback: string,
+  permissionMessage = "You do not have permission to resolve posting failures.",
+): string {
   return toUserError(error, fallback, {
     map: (err) => {
-      const message =
-        typeof err === "object" &&
-        err !== null &&
-        "message" in err &&
-        typeof (err as { message: unknown }).message === "string"
-          ? (err as { message: string }).message
-          : typeof err === "string"
-            ? err
-            : null;
+      const message = readMessage(err);
 
       if (!message) {
         return null;
       }
 
       const normalized = message.toLowerCase();
+
+      if (
+        REPOST_MESSAGE_PREFIXES.some((prefix) =>
+          normalized.startsWith(prefix),
+        )
+      ) {
+        return message.trim();
+      }
 
       if (
         normalized.includes("posting_failures") &&
@@ -88,7 +122,8 @@ function mapError(error: unknown, fallback: string): string {
 
       if (
         normalized.includes("record_posting_failure") ||
-        normalized.includes("resolve_posting_failure")
+        normalized.includes("resolve_posting_failure") ||
+        normalized.includes("repost_posting_failure")
       ) {
         if (
           normalized.includes("does not exist") ||
@@ -100,7 +135,7 @@ function mapError(error: unknown, fallback: string): string {
       }
 
       if (normalized.includes("insufficient permissions")) {
-        return "You do not have permission to resolve posting failures.";
+        return permissionMessage;
       }
 
       if (normalized.includes("already resolved")) {
@@ -167,4 +202,61 @@ export const postingFailuresService = {
       return fail(mapError(error, "Failed to resolve posting failure"));
     }
   },
+
+  /**
+   * "Post again": repost_posting_failure (sql/154) re-runs the database
+   * poster for this row's operation. On success the database has closed the
+   * row and every other open row of the same operation (`resolved` = how
+   * many). On failure it raises a readable message and the row stays open.
+   */
+  async repost(id: string): Promise<ServiceResult<RepostPostingFailureResult>> {
+    const permissionMessage =
+      "Only the owner or a partner can post again.";
+    try {
+      const trimmedId = id?.trim() ?? "";
+      if (!trimmedId || !UUID_RE.test(trimmedId)) {
+        return fail("Posting failure id is required.");
+      }
+
+      const { data, error } = await supabase.rpc("repost_posting_failure", {
+        p_id: trimmedId,
+      });
+
+      if (error) {
+        return fail(
+          mapError(error, "Failed to post again", permissionMessage),
+        );
+      }
+
+      const result = toRepostResult(data);
+      if (!result) {
+        return fail("Post again response was invalid.");
+      }
+
+      return ok(result);
+    } catch (error) {
+      return fail(mapError(error, "Failed to post again", permissionMessage));
+    }
+  },
 };
+
+function toRepostResult(data: unknown): RepostPostingFailureResult | null {
+  if (typeof data !== "object" || data === null) {
+    return null;
+  }
+
+  const row = data as Record<string, unknown>;
+  const status = row.status;
+  const resolved =
+    typeof row.resolved === "number" ? row.resolved : Number(row.resolved);
+
+  if (status !== "posted" && status !== "nothing_to_post") {
+    return null;
+  }
+
+  if (!Number.isInteger(resolved) || resolved < 0) {
+    return null;
+  }
+
+  return { status, resolved };
+}
