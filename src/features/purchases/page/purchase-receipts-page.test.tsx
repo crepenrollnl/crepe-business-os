@@ -4,9 +4,9 @@ import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
 
-const { getMyRoleMock, usePurchaseReceiptsMock, getPurchaseReceiptAccessToken, requestDriveReceiptSync } =
+const { useRoleMock, usePurchaseReceiptsMock, getPurchaseReceiptAccessToken, requestDriveReceiptSync } =
   vi.hoisted(() => ({
-    getMyRoleMock: vi.fn(),
+    useRoleMock: vi.fn(),
     usePurchaseReceiptsMock: vi.fn(),
     getPurchaseReceiptAccessToken: vi.fn(),
     requestDriveReceiptSync: vi.fn(),
@@ -18,11 +18,13 @@ vi.mock("next/link", () => ({
   ),
 }));
 
-vi.mock("@/features/auth/services/auth-service", () => ({
-  authService: {
-    getMyRole: () => getMyRoleMock(),
-  },
+vi.mock("@/hooks/use-role", () => ({
+  useRole: () => useRoleMock(),
 }));
+
+function asRole(role: string | null) {
+  useRoleMock.mockReturnValue({ role, loading: false, reload: () => undefined });
+}
 
 vi.mock("../utils/purchase-receipt-access-token", () => ({
   getPurchaseReceiptAccessToken: () => getPurchaseReceiptAccessToken(),
@@ -61,7 +63,7 @@ const idle = {
 describe("PurchaseReceiptsPage role gate", () => {
   afterEach(() => {
     cleanup();
-    getMyRoleMock.mockReset();
+    useRoleMock.mockReset();
     usePurchaseReceiptsMock.mockReset();
     getPurchaseReceiptAccessToken.mockReset();
     getPurchaseReceiptAccessToken.mockResolvedValue(null);
@@ -70,13 +72,13 @@ describe("PurchaseReceiptsPage role gate", () => {
   });
 
   it("does not show the receipt screen to a seller", async () => {
-    getMyRoleMock.mockResolvedValue("seller");
+    asRole("seller");
     usePurchaseReceiptsMock.mockReturnValue(idle);
 
     render(<PurchaseReceiptsPage />);
 
     await waitFor(() => {
-      expect(usePurchaseReceiptsMock.mock.calls.length).toBeGreaterThanOrEqual(2);
+      expect(usePurchaseReceiptsMock.mock.calls.length).toBeGreaterThanOrEqual(1);
     });
     expect(usePurchaseReceiptsMock.mock.calls.every(([enabled]) => enabled === false)).toBe(true);
     expect(
@@ -89,7 +91,7 @@ describe("PurchaseReceiptsPage role gate", () => {
   });
 
   it("shows a loading line and does not open the form while the role is loading", () => {
-    getMyRoleMock.mockImplementation(() => new Promise(() => undefined));
+    useRoleMock.mockReturnValue({ role: null, loading: true, reload: () => undefined });
     usePurchaseReceiptsMock.mockReturnValue(idle);
 
     render(<PurchaseReceiptsPage />);
@@ -100,24 +102,28 @@ describe("PurchaseReceiptsPage role gate", () => {
   });
 
   it("shows an error and retry, then the form after access succeeds", async () => {
-    getMyRoleMock
-      .mockRejectedValueOnce(new Error("offline"))
-      .mockResolvedValue("owner");
+    const reload = vi.fn();
+    useRoleMock.mockReturnValue({ role: null, loading: false, reload });
     usePurchaseReceiptsMock.mockReturnValue(idle);
 
-    render(<PurchaseReceiptsPage />);
+    const { rerender } = render(<PurchaseReceiptsPage />);
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Could not check your access.");
     expect(usePurchaseReceiptsMock).not.toHaveBeenCalledWith(true);
 
     await userEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(reload).toHaveBeenCalledTimes(1);
+
+    // RoleProvider reads the role again; here the read now succeeds.
+    asRole("owner");
+    rerender(<PurchaseReceiptsPage />);
 
     expect(await screen.findByText("Take photo")).toBeInTheDocument();
     expect(usePurchaseReceiptsMock).toHaveBeenCalledWith(true);
   });
 
   it("shows the receipt screen to an owner", async () => {
-    getMyRoleMock.mockResolvedValue("owner");
+    asRole("owner");
     usePurchaseReceiptsMock.mockReturnValue(idle);
 
     render(<PurchaseReceiptsPage />);
@@ -135,7 +141,7 @@ describe("PurchaseReceiptsPage role gate", () => {
   });
 
   it("shows the Drive notice only when the latest sync says Drive is unavailable", async () => {
-    getMyRoleMock.mockResolvedValue("owner");
+    asRole("owner");
     usePurchaseReceiptsMock.mockReturnValue(idle);
     requestDriveReceiptSync.mockResolvedValue({
       configured: true,
@@ -155,7 +161,7 @@ describe("PurchaseReceiptsPage role gate", () => {
   });
 
   it("shows nothing about Drive when the sync says it is not configured", async () => {
-    getMyRoleMock.mockResolvedValue("owner");
+    asRole("owner");
     usePurchaseReceiptsMock.mockReturnValue(idle);
     requestDriveReceiptSync.mockResolvedValue({ configured: false });
 

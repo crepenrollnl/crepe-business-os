@@ -10,7 +10,7 @@ import { formatReceiptDisplayDate } from "../utils/receipt-purchase-link";
 import { PurchaseReceiptsSection } from "./purchase-receipts-section";
 
 const {
-  getMyRole,
+  useRoleMock,
   listForPurchase,
   listUnassigned,
   listActiveSuppliers,
@@ -18,7 +18,7 @@ const {
   unlinkFromPurchase,
   signStoragePaths,
 } = vi.hoisted(() => ({
-  getMyRole: vi.fn(),
+  useRoleMock: vi.fn(),
   listForPurchase: vi.fn(),
   listUnassigned: vi.fn(),
   listActiveSuppliers: vi.fn(),
@@ -37,11 +37,13 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn() }),
 }));
 
-vi.mock("@/features/auth/services/auth-service", () => ({
-  authService: {
-    getMyRole: () => getMyRole(),
-  },
+vi.mock("@/hooks/use-role", () => ({
+  useRole: () => useRoleMock(),
 }));
+
+function asRole(role: string | null) {
+  useRoleMock.mockReturnValue({ role, loading: false, reload: () => undefined });
+}
 
 vi.mock("../services/purchase-receipt-service", () => ({
   purchaseReceiptService: {
@@ -99,7 +101,7 @@ function renderSection(
 
 describe("PurchaseReceiptsSection", () => {
   beforeEach(() => {
-    getMyRole.mockResolvedValue("owner");
+    asRole("owner");
     listForPurchase.mockResolvedValue({ data: [], error: null });
     listUnassigned.mockResolvedValue({ data: [], error: null });
     listActiveSuppliers.mockResolvedValue({ data: [], error: null });
@@ -113,7 +115,7 @@ describe("PurchaseReceiptsSection", () => {
 
   afterEach(() => {
     cleanup();
-    getMyRole.mockReset();
+    useRoleMock.mockReset();
     listForPurchase.mockReset();
     listUnassigned.mockReset();
     listActiveSuppliers.mockReset();

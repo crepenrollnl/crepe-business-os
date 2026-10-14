@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMyRole } from "@/features/auth/hooks/use-my-role";
+import { useRole } from "@/hooks/use-role";
 import { isNavItemVisible, navItems } from "@/lib/navigation";
 
 type SidebarProps = {
@@ -11,7 +11,7 @@ type SidebarProps = {
 };
 
 export function Sidebar({ isOpen, onClose, activePath = "/" }: SidebarProps) {
-  const { role } = useMyRole();
+  const { role } = useRole();
   const visibleItems = navItems.filter((item) => isNavItemVisible(item, role));
 
   return (

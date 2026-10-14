@@ -17,7 +17,8 @@ type RecipeViewModalProps = {
   isLoading: boolean;
   error: string | null;
   onClose: () => void;
-  onEdit: () => void;
+  /** Omitted for sellers (view only): no Edit button. */
+  onEdit?: () => void;
 };
 
 function formatQuantity(value: number): string {
@@ -282,7 +283,7 @@ export function RecipeViewModal({
           >
             Close
           </button>
-          {recipe && (
+          {recipe && onEdit && (
             <button
               type="button"
               onClick={onEdit}

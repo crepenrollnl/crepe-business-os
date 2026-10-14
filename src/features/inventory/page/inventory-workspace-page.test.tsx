@@ -1,7 +1,19 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
+
+const { useRoleMock } = vi.hoisted(() => ({
+  useRoleMock: vi.fn(),
+}));
+
+vi.mock("@/hooks/use-role", () => ({
+  useRole: () => useRoleMock(),
+}));
+
+function asRole(role: string | null) {
+  useRoleMock.mockReturnValue({ role, loading: false, reload: () => undefined });
+}
 
 vi.mock("next/link", () => ({
   default: ({
@@ -44,6 +56,10 @@ vi.mock("./inventory-page", () => ({
 import { InventoryWorkspacePage } from "./inventory-workspace-page";
 
 describe("InventoryWorkspacePage", () => {
+  beforeEach(() => {
+    asRole("owner");
+  });
+
   afterEach(() => {
     cleanup();
   });
@@ -102,5 +118,25 @@ describe("InventoryWorkspacePage", () => {
       "aria-current",
       "page",
     );
+  });
+
+  it("gives a seller no Write-offs tab, even on ?tab=write-offs", () => {
+    asRole("seller");
+
+    render(
+      <InventoryWorkspacePage
+        activeTab="write-offs"
+        finishedGoods={<div data-testid="finished-goods">embedded</div>}
+        writeOffs={<div data-testid="write-offs">embedded</div>}
+      />,
+    );
+
+    expect(screen.queryByRole("link", { name: "Write-offs" })).not.toBeInTheDocument();
+    expect(screen.queryByTestId("write-offs")).not.toBeInTheDocument();
+    expect(screen.getByTestId("raw-materials")).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: "Raw Materials" }),
+    ).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("link", { name: "Finished Goods" })).toBeInTheDocument();
   });
 });

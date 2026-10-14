@@ -3,8 +3,8 @@ import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
 
-const { getMyRoleMock, listUnresolvedMock } = vi.hoisted(() => ({
-  getMyRoleMock: vi.fn(),
+const { useRoleMock, listUnresolvedMock } = vi.hoisted(() => ({
+  useRoleMock: vi.fn(),
   listUnresolvedMock: vi.fn(),
 }));
 
@@ -12,11 +12,13 @@ vi.mock("@/components/layout/dashboard-layout", () => ({
   DashboardLayout: ({ children }: { children: ReactNode }) => <div>{children}</div>,
 }));
 
-vi.mock("@/features/auth/services/auth-service", () => ({
-  authService: {
-    getMyRole: () => getMyRoleMock(),
-  },
+vi.mock("@/hooks/use-role", () => ({
+  useRole: () => useRoleMock(),
 }));
+
+function asRole(role: string | null) {
+  useRoleMock.mockReturnValue({ role, loading: false, reload: () => undefined });
+}
 
 vi.mock("../services/posting-failures-service", () => ({
   postingFailuresService: {
@@ -32,7 +34,7 @@ describe("PostingFailuresPage", () => {
   afterEach(cleanup);
 
   it("tells a seller that only the owner or a partner can see posting failures", async () => {
-    getMyRoleMock.mockResolvedValue("seller");
+    asRole("seller");
 
     render(<PostingFailuresPage />);
 
@@ -45,7 +47,7 @@ describe("PostingFailuresPage", () => {
   });
 
   it("shows the list for the owner", async () => {
-    getMyRoleMock.mockResolvedValue("owner");
+    asRole("owner");
     listUnresolvedMock.mockResolvedValue({ data: [], error: null });
 
     render(<PostingFailuresPage />);

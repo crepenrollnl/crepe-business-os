@@ -35,7 +35,7 @@ export function QuickSalePage() {
   } = useQuickSale();
 
   return (
-    <DashboardLayout activePath="/sales">
+    <DashboardLayout activePath="/sales/quick">
       <div className="mx-auto max-w-7xl space-y-8">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div>

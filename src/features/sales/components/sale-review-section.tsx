@@ -25,6 +25,11 @@ type SaleReviewSectionProps = {
    * (useSale().showAccountingStatus). Hidden unless explicitly enabled.
    */
   showAccountingStatus?: boolean;
+  /**
+   * Owner/partner only (useSale().showCosts): Frozen COGS, Gross Profit,
+   * Gross Margin % and the consumed-batch cost table. Hidden unless enabled.
+   */
+  showCosts?: boolean;
   warning?: string | null;
   cogsError?: string | null;
   profitError?: string | null;
@@ -98,6 +103,7 @@ export function SaleReviewSection({
   profitSummary = null,
   accountingPostingStatus = "pending",
   showAccountingStatus = false,
+  showCosts = false,
   warning = null,
   cogsError = null,
   profitError = null,
@@ -123,8 +129,9 @@ export function SaleReviewSection({
       >
         <h2 className="text-base font-semibold text-zinc-900">Sale Review</h2>
         <p className="mt-1 text-sm text-zinc-500">
-          Confirm this sale to freeze COGS, profit, and accounting posting
-          status.
+          {showCosts
+            ? "Confirm this sale to freeze COGS, profit, and accounting posting status."
+            : "Confirm this sale to lock its lines and totals."}
         </p>
         <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-3">
           <div>
@@ -180,7 +187,9 @@ export function SaleReviewSection({
         <div className="border-b border-zinc-200 px-4 py-4">
           <h2 className="text-base font-semibold text-zinc-900">Sale Review</h2>
           <p className="mt-0.5 text-sm text-zinc-500">
-            Complete business view from frozen sale, COGS, and profit records.
+            {showCosts
+              ? "Complete business view from frozen sale, COGS, and profit records."
+              : "Frozen sale totals."}{" "}
             Values are never recalculated in the UI.
           </p>
           <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-3">
@@ -215,36 +224,40 @@ export function SaleReviewSection({
                 {formatSaleMoney(vat)}
               </dd>
             </div>
-            <div>
-              <dt className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
-                Frozen COGS
-              </dt>
-              <dd className="mt-0.5 text-zinc-800" data-testid="review-cogs">
-                {cogs === null ? "—" : formatSaleMoney(cogs)}
-              </dd>
-            </div>
-            <div>
-              <dt className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
-                Gross Profit
-              </dt>
-              <dd
-                className="mt-0.5 text-zinc-800"
-                data-testid="review-gross-profit"
-              >
-                {grossProfit === null ? "—" : formatSaleMoney(grossProfit)}
-              </dd>
-            </div>
-            <div>
-              <dt className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
-                Gross Margin %
-              </dt>
-              <dd
-                className="mt-0.5 text-zinc-800"
-                data-testid="review-gross-margin"
-              >
-                {formatMarginPercent(margin)}
-              </dd>
-            </div>
+            {showCosts ? (
+              <>
+                <div>
+                  <dt className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                    Frozen COGS
+                  </dt>
+                  <dd className="mt-0.5 text-zinc-800" data-testid="review-cogs">
+                    {cogs === null ? "—" : formatSaleMoney(cogs)}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                    Gross Profit
+                  </dt>
+                  <dd
+                    className="mt-0.5 text-zinc-800"
+                    data-testid="review-gross-profit"
+                  >
+                    {grossProfit === null ? "—" : formatSaleMoney(grossProfit)}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                    Gross Margin %
+                  </dt>
+                  <dd
+                    className="mt-0.5 text-zinc-800"
+                    data-testid="review-gross-margin"
+                  >
+                    {formatMarginPercent(margin)}
+                  </dd>
+                </div>
+              </>
+            ) : null}
             <div>
               <dt className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
                 Sale Completion Date
@@ -275,7 +288,7 @@ export function SaleReviewSection({
             <p className="mt-3 text-sm text-amber-700">{warning}</p>
           ) : null}
 
-          {cogsError ? (
+          {showCosts && cogsError ? (
             <p
               className="mt-3 text-sm text-amber-700"
               data-testid="review-missing-cogs"
@@ -283,7 +296,7 @@ export function SaleReviewSection({
               {cogsError}
             </p>
           ) : null}
-          {profitError ? (
+          {showCosts && profitError ? (
             <p
               className="mt-3 text-sm text-amber-700"
               data-testid="review-missing-profit"
@@ -294,61 +307,63 @@ export function SaleReviewSection({
         </div>
       </div>
 
-      <div
-        className="overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-sm"
-        data-testid="review-consumed-batches"
-      >
-        <div className="border-b border-zinc-200 px-4 py-3">
-          <h3 className="text-sm font-semibold text-zinc-900">
-            Finished Goods Batches Consumed
-          </h3>
-          <p className="mt-0.5 text-xs text-zinc-500">
-            Frozen FIFO consumption layers from confirmation.
-          </p>
-        </div>
-        {layers.length === 0 ? (
-          <p className="px-4 py-4 text-sm text-zinc-500">
-            {cogsError
-              ? "Batch consumption is unavailable for this sale."
-              : "No Finished Goods consumption layers are recorded for this sale."}
-          </p>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-zinc-200 text-sm">
-              <thead className="bg-zinc-50 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
-                <tr>
-                  <th className="px-4 py-3">Batch</th>
-                  <th className="px-4 py-3">Quantity</th>
-                  <th className="px-4 py-3">Unit Cost</th>
-                  <th className="px-4 py-3">Layer Cost</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-zinc-100">
-                {layers.map((layer) => (
-                  <tr key={layer.consumption_id}>
-                    <td className="px-4 py-3 font-medium text-zinc-900">
-                      {layer.source === "ingredient"
-                        ? (layer.ingredient_name ?? "Ingredient")
-                        : layer.batch_number !== null
-                          ? `#${layer.batch_number}`
-                          : (layer.production_batch_id?.slice(0, 8) ?? "—")}
-                    </td>
-                    <td className="px-4 py-3 text-zinc-800">
-                      {formatQuantity(layer.quantity)}
-                    </td>
-                    <td className="px-4 py-3 text-zinc-800">
-                      {formatUnitCost(layer.unit_cost)}
-                    </td>
-                    <td className="px-4 py-3 text-zinc-800">
-                      {formatSaleMoney(layer.total_cost)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+      {showCosts ? (
+        <div
+          className="overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-sm"
+          data-testid="review-consumed-batches"
+        >
+          <div className="border-b border-zinc-200 px-4 py-3">
+            <h3 className="text-sm font-semibold text-zinc-900">
+              Finished Goods Batches Consumed
+            </h3>
+            <p className="mt-0.5 text-xs text-zinc-500">
+              Frozen FIFO consumption layers from confirmation.
+            </p>
           </div>
-        )}
-      </div>
+          {layers.length === 0 ? (
+            <p className="px-4 py-4 text-sm text-zinc-500">
+              {cogsError
+                ? "Batch consumption is unavailable for this sale."
+                : "No Finished Goods consumption layers are recorded for this sale."}
+            </p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-zinc-200 text-sm">
+                <thead className="bg-zinc-50 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                  <tr>
+                    <th className="px-4 py-3">Batch</th>
+                    <th className="px-4 py-3">Quantity</th>
+                    <th className="px-4 py-3">Unit Cost</th>
+                    <th className="px-4 py-3">Layer Cost</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-zinc-100">
+                  {layers.map((layer) => (
+                    <tr key={layer.consumption_id}>
+                      <td className="px-4 py-3 font-medium text-zinc-900">
+                        {layer.source === "ingredient"
+                          ? (layer.ingredient_name ?? "Ingredient")
+                          : layer.batch_number !== null
+                            ? `#${layer.batch_number}`
+                            : (layer.production_batch_id?.slice(0, 8) ?? "—")}
+                      </td>
+                      <td className="px-4 py-3 text-zinc-800">
+                        {formatQuantity(layer.quantity)}
+                      </td>
+                      <td className="px-4 py-3 text-zinc-800">
+                        {formatUnitCost(layer.unit_cost)}
+                      </td>
+                      <td className="px-4 py-3 text-zinc-800">
+                        {formatSaleMoney(layer.total_cost)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      ) : null}
     </div>
   );
 }

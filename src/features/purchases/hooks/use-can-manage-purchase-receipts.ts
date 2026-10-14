@@ -1,40 +1,30 @@
 "use client";
 
-import { useCallback, useState } from "react";
-import { authService } from "@/features/auth/services/auth-service";
-import { useAsyncEffect } from "@/hooks/use-async-effect";
-import { canManagePurchaseReceipts } from "../types/purchase-receipt";
+import { useRole } from "@/hooks/use-role";
+import { canAccessPath } from "@/lib/navigation";
 
 export type PurchaseReceiptAccessStatus = "loading" | "allowed" | "denied" | "error";
 
+const PURCHASE_RECEIPTS_PATH = "/purchases/receipts";
+
+/**
+ * Same rule as the Receipts page (route table, src/lib/navigation.ts). The
+ * API routes check the role again on the server (canManagePurchaseReceipts).
+ */
 export function useCanManagePurchaseReceipts(): {
   status: PurchaseReceiptAccessStatus;
   retry: () => void;
 } {
-  const [status, setStatus] = useState<PurchaseReceiptAccessStatus>("loading");
-  const [attempt, setAttempt] = useState(0);
+  const { role, loading, reload } = useRole();
 
-  const loadRole = useCallback(async () => {
-    setStatus("loading");
-    try {
-      const role = await authService.getMyRole();
-      if (typeof role !== "string" || role.length === 0) {
-        setStatus("error");
-        return;
-      }
-      setStatus(canManagePurchaseReceipts(role) ? "allowed" : "denied");
-    } catch {
-      setStatus("error");
-    }
-  }, []);
-
-  useAsyncEffect(() => {
-    void loadRole();
-  }, [loadRole, attempt]);
-
-  const retry = useCallback(() => {
-    setAttempt((current) => current + 1);
-  }, []);
-
-  return { status, retry };
+  if (loading) {
+    return { status: "loading", retry: reload };
+  }
+  if (role === null) {
+    return { status: "error", retry: reload };
+  }
+  return {
+    status: canAccessPath(PURCHASE_RECEIPTS_PATH, role) ? "allowed" : "denied",
+    retry: reload,
+  };
 }

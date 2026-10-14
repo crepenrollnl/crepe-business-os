@@ -3,8 +3,9 @@ import type { RecipeListItem } from "../types/recipe";
 type RecipeRowProps = {
   item: RecipeListItem;
   onView: (item: RecipeListItem) => void;
-  onEdit: (item: RecipeListItem) => void;
-  onDelete: (item: RecipeListItem) => void;
+  /** Omitted for sellers (view only). */
+  onEdit?: (item: RecipeListItem) => void;
+  onDelete?: (item: RecipeListItem) => void;
 };
 
 function formatYield(item: RecipeListItem): string {
@@ -50,20 +51,24 @@ export function RecipeRow({ item, onView, onEdit, onDelete }: RecipeRowProps) {
           >
             View
           </button>
-          <button
-            type="button"
-            onClick={() => onEdit(item)}
-            className="rounded-lg px-3 py-1.5 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-900"
-          >
-            Edit
-          </button>
-          <button
-            type="button"
-            onClick={() => onDelete(item)}
-            className="rounded-lg px-3 py-1.5 text-sm font-medium text-red-600 transition-colors hover:bg-red-50 hover:text-red-700"
-          >
-            Delete
-          </button>
+          {onEdit ? (
+            <button
+              type="button"
+              onClick={() => onEdit(item)}
+              className="rounded-lg px-3 py-1.5 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-900"
+            >
+              Edit
+            </button>
+          ) : null}
+          {onDelete ? (
+            <button
+              type="button"
+              onClick={() => onDelete(item)}
+              className="rounded-lg px-3 py-1.5 text-sm font-medium text-red-600 transition-colors hover:bg-red-50 hover:text-red-700"
+            >
+              Delete
+            </button>
+          ) : null}
         </div>
       </td>
     </tr>

@@ -1,21 +1,20 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import { authService } from "@/features/auth/services/auth-service";
+import { useRole } from "@/hooks/use-role";
 import { useAsyncEffect } from "@/hooks/use-async-effect";
-import { isNavItemVisible, navItems } from "@/lib/navigation";
+import { canAccessPath } from "@/lib/navigation";
 import { postingFailuresService } from "../services/posting-failures-service";
 import type { PostingFailure } from "../types/posting-failure";
 
 const POSTING_FAILURES_HREF = "/reports/posting-failures";
 
 /**
- * Same role rule as the sidebar link (src/lib/navigation.ts), so the page and
- * the menu never disagree about who may see posting failures.
+ * Same route table as the sidebar and the page guard (src/lib/navigation.ts),
+ * so the page and the menu never disagree about who may see posting failures.
  */
 function canViewPostingFailures(role: string | null): boolean {
-  const item = navItems.find((navItem) => navItem.href === POSTING_FAILURES_HREF);
-  return item ? isNavItemVisible(item, role) : false;
+  return canAccessPath(POSTING_FAILURES_HREF, role);
 }
 
 export type PostingFailuresAccess = "loading" | "allowed" | "denied";
@@ -24,12 +23,18 @@ export function usePostingFailures() {
   const [items, setItems] = useState<PostingFailure[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [access, setAccess] = useState<PostingFailuresAccess>("loading");
   const [resolvingId, setResolvingId] = useState<string | null>(null);
   const [repostingId, setRepostingId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [rowErrors, setRowErrors] = useState<Record<string, string>>({});
   const [notice, setNotice] = useState<string | null>(null);
+  const { role, loading: roleLoading } = useRole();
+  const allowed = canViewPostingFailures(role);
+  const access: PostingFailuresAccess = roleLoading
+    ? "loading"
+    : allowed
+      ? "allowed"
+      : "denied";
 
   const fetchList = useCallback(async () => {
     const result = await postingFailuresService.listUnresolved();
@@ -45,22 +50,23 @@ export function usePostingFailures() {
   }, []);
 
   const load = useCallback(async () => {
+    if (roleLoading) {
+      return;
+    }
+
     setLoading(true);
     setActionError(null);
 
-    const role = await authService.getMyRole();
-    if (!canViewPostingFailures(role)) {
-      setAccess("denied");
+    if (!allowed) {
       setItems([]);
       setError(null);
       setLoading(false);
       return;
     }
 
-    setAccess("allowed");
     await fetchList();
     setLoading(false);
-  }, [fetchList]);
+  }, [allowed, fetchList, roleLoading]);
 
   useAsyncEffect(load, [load]);
 

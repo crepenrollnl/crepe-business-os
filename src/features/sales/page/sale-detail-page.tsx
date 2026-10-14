@@ -45,6 +45,7 @@ export function SaleDetailPage({ saleId }: SaleDetailPageProps) {
     profitError,
     accountingPostingStatus,
     showAccountingStatus,
+    showCosts,
     reviewLoading,
     addSaleLine,
     updateSaleLine,
@@ -188,6 +189,7 @@ export function SaleDetailPage({ saleId }: SaleDetailPageProps) {
                 profitSummary={profitSummary}
                 accountingPostingStatus={accountingPostingStatus}
                 showAccountingStatus={showAccountingStatus}
+                showCosts={showCosts}
                 warning={warning}
                 cogsError={cogsError}
                 profitError={profitError}
@@ -205,16 +207,20 @@ export function SaleDetailPage({ saleId }: SaleDetailPageProps) {
                   This sale is locked. Line items and commercial totals cannot be
                   changed.
                 </div>
-                <SaleCogsSection
-                  summary={cogsSummary}
-                  loading={cogsLoading}
-                  error={cogsError}
-                />
-                <SaleProfitSection
-                  summary={profitSummary}
-                  loading={profitLoading}
-                  error={profitError}
-                />
+                {showCosts ? (
+                  <>
+                    <SaleCogsSection
+                      summary={cogsSummary}
+                      loading={cogsLoading}
+                      error={cogsError}
+                    />
+                    <SaleProfitSection
+                      summary={profitSummary}
+                      loading={profitLoading}
+                      error={profitError}
+                    />
+                  </>
+                ) : null}
               </>
             ) : null}
 

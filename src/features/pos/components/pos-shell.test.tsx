@@ -4,8 +4,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
 import { PosShell } from "./pos-shell";
 
-const { getMyRole } = vi.hoisted(() => ({
-  getMyRole: vi.fn(),
+const { useRoleMock } = vi.hoisted(() => ({
+  useRoleMock: vi.fn(),
 }));
 
 vi.mock("next/link", () => ({
@@ -18,11 +18,13 @@ vi.mock("@/components/logout-button", () => ({
   LogoutButton: () => <button type="button">Logout</button>,
 }));
 
-vi.mock("@/features/auth/services/auth-service", () => ({
-  authService: {
-    getMyRole: () => getMyRole(),
-  },
+vi.mock("@/hooks/use-role", () => ({
+  useRole: () => useRoleMock(),
 }));
+
+function asRole(role: string | null) {
+  useRoleMock.mockReturnValue({ role, loading: false, reload: () => undefined });
+}
 
 function renderShell() {
   return render(
@@ -35,11 +37,11 @@ function renderShell() {
 describe("PosShell receipts link", () => {
   afterEach(() => {
     cleanup();
-    getMyRole.mockReset();
+    useRoleMock.mockReset();
   });
 
   it("shows Receipts to an owner", async () => {
-    getMyRole.mockResolvedValue("owner");
+    asRole("owner");
     renderShell();
 
     const link = await screen.findByRole("link", { name: "Receipts" });
@@ -47,25 +49,23 @@ describe("PosShell receipts link", () => {
   });
 
   it("shows Receipts to a partner", async () => {
-    getMyRole.mockResolvedValue("partner");
+    asRole("partner");
     renderShell();
 
     expect(await screen.findByRole("link", { name: "Receipts" })).toBeInTheDocument();
   });
 
-  it("hides Receipts from a seller", async () => {
-    let resolveRole: (role: string) => void = () => undefined;
-    getMyRole.mockImplementation(
-      () =>
-        new Promise<string>((resolve) => {
-          resolveRole = resolve;
-        }),
-    );
+  it("hides Receipts while the role is loading", () => {
+    useRoleMock.mockReturnValue({ role: null, loading: true, reload: () => undefined });
     renderShell();
 
     expect(screen.queryByRole("link", { name: "Receipts" })).not.toBeInTheDocument();
-    resolveRole("seller");
-    await waitFor(() => expect(getMyRole).toHaveBeenCalled());
+  });
+
+  it("hides Receipts from a seller", async () => {
+    asRole("seller");
+    renderShell();
+
     await waitFor(() => {
       expect(screen.getByRole("link", { name: "Back to OS" })).toBeInTheDocument();
     });

@@ -102,6 +102,7 @@ describe("SaleReviewSection (DEV-111)", () => {
         profitSummary={profitSummary()}
         accountingPostingStatus="posted"
         showAccountingStatus
+        showCosts
       />,
     );
 
@@ -173,6 +174,7 @@ describe("SaleReviewSection (DEV-111)", () => {
         profitSummary={profitSummary({ cogs: 10.15, gross_profit: 89.85 })}
         accountingPostingStatus="posted"
         showAccountingStatus
+        showCosts
       />,
     );
 
@@ -212,6 +214,7 @@ describe("SaleReviewSection (DEV-111)", () => {
         profitSummary={profitSummary()}
         accountingPostingStatus="pending"
         showAccountingStatus
+        showCosts
       />,
     );
 
@@ -230,6 +233,7 @@ describe("SaleReviewSection (DEV-111)", () => {
         profitError="Failed to load sale profit"
         accountingPostingStatus="pending"
         showAccountingStatus
+        showCosts
       />,
     );
 
@@ -267,6 +271,7 @@ describe("SaleReviewSection (DEV-111)", () => {
         })}
         accountingPostingStatus="posted"
         showAccountingStatus
+        showCosts
       />,
     );
 
@@ -293,6 +298,7 @@ describe("SaleReviewSection (DEV-111)", () => {
         profitSummary={profitSummary()}
         accountingPostingStatus="pending"
         showAccountingStatus
+        showCosts
         warning="Sale confirmed, but it could not be reloaded: Statement timeout."
       />,
     );
@@ -323,6 +329,35 @@ describe("SaleReviewSection (DEV-111)", () => {
     expect(screen.queryByText(/accounting posting status/i)).toBeNull();
   });
 
+  it("shows a seller no COGS, profit, margin or batch costs (S4/U5)", () => {
+    render(
+      <SaleReviewSection
+        sale={sale()}
+        cogsSummary={cogsSummary()}
+        profitSummary={profitSummary()}
+        accountingPostingStatus="posted"
+        cogsError="COGS missing"
+        profitError="Profit missing"
+      />,
+    );
+
+    expect(screen.getByTestId("review-sale-total")).toBeInTheDocument();
+    expect(screen.getByTestId("review-net-revenue")).toBeInTheDocument();
+    expect(screen.getByTestId("review-vat")).toBeInTheDocument();
+    for (const id of [
+      "review-cogs",
+      "review-gross-profit",
+      "review-gross-margin",
+      "review-consumed-batches",
+      "review-missing-cogs",
+      "review-missing-profit",
+      "review-accounting-status",
+    ]) {
+      expect(screen.queryByTestId(id)).not.toBeInTheDocument();
+    }
+    expect(screen.queryByText(/cogs|profit|margin|unit cost/i)).toBeNull();
+  });
+
   it("shows typed discount and resolved amount on a completed sale", () => {
     render(
       <SaleReviewSection
@@ -338,6 +373,7 @@ describe("SaleReviewSection (DEV-111)", () => {
         profitSummary={profitSummary({ net_revenue: 18 })}
         accountingPostingStatus="posted"
         showAccountingStatus
+        showCosts
       />,
     );
 

@@ -1,35 +1,23 @@
 "use client";
 
-import { useCallback, useState } from "react";
-import { authService } from "@/features/auth/services/auth-service";
-import { useAsyncEffect } from "@/hooks/use-async-effect";
+import { useRole } from "@/hooks/use-role";
+import { canAccessPath } from "@/lib/navigation";
 
 export type PosReceiptsAccessStatus = "loading" | "allowed" | "denied" | "error";
 
-function canOpenPurchaseReceipts(role: string): boolean {
-  return role === "owner" || role === "partner";
-}
+const PURCHASE_RECEIPTS_PATH = "/purchases/receipts";
 
+/** Same rule as the Receipts page itself (route table, src/lib/navigation.ts). */
 export function useCanOpenPurchaseReceipts(): { status: PosReceiptsAccessStatus } {
-  const [status, setStatus] = useState<PosReceiptsAccessStatus>("loading");
+  const { role, loading } = useRole();
 
-  const loadRole = useCallback(async () => {
-    setStatus("loading");
-    try {
-      const role = await authService.getMyRole();
-      if (typeof role !== "string" || role.length === 0) {
-        setStatus("error");
-        return;
-      }
-      setStatus(canOpenPurchaseReceipts(role) ? "allowed" : "denied");
-    } catch {
-      setStatus("error");
-    }
-  }, []);
-
-  useAsyncEffect(() => {
-    void loadRole();
-  }, [loadRole]);
-
-  return { status };
+  if (loading) {
+    return { status: "loading" };
+  }
+  if (role === null) {
+    return { status: "error" };
+  }
+  return {
+    status: canAccessPath(PURCHASE_RECEIPTS_PATH, role) ? "allowed" : "denied",
+  };
 }

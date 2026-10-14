@@ -29,10 +29,8 @@ vi.mock("../services/purchase-tax-service", () => ({
   },
 }));
 
-vi.mock("@/features/auth/services/auth-service", () => ({
-  authService: {
-    getMyRole: () => Promise.resolve("seller"),
-  },
+vi.mock("@/hooks/use-role", () => ({
+  useRole: () => ({ role: "seller", loading: false, reload: () => undefined }),
 }));
 
 vi.mock("../services/purchase-receipt-service", () => ({

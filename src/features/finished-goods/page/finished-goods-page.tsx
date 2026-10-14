@@ -1,6 +1,8 @@
 "use client";
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
+import { useRole } from "@/hooks/use-role";
+import { canSeeCosts } from "@/lib/roles";
 import { FinishedGoodsTable } from "../components/finished-goods-table";
 import { FinishedGoodsToolbar } from "../components/finished-goods-toolbar";
 import { useFinishedGoods } from "../hooks/use-finished-goods";
@@ -32,6 +34,10 @@ export function FinishedGoodsPage({
     totalPages,
     retry,
   } = useFinishedGoods();
+  // Sellers see available quantities only — no unit cost, no stock value,
+  // no write-off action.
+  const { role } = useRole();
+  const showCosts = canSeeCosts(role);
 
   const content = (
     <div className="mx-auto max-w-7xl space-y-8">
@@ -48,6 +54,7 @@ export function FinishedGoodsPage({
       <FinishedGoodsToolbar search={search} onSearchChange={setSearch} />
 
       <FinishedGoodsTable
+        showCosts={showCosts}
         items={items}
         totalCount={totalCount}
         filteredCount={filteredCount}

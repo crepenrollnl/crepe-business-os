@@ -3,7 +3,8 @@ import { SearchBox } from "./search-box";
 type RecipesToolbarProps = {
   search: string;
   onSearchChange: (value: string) => void;
-  onCreateClick: () => void;
+  /** Omitted for sellers (view only): no "Create Recipe" button. */
+  onCreateClick?: () => void;
 };
 
 export function RecipesToolbar({
@@ -17,13 +18,15 @@ export function RecipesToolbar({
         <SearchBox value={search} onChange={onSearchChange} />
       </div>
 
-      <button
-        type="button"
-        onClick={onCreateClick}
-        className="inline-flex shrink-0 items-center justify-center rounded-lg bg-amber-500 px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-amber-600"
-      >
-        + Create Recipe
-      </button>
+      {onCreateClick ? (
+        <button
+          type="button"
+          onClick={onCreateClick}
+          className="inline-flex shrink-0 items-center justify-center rounded-lg bg-amber-500 px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-amber-600"
+        >
+          + Create Recipe
+        </button>
+      ) : null}
     </div>
   );
 }

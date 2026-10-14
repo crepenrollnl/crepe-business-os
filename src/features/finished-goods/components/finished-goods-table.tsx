@@ -11,6 +11,8 @@ import { formatFinishedGoodsAvailable } from "../utils/format-finished-goods";
 import { FinishedGoodsPagination } from "./finished-goods-pagination";
 
 const COLUMN_COUNT = 6;
+/** Seller view: Product, Available Quantity, Newest Batch. */
+const QUANTITIES_ONLY_COLUMN_COUNT = 3;
 
 type FinishedGoodsTableProps = {
   items: FinishedGoodsListRow[];
@@ -28,14 +30,19 @@ type FinishedGoodsTableProps = {
   onRetry: () => void;
   onPageChange: (page: number) => void;
   onPageSizeChange: (pageSize: number) => void;
+  /**
+   * False for sellers: no Avg Unit Cost, Remaining Value or write-off
+   * action. Defaults to true.
+   */
+  showCosts?: boolean;
 };
 
-function TableSkeleton() {
+function TableSkeleton({ columnCount }: { columnCount: number }) {
   return (
     <>
       {Array.from({ length: 5 }).map((_, index) => (
         <tr key={index} className="border-t border-zinc-200">
-          {Array.from({ length: COLUMN_COUNT }).map((__, cellIndex) => (
+          {Array.from({ length: columnCount }).map((__, cellIndex) => (
             <td key={cellIndex} className="px-4 py-4">
               <div className="h-4 animate-pulse rounded bg-zinc-200" />
             </td>
@@ -46,10 +53,16 @@ function TableSkeleton() {
   );
 }
 
-function EmptyState({ hasActiveFilters }: { hasActiveFilters: boolean }) {
+function EmptyState({
+  hasActiveFilters,
+  columnCount,
+}: {
+  hasActiveFilters: boolean;
+  columnCount: number;
+}) {
   return (
     <tr>
-      <td colSpan={COLUMN_COUNT} className="px-4 py-16 text-center">
+      <td colSpan={columnCount} className="px-4 py-16 text-center">
         <div className="mx-auto max-w-sm">
           <p className="text-base font-medium text-zinc-900">
             {hasActiveFilters
@@ -133,7 +146,9 @@ export function FinishedGoodsTable({
   onRetry,
   onPageChange,
   onPageSizeChange,
+  showCosts = true,
 }: FinishedGoodsTableProps) {
+  const columnCount = showCosts ? COLUMN_COUNT : QUANTITIES_ONLY_COLUMN_COUNT;
   if (error) {
     return (
       <div className="rounded-xl border border-red-200 bg-red-50 p-8 text-center">
@@ -173,22 +188,26 @@ export function FinishedGoodsTable({
                 align="right"
                 onSort={onSort}
               />
-              <SortableHeader
-                label="Avg Unit Cost"
-                field="average_unit_cost"
-                sortField={sortField}
-                sortDirection={sortDirection}
-                align="right"
-                onSort={onSort}
-              />
-              <SortableHeader
-                label="Remaining Value"
-                field="remaining_value"
-                sortField={sortField}
-                sortDirection={sortDirection}
-                align="right"
-                onSort={onSort}
-              />
+              {showCosts && (
+                <SortableHeader
+                  label="Avg Unit Cost"
+                  field="average_unit_cost"
+                  sortField={sortField}
+                  sortDirection={sortDirection}
+                  align="right"
+                  onSort={onSort}
+                />
+              )}
+              {showCosts && (
+                <SortableHeader
+                  label="Remaining Value"
+                  field="remaining_value"
+                  sortField={sortField}
+                  sortDirection={sortDirection}
+                  align="right"
+                  onSort={onSort}
+                />
+              )}
               <SortableHeader
                 label="Newest Batch"
                 field="newest_batch_at"
@@ -196,17 +215,20 @@ export function FinishedGoodsTable({
                 sortDirection={sortDirection}
                 onSort={onSort}
               />
-              <th className="px-4 py-3 text-right text-sm font-semibold text-zinc-700">
-                Actions
-              </th>
+              {showCosts && (
+                <th className="px-4 py-3 text-right text-sm font-semibold text-zinc-700">
+                  Actions
+                </th>
+              )}
             </tr>
           </thead>
           <tbody>
             {loading ? (
-              <TableSkeleton />
+              <TableSkeleton columnCount={columnCount} />
             ) : items.length === 0 ? (
               <EmptyState
                 hasActiveFilters={hasActiveFilters && totalCount > 0}
+                columnCount={columnCount}
               />
             ) : (
               items.map((item) => (
@@ -223,27 +245,33 @@ export function FinishedGoodsTable({
                       item.yield_unit,
                     )}
                   </td>
-                  <td className="px-4 py-4 text-right text-zinc-700">
-                    {item.average_unit_cost === null
-                      ? "—"
-                      : formatUnitCost(item.average_unit_cost)}
-                  </td>
-                  <td className="px-4 py-4 text-right text-zinc-700">
-                    {item.remaining_value === null
-                      ? "—"
-                      : formatMoney(item.remaining_value)}
-                  </td>
+                  {showCosts && (
+                    <td className="px-4 py-4 text-right text-zinc-700">
+                      {item.average_unit_cost === null
+                        ? "—"
+                        : formatUnitCost(item.average_unit_cost)}
+                    </td>
+                  )}
+                  {showCosts && (
+                    <td className="px-4 py-4 text-right text-zinc-700">
+                      {item.remaining_value === null
+                        ? "—"
+                        : formatMoney(item.remaining_value)}
+                    </td>
+                  )}
                   <td className="px-4 py-4 text-zinc-700">
                     {formatDate(item.newest_batch_at)}
                   </td>
-                  <td className="px-4 py-4 text-right">
-                    <Link
-                      href={writeOffPrefillHref("finished_good", item.product_id)}
-                      className="rounded-lg px-3 py-1.5 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-900"
-                    >
-                      Write off
-                    </Link>
-                  </td>
+                  {showCosts && (
+                    <td className="px-4 py-4 text-right">
+                      <Link
+                        href={writeOffPrefillHref("finished_good", item.product_id)}
+                        className="rounded-lg px-3 py-1.5 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-900"
+                      >
+                        Write off
+                      </Link>
+                    </td>
+                  )}
                 </tr>
               ))
             )}

@@ -1,8 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { authService } from "@/features/auth/services/auth-service";
-import { useAsyncEffect } from "@/hooks/use-async-effect";
+import { useCallback, useEffect, useState } from "react";
+import { useRole } from "@/hooks/use-role";
+import { canSeeCosts } from "@/lib/roles";
 import { saleAccountingService } from "../services/sale-accounting-service";
 import { saleCogsService } from "../services/sale-cogs-service";
 import { saleProfitService } from "../services/sale-profit-service";
@@ -17,11 +17,6 @@ import {
   reconcileCompletedSaleReview,
   type CompletedSaleReviewRead,
 } from "../utils/completed-sale-review-builder";
-
-/** Only owner/partner see accounting (journal) status; sellers never do. */
-function canSeeSaleAccounting(role: string | null): boolean {
-  return role === "owner" || role === "partner";
-}
 
 function isCompletedSale(sale: SaleDetail | null): boolean {
   return sale?.status === "confirmed" || sale?.status === "paid";
@@ -47,23 +42,14 @@ export function useSale(saleId: string) {
   const [accountingPostingStatus, setAccountingPostingStatus] =
     useState<SaleAccountingPostingStatus>("pending");
   const [reviewLoading, setReviewLoading] = useState(false);
-  const [showAccountingStatus, setShowAccountingStatus] = useState(false);
 
   /**
-   * The viewer's role, read once (get_my_role). Gates the journal-status
-   * read below so a seller never queries or sees accounting state.
+   * Only owner/partner see COGS, profit and the accounting (journal) status.
+   * For a seller none of these is requested at all — no COGS read, no
+   * verify_sale_cost_and_profit, no journal read.
    */
-  const rolePromiseRef = useRef<Promise<string | null> | null>(null);
-  const getRole = useCallback(() => {
-    rolePromiseRef.current ??= authService.getMyRole();
-    return rolePromiseRef.current;
-  }, []);
-
-  const loadAccountingVisibility = useCallback(async () => {
-    setShowAccountingStatus(canSeeSaleAccounting(await getRole()));
-  }, [getRole]);
-
-  useAsyncEffect(loadAccountingVisibility, [loadAccountingVisibility]);
+  const { role } = useRole();
+  const showCosts = canSeeCosts(role);
 
   /**
    * Loads COGS on its own but does not commit it to state — the sale
@@ -139,7 +125,7 @@ export function useSale(saleId: string) {
   );
 
   const loadAccountingStatus = useCallback(async (detail: SaleDetail) => {
-    if (!isCompletedSale(detail) || !canSeeSaleAccounting(await getRole())) {
+    if (!isCompletedSale(detail)) {
       setAccountingPostingStatus("pending");
       return;
     }
@@ -148,14 +134,14 @@ export function useSale(saleId: string) {
       detail.sale_id,
     );
     setAccountingPostingStatus(result.data ?? "pending");
-  }, [getRole]);
+  }, []);
 
   const loadCompletedReview = useCallback(
     async (
       detail: SaleDetail,
       options?: { registerProfitGeneration?: boolean },
     ) => {
-      if (!isCompletedSale(detail)) {
+      if (!isCompletedSale(detail) || !showCosts) {
         setCogsSummary(null);
         setCogsError(null);
         setProfitSummary(null);
@@ -184,7 +170,7 @@ export function useSale(saleId: string) {
       setProfitError(resolved.profitError);
       setReviewLoading(false);
     },
-    [loadAccountingStatus, loadCogs, loadProfit],
+    [loadAccountingStatus, loadCogs, loadProfit, showCosts],
   );
 
   const loadSale = useCallback(async () => {
@@ -403,7 +389,8 @@ export function useSale(saleId: string) {
     profitLoading,
     profitError,
     accountingPostingStatus,
-    showAccountingStatus,
+    showAccountingStatus: showCosts,
+    showCosts,
     reviewLoading,
     addSaleLine,
     updateSaleLine,
