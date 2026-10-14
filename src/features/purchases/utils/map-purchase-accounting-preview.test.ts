@@ -1,162 +1,21 @@
 /**
  * Accounting Preview mapping coverage (DEV-101).
+ *
+ * Since sql/150 the database posts the purchase journal from the stored
+ * totals; the preview shows exactly those totals.
  */
 
 import { describe, expect, it } from "vitest";
-import type {
-  PurchaseJournalPosting,
-  PurchaseJournalProposal,
-} from "../types/purchase-accounting";
-import type { PurchaseTaxResult } from "../types/purchase-tax";
-import type { PurchaseWithRelations } from "../types/purchase";
-import {
-  mapPurchaseJournalPostingToPreview,
-  mapPurchaseJournalProposalToPreview,
-  mapPurchaseTotalsToAccountingPreview,
-} from "./map-purchase-accounting-preview";
+import { mapPurchaseTotalsToAccountingPreview } from "./map-purchase-accounting-preview";
 
-function purchase(): PurchaseWithRelations {
-  return {
-    id: "purchase-1",
-    supplier_id: "supplier-1",
-    status: "received",
-    invoice_number: "INV-1",
-    notes: null,
-    subtotal: 100,
-    tax_total: 21,
-    total: 121,
-    currency: "EUR",
-    purchased_at: "2026-07-26T09:00:00.000Z",
-    transaction_id: "txn-1",
-    production_plan_id: null,
-    tax_country: null,
-    supplier_country: null,
-    created_at: "2026-07-26T09:00:00.000Z",
-    supplier: { id: "supplier-1", name: "Dairy Co" },
-    items: [],
-  };
-}
-
-function tax(): PurchaseTaxResult {
-  return {
-    document_id: "purchase-1",
-    mode: "calculate",
-    is_valid: true,
-    subtotal: 100,
-    tax_total: 21,
-    grand_total: 121,
-    effective_tax_rate: 0.21,
-    lines: [],
-    warnings: [],
-    tax_result: {
-      currency: "EUR",
-      breakdown: { lines: [] },
-    },
-  };
-}
-
-function proposal(): PurchaseJournalProposal {
-  return {
-    purchase: purchase(),
-    business_event_id: "evt-1",
-    tax: tax(),
-    journalProposal: {
-      event_id: "evt-1",
-      rule_id: "posting-rule-purchase-received-v1",
-      rule_version: 2,
-      rule_priority: 100,
-      journal_entry: {
-        id: "je-1",
-        business_event_id: "evt-1",
-        transaction_id: "txn-1",
-        fiscal_period_id: "period-1",
-        entry_date: "2026-07-26",
-        memo: null,
-        status: "posted",
-        posting_number: null,
-        transaction_currency: "EUR",
-        base_currency: "EUR",
-        exchange_rate: 1,
-        reversal_of_journal_entry_id: null,
-        posted_at: null,
-        created_at: "2026-07-26T12:00:00.000Z",
-      },
-      journal_lines: [
-        {
-          id: "jl-1",
-          journal_entry_id: "je-1",
-          line_no: 1,
-          account_id: "acct-inventory",
-          description: "Inventory",
-          debit_transaction: 100,
-          credit_transaction: 0,
-          debit_base: 100,
-          credit_base: 0,
-          tax_code: null,
-        },
-        {
-          id: "jl-2",
-          journal_entry_id: "je-1",
-          line_no: 2,
-          account_id: "acct-vat",
-          description: "Recoverable tax",
-          debit_transaction: 21,
-          credit_transaction: 0,
-          debit_base: 21,
-          credit_base: 0,
-          tax_code: null,
-        },
-        {
-          id: "jl-3",
-          journal_entry_id: "je-1",
-          line_no: 3,
-          account_id: "acct-cash",
-          description: "Cash / Bank",
-          debit_transaction: 0,
-          credit_transaction: 121,
-          debit_base: 0,
-          credit_base: 121,
-          tax_code: null,
-        },
-      ],
-      ledger_entries: [],
-    },
-  };
-}
-
-function posting(): PurchaseJournalPosting {
-  return {
-    ...proposal(),
-    posted_journal: {
-      journal_entry: {
-        id: "je-1",
-        business_event_id: "evt-1",
-        transaction_id: "txn-1",
-        fiscal_period_id: "period-1",
-        entry_date: "2026-07-26",
-        memo: null,
-        status: "posted",
-        posting_number: "JE-2026-000001",
-        transaction_currency: "EUR",
-        base_currency: "EUR",
-        exchange_rate: 1,
-        reversal_of_journal_entry_id: null,
-        posted_at: "2026-07-26T12:00:00.000Z",
-        created_at: "2026-07-26T12:00:00.000Z",
-      },
-      journal_lines: [],
-      ledger_entries: [],
-      posting_number: "JE-2026-000001",
-      posting_date: "2026-07-26",
-      fiscal_period_id: "period-1",
-    },
-    posting_status: "posted_now",
-  };
-}
-
-describe("mapPurchaseAccountingPreview (DEV-101)", () => {
+describe("mapPurchaseTotalsToAccountingPreview (DEV-101)", () => {
   it("maps document totals without a journal proposal", () => {
-    const preview = mapPurchaseTotalsToAccountingPreview(purchase());
+    const preview = mapPurchaseTotalsToAccountingPreview({
+      subtotal: 100,
+      tax_total: 21,
+      total: 121,
+      currency: "EUR",
+    });
 
     expect(preview).toEqual({
       net_amount: 100,
@@ -169,59 +28,27 @@ describe("mapPurchaseAccountingPreview (DEV-101)", () => {
     });
   });
 
-  it("maps an existing journal proposal into display lines", () => {
-    const preview = mapPurchaseJournalProposalToPreview(proposal());
+  it("shows the same amounts the database posts (net, VAT, net + VAT)", () => {
+    const stored = { subtotal: 38.47, tax_total: 3.46, total: 41.93, currency: "EUR" };
 
-    expect(preview.has_proposal).toBe(true);
-    expect(preview.net_amount).toBe(100);
-    expect(preview.tax_total).toBe(21);
-    expect(preview.grand_total).toBe(121);
-    expect(preview.lines).toEqual([
-      {
-        account_role: "inventory_asset",
-        debit: 100,
-        credit: 0,
-        currency: "EUR",
-      },
-      {
-        account_role: "vat_input",
-        debit: 21,
-        credit: 0,
-        currency: "EUR",
-      },
-      {
-        account_role: "cash",
-        debit: 0,
-        credit: 121,
-        currency: "EUR",
-      },
-    ]);
+    const preview = mapPurchaseTotalsToAccountingPreview(stored);
+
+    // sql/150: Dr inventory = subtotal, Dr vat_input = tax_total,
+    // Cr cash = subtotal + tax_total (purchases.total is that same sum).
+    expect(preview.net_amount).toBe(stored.subtotal);
+    expect(preview.tax_total).toBe(stored.tax_total);
+    expect(preview.grand_total).toBe(stored.subtotal + stored.tax_total);
   });
 
-  it("maps a persisted journal posting with status posted", () => {
-    const preview = mapPurchaseJournalPostingToPreview(posting());
+  it("maps a zero-VAT purchase (the database posts no VAT line)", () => {
+    const preview = mapPurchaseTotalsToAccountingPreview({
+      subtotal: 50,
+      tax_total: 0,
+      total: 50,
+      currency: "EUR",
+    });
 
-    expect(preview.status).toBe("posted");
-    expect(preview.has_proposal).toBe(true);
-    expect(preview.lines).toEqual([
-      {
-        account_role: "inventory_asset",
-        debit: 100,
-        credit: 0,
-        currency: "EUR",
-      },
-      {
-        account_role: "vat_input",
-        debit: 21,
-        credit: 0,
-        currency: "EUR",
-      },
-      {
-        account_role: "cash",
-        debit: 0,
-        credit: 121,
-        currency: "EUR",
-      },
-    ]);
+    expect(preview.tax_total).toBe(0);
+    expect(preview.grand_total).toBe(preview.net_amount);
   });
 });

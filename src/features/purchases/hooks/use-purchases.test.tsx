@@ -12,12 +12,10 @@ const {
   getPurchaseById,
   saveDraft,
   receivePurchase,
-  receivePurchaseAndPostJournal,
   getUnassigned,
   linkToPurchase,
   calculatePurchaseTaxes,
   getCurrentAccountingContext,
-  reportSkippedPosting,
 } = vi.hoisted(() => ({
   getPurchases: vi.fn(),
   getSuppliers: vi.fn(),
@@ -25,12 +23,10 @@ const {
   getPurchaseById: vi.fn(),
   saveDraft: vi.fn(),
   receivePurchase: vi.fn(),
-  receivePurchaseAndPostJournal: vi.fn(),
   getUnassigned: vi.fn(),
   linkToPurchase: vi.fn(),
   calculatePurchaseTaxes: vi.fn(),
   getCurrentAccountingContext: vi.fn(),
-  reportSkippedPosting: vi.fn(),
 }));
 
 vi.mock("../services/purchase-service", () => ({
@@ -41,9 +37,6 @@ vi.mock("../services/purchase-service", () => ({
     getPurchaseById: (id: string) => getPurchaseById(id),
     saveDraft: (input: unknown) => saveDraft(input),
     receivePurchase: (input: unknown) => receivePurchase(input),
-    receivePurchaseAndPostJournal: (...args: unknown[]) =>
-      receivePurchaseAndPostJournal(...args),
-    reportSkippedPosting: (...args: unknown[]) => reportSkippedPosting(...args),
   },
 }));
 
@@ -61,6 +54,7 @@ vi.mock("../services/purchase-tax-service", () => ({
   },
 }));
 
+// Kept only to prove Receive never loads an accounting context (sql/150).
 vi.mock("@/features/accounting/services/accounting-context-service", () => ({
   accountingContextService: {
     getCurrentAccountingContext: () => getCurrentAccountingContext(),
@@ -159,10 +153,6 @@ describe("usePurchases from a receipt", () => {
     saveDraft.mockResolvedValue({ data: savedPurchase(), error: null });
     getPurchaseById.mockResolvedValue({ data: savedPurchase(), error: null });
     linkToPurchase.mockResolvedValue({ data: true, error: null });
-    getCurrentAccountingContext.mockResolvedValue({
-      data: null,
-      error: "No open fiscal period.",
-    });
   });
 
   afterEach(() => {
@@ -318,24 +308,7 @@ describe("usePurchases from a receipt", () => {
   });
 });
 
-describe("usePurchases.receiveGoods posting-failure recording (audit D1)", () => {
-  const ACCOUNTING_CONTEXT = {
-    fiscalPeriod: {
-      id: "period-1",
-      name: "FY2026",
-      start_date: "2026-01-01",
-      end_date: "2026-12-31",
-      status: "open",
-      closed_at: null,
-      created_at: "2026-01-01T00:00:00.000Z",
-    },
-    accountRoleBindings: [],
-    baseCurrency: "EUR",
-    transactionCurrency: "EUR",
-    exchangeRate: 1,
-    rateDate: "2026-10-05",
-  };
-
+describe("usePurchases.receiveGoods (sql/150: database posts the journal)", () => {
   beforeEach(() => {
     setUrl("");
     getPurchases.mockResolvedValue({ data: [], error: null });
@@ -368,45 +341,50 @@ describe("usePurchases.receiveGoods posting-failure recording (audit D1)", () =>
     return { result, received };
   }
 
-  it("records a purchase_receive posting failure once when the accounting context cannot be loaded", async () => {
-    getCurrentAccountingContext.mockResolvedValue({
-      data: null,
-      error: "No open fiscal period.",
-    });
+  it("receives through receivePurchase only and never loads an accounting context", async () => {
     receivePurchase.mockResolvedValue({ data: savedPurchase("received"), error: null });
 
     const { result, received } = await receiveNewPurchase();
 
     expect(received).toBe(true);
+    expect(receivePurchase).toHaveBeenCalledTimes(1);
+    expect(getCurrentAccountingContext).not.toHaveBeenCalled();
     expect(result.current.editingPurchase?.status).toBe("received");
-    expect(reportSkippedPosting).toHaveBeenCalledTimes(1);
-    expect(reportSkippedPosting).toHaveBeenCalledWith(
-      NEW_PURCHASE_ID,
-      "No open fiscal period.",
-    );
-    expect(result.current.postingError).toBe("No open fiscal period.");
+    expect(result.current.actionError).toBeNull();
+    expect("postingError" in result.current).toBe(false);
   });
 
-  it("does not record a second failure when the post itself fails (the service already did)", async () => {
-    getCurrentAccountingContext.mockResolvedValue({
-      data: ACCOUNTING_CONTEXT,
+  it("shows the stored totals as the accounting preview (what the database posts)", async () => {
+    receivePurchase.mockResolvedValue({
+      data: { ...savedPurchase("received"), subtotal: 100, tax_total: 21, total: 121 },
       error: null,
     });
-    receivePurchaseAndPostJournal.mockResolvedValue({
-      data: {
-        purchase: savedPurchase("received"),
-        posting: null,
-        postingError: "Purchase received but accounting posting failed.",
-      },
-      error: null,
+
+    const { result } = await receiveNewPurchase();
+
+    expect(result.current.accountingPreview).toEqual({
+      net_amount: 100,
+      tax_total: 21,
+      grand_total: 121,
+      currency: "EUR",
+      status: "draft_proposal",
+      has_proposal: false,
+      lines: [],
+    });
+  });
+
+  it("keeps the modal on the draft and surfaces actionError when the receive fails", async () => {
+    receivePurchase.mockResolvedValue({
+      data: null,
+      error: "This purchase has already been received.",
     });
 
     const { result, received } = await receiveNewPurchase();
 
-    expect(received).toBe(true);
-    expect(reportSkippedPosting).not.toHaveBeenCalled();
-    expect(result.current.postingError).toBe(
-      "Purchase received but accounting posting failed.",
+    expect(received).toBe(false);
+    expect(result.current.actionError).toBe(
+      "This purchase has already been received.",
     );
+    expect(result.current.accountingPreview).toBeNull();
   });
 });
