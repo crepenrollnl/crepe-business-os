@@ -9,6 +9,7 @@ import type {
   CreateIngredientInput,
   Ingredient,
   IngredientCategory,
+  IngredientStockLevel,
   IngredientWithRelations,
   Supplier,
   UpdateIngredientInput,
@@ -307,7 +308,81 @@ function getReferenceData(
   return result.data;
 }
 
+interface IngredientStockLevelRow {
+  id: string;
+  name: string;
+  category_id: string | null;
+  unit: string;
+  current_stock: number | string;
+  minimum_stock: number | string;
+  active: boolean | null;
+}
+
+const STOCK_LEVEL_SELECT =
+  "id, name, category_id, unit, current_stock, minimum_stock, active";
+
 export const inventoryService = {
+  /**
+   * Ingredient quantities WITHOUT cost or supplier (ingredient_stock_levels,
+   * sql/155). For every screen that only needs stock (POS, the seller's
+   * Inventory, recipe ingredient names), so they keep working after the
+   * ingredients table is closed to sellers (phase 2b).
+   */
+  async getStockLevels(): Promise<ServiceResult<IngredientStockLevel[]>> {
+    try {
+      const [levelsResult, categoriesResult] = await Promise.all([
+        supabase
+          .from("ingredient_stock_levels")
+          .select(STOCK_LEVEL_SELECT)
+          .order("name"),
+        supabase.from("ingredient_categories").select("id, name").order("name"),
+      ]);
+
+      if (levelsResult.error) {
+        return {
+          data: null,
+          error: toUserError(levelsResult.error, "Failed to load stock levels"),
+        };
+      }
+
+      if (categoriesResult.error) {
+        return {
+          data: null,
+          error: toUserError(categoriesResult.error, "Failed to load categories"),
+        };
+      }
+
+      const categoryMap = new Map(
+        ((categoriesResult.data as IngredientCategory[] | null) ?? []).map(
+          (category) => [category.id, category],
+        ),
+      );
+
+      return {
+        data: ((levelsResult.data as IngredientStockLevelRow[] | null) ?? []).map(
+          (row) => ({
+            id: row.id,
+            name: row.name,
+            category_id: row.category_id,
+            unit: row.unit,
+            current_stock: Number(row.current_stock),
+            minimum_stock: Number(row.minimum_stock),
+            active: row.active !== false,
+            category: row.category_id
+              ? (categoryMap.get(row.category_id) ?? null)
+              : null,
+          }),
+        ),
+        error: null,
+      };
+    } catch (error) {
+      return {
+        data: null,
+        error: toUserError(error, "Failed to load stock levels"),
+      };
+    }
+  },
+
   async getInventory(): Promise<ServiceResult<IngredientWithRelations[]>> {
     try {
       const referenceResult = getReferenceData(await fetchReferenceData());

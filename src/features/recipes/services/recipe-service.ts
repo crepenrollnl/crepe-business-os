@@ -407,12 +407,17 @@ function toRecipePayload(input: RecipeFormValues) {
   };
 }
 
+/**
+ * Ingredient names and units for recipes (picker, view, BOM). Read from the
+ * cost-free ingredient_stock_levels view (sql/155) for every role, so the
+ * seller's read-only recipe view never touches the ingredients table.
+ */
 async function fetchIngredients(): Promise<
   ServiceResult<RecipeIngredientOption[]>
 > {
   try {
     const { data, error } = await supabase
-      .from("ingredients")
+      .from("ingredient_stock_levels")
       .select("id, name, unit")
       .order("name");
 

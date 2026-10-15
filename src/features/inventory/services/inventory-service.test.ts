@@ -822,3 +822,64 @@ describe("inventoryService", () => {
     });
   });
 });
+
+describe("inventoryService.getStockLevels (sql/155, no costs)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("reads ingredient_stock_levels and categories only — never ingredients or suppliers", async () => {
+    mockTables({
+      ingredient_stock_levels: {
+        data: [
+          {
+            id: INGREDIENT_ID,
+            name: "Flour",
+            category_id: CATEGORY_ID,
+            unit: "kg",
+            current_stock: "10.500",
+            minimum_stock: "2",
+            active: true,
+          },
+        ],
+        error: null,
+      },
+      ingredient_categories: {
+        data: [{ id: CATEGORY_ID, name: "Baking" }],
+        error: null,
+      },
+    });
+
+    const result = await inventoryService.getStockLevels();
+
+    expect(result.error).toBeNull();
+    expect(result.data).toEqual([
+      {
+        id: INGREDIENT_ID,
+        name: "Flour",
+        category_id: CATEGORY_ID,
+        unit: "kg",
+        current_stock: 10.5,
+        minimum_stock: 2,
+        active: true,
+        category: { id: CATEGORY_ID, name: "Baking" },
+      },
+    ]);
+    const tables = supabaseMock.from.mock.calls.map(([table]) => table);
+    expect(tables).toContain("ingredient_stock_levels");
+    expect(tables).not.toContain("ingredients");
+    expect(tables).not.toContain("suppliers");
+    expect(result.data?.[0]).not.toHaveProperty("cost_per_unit");
+  });
+
+  it("returns the view error", async () => {
+    mockTables({
+      ingredient_stock_levels: { data: null, error: { message: "permission denied" } },
+    });
+
+    const result = await inventoryService.getStockLevels();
+
+    expect(result.data).toBeNull();
+    expect(result.error).toBe("permission denied");
+  });
+});

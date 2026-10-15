@@ -15,6 +15,10 @@ type FinishedGoodsPageProps = {
 export function FinishedGoodsPage({
   embedded = false,
 }: FinishedGoodsPageProps) {
+  // Sellers see available quantities only — no unit cost, no stock value,
+  // no write-off action — and their list is read without costs (sql/155).
+  const { role } = useRole();
+  const showCosts = canSeeCosts(role);
   const {
     items,
     totalCount,
@@ -33,11 +37,7 @@ export function FinishedGoodsPage({
     setPageSize,
     totalPages,
     retry,
-  } = useFinishedGoods();
-  // Sellers see available quantities only — no unit cost, no stock value,
-  // no write-off action.
-  const { role } = useRole();
-  const showCosts = canSeeCosts(role);
+  } = useFinishedGoods({ showCosts });
 
   const content = (
     <div className="mx-auto max-w-7xl space-y-8">
