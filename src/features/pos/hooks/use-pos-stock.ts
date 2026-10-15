@@ -2,11 +2,12 @@
 
 import { useCallback, useState } from "react";
 import { inventoryService } from "@/features/inventory/services/inventory-service";
-import type { IngredientWithRelations } from "@/features/inventory/types/inventory";
+import type { IngredientStockLevel } from "@/features/inventory/types/inventory";
 import { useAsyncEffect } from "@/hooks/use-async-effect";
 
+/** POS stock tab: quantities only (ingredient_stock_levels, sql/155). */
 export function usePosStock() {
-  const [items, setItems] = useState<IngredientWithRelations[]>([]);
+  const [items, setItems] = useState<IngredientStockLevel[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -14,7 +15,7 @@ export function usePosStock() {
     setLoading(true);
     setError(null);
 
-    const result = await inventoryService.getInventory();
+    const result = await inventoryService.getStockLevels();
 
     if (result.error || !result.data) {
       setItems([]);

@@ -13,8 +13,6 @@ type InventoryRowProps = {
   onDelete: (item: IngredientWithRelations) => void;
   canAdjustStock?: boolean;
   onAdjust?: (item: IngredientWithRelations) => void;
-  /** Seller view: Name, Category, Unit, Current Quantity, Minimum Stock. */
-  quantitiesOnly?: boolean;
 };
 
 type StockStatus = "ok" | "low" | "out";
@@ -223,9 +221,7 @@ export function InventoryRow({
   onDelete,
   canAdjustStock = false,
   onAdjust,
-  quantitiesOnly = false,
 }: InventoryRowProps) {
-  const full = !quantitiesOnly;
   const stockStatus = getStockStatus(item);
   const showWarning = stockStatus !== "ok";
   const currentQuantity = review?.current_quantity ?? item.current_stock;
@@ -239,9 +235,7 @@ export function InventoryRow({
           {item.supplier?.name ?? "—"}
         </td>
       )}
-      {(showAll || quantitiesOnly) && (
-        <td className="px-4 py-4 text-zinc-600">{item.unit}</td>
-      )}
+      {showAll && <td className="px-4 py-4 text-zinc-600">{item.unit}</td>}
       <td className="px-4 py-4 text-right">
         <span
           className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-sm font-semibold ${getStockBadgeClass(
@@ -253,24 +247,17 @@ export function InventoryRow({
           {formatQuantity(currentQuantity)}
         </span>
       </td>
-      {full && (
-        <td
-          className="px-4 py-4 text-right text-zinc-600"
-          data-testid="last-purchase-price"
-        >
-          {review?.last_purchase_price == null
-            ? "—"
-            : formatMoney(review.last_purchase_price)}
-        </td>
-      )}
-      {full && (
-        <td
-          className="px-4 py-4 text-right font-medium text-zinc-900"
-          data-testid="cost-per-unit"
-        >
-          {formatMoney(item.cost_per_unit)}
-        </td>
-      )}
+      <td
+        className="px-4 py-4 text-right text-zinc-600"
+        data-testid="last-purchase-price"
+      >
+        {review?.last_purchase_price == null
+          ? "—"
+          : formatMoney(review.last_purchase_price)}
+      </td>
+      <td className="px-4 py-4 text-right font-medium text-zinc-900">
+        {formatMoney(item.cost_per_unit)}
+      </td>
       {showAll && (
         <td
           className="px-4 py-4 text-right text-zinc-600"
@@ -314,16 +301,12 @@ export function InventoryRow({
             : formatQuantity(review.target_stock)}
         </td>
       )}
-      {full && (
-        <td className="px-4 py-4">
-          <AlertLevelLabel review={review} />
-        </td>
-      )}
-      {full && (
-        <td className="px-4 py-4">
-          <RecommendationStatusLabel review={review} />
-        </td>
-      )}
+      <td className="px-4 py-4">
+        <AlertLevelLabel review={review} />
+      </td>
+      <td className="px-4 py-4">
+        <RecommendationStatusLabel review={review} />
+      </td>
       {showAll && (
         <td className="px-4 py-4 text-zinc-600" data-testid="last-supplier">
           {review?.last_supplier_name ?? "—"}
@@ -345,55 +328,50 @@ export function InventoryRow({
           {review?.purchase_count == null ? "—" : review.purchase_count}
         </td>
       )}
-      {(showAll || quantitiesOnly) && (
-        <td
-          className="px-4 py-4 text-right text-zinc-600"
-          data-testid="minimum-stock"
-        >
+      {showAll && (
+        <td className="px-4 py-4 text-right text-zinc-600">
           {item.minimum_stock}
         </td>
       )}
-      {full && (
-        <td className="px-4 py-4 text-right">
-          <div className="inline-flex items-center gap-2">
-            <Link
-              href={`/inventory/ingredients/${item.id}/movements`}
-              className="rounded-lg px-3 py-1.5 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-900"
-            >
-              Movement history
-            </Link>
-            <Link
-              href={writeOffPrefillHref("ingredient", item.id)}
-              className="rounded-lg px-3 py-1.5 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-900"
-            >
-              Write off
-            </Link>
-            {canAdjustStock && onAdjust ? (
-              <button
-                type="button"
-                onClick={() => onAdjust(item)}
-                className="rounded-lg px-3 py-1.5 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-900"
-              >
-                Adjust Stock
-              </button>
-            ) : null}
+      <td className="px-4 py-4 text-right">
+        <div className="inline-flex items-center gap-2">
+          <Link
+            href={`/inventory/ingredients/${item.id}/movements`}
+            className="rounded-lg px-3 py-1.5 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-900"
+          >
+            Movement history
+          </Link>
+          <Link
+            href={writeOffPrefillHref("ingredient", item.id)}
+            className="rounded-lg px-3 py-1.5 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-900"
+          >
+            Write off
+          </Link>
+          {canAdjustStock && onAdjust ? (
             <button
               type="button"
-              onClick={() => onEdit(item)}
+              onClick={() => onAdjust(item)}
               className="rounded-lg px-3 py-1.5 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-900"
             >
-              Edit
+              Adjust Stock
             </button>
-            <button
-              type="button"
-              onClick={() => onDelete(item)}
-              className="rounded-lg px-3 py-1.5 text-sm font-medium text-red-600 transition-colors hover:bg-red-50 hover:text-red-700"
-            >
-              Delete
-            </button>
-          </div>
-        </td>
-      )}
+          ) : null}
+          <button
+            type="button"
+            onClick={() => onEdit(item)}
+            className="rounded-lg px-3 py-1.5 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-900"
+          >
+            Edit
+          </button>
+          <button
+            type="button"
+            onClick={() => onDelete(item)}
+            className="rounded-lg px-3 py-1.5 text-sm font-medium text-red-600 transition-colors hover:bg-red-50 hover:text-red-700"
+          >
+            Delete
+          </button>
+        </div>
+      </td>
     </tr>
   );
 }

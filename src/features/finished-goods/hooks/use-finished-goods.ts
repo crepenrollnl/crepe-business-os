@@ -41,8 +41,14 @@ function compareRows(
   return (aValue - bValue) * direction;
 }
 
-async function fetchFinishedGoodsState() {
-  const result = await finishedGoodsListService.listProductAvailability();
+/**
+ * Owner/partner read quantities with costs; sellers read the cost-free
+ * stock summary (sql/155) — their request never touches a cost column.
+ */
+async function fetchFinishedGoodsState(showCosts: boolean) {
+  const result = showCosts
+    ? await finishedGoodsListService.listProductAvailability()
+    : await finishedGoodsListService.listProductStock();
 
   return {
     items: result.error ? [] : (result.data ?? []),
@@ -50,7 +56,7 @@ async function fetchFinishedGoodsState() {
   };
 }
 
-export function useFinishedGoods() {
+export function useFinishedGoods({ showCosts }: { showCosts: boolean }) {
   const [items, setItems] = useState<FinishedGoodsListRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -76,20 +82,20 @@ export function useFinishedGoods() {
         setLoading(true);
       }
 
-      const state = await fetchFinishedGoodsState();
+      const state = await fetchFinishedGoodsState(showCosts);
       applyState(state);
       setLoading(false);
     },
-    [applyState],
+    [applyState, showCosts],
   );
 
   useEffect(() => {
     void (async () => {
-      const state = await fetchFinishedGoodsState();
+      const state = await fetchFinishedGoodsState(showCosts);
       applyState(state);
       setLoading(false);
     })();
-  }, [applyState]);
+  }, [applyState, showCosts]);
 
   const filteredItems = useMemo(() => {
     const normalizedSearch = search.trim().toLowerCase();

@@ -1,12 +1,12 @@
 "use client";
 
-import type { IngredientWithRelations } from "@/features/inventory/types/inventory";
+import type { IngredientStockLevel } from "@/features/inventory/types/inventory";
 import { usePosStock } from "../hooks/use-pos-stock";
 import { PosSaleableNowSection } from "./pos-saleable-now-section";
 
 type StockStatus = "ok" | "low" | "out";
 
-function getStockStatus(item: IngredientWithRelations): StockStatus {
+function getStockStatus(item: IngredientStockLevel): StockStatus {
   if (item.current_stock === 0) {
     return "out";
   }
@@ -68,7 +68,7 @@ function PosIngredientStockSection({
   error,
   retry,
 }: {
-  items: IngredientWithRelations[];
+  items: IngredientStockLevel[];
   loading: boolean;
   error: string | null;
   retry: () => void;

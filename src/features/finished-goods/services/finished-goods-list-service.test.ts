@@ -6,9 +6,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { FinishedGoodsSummaryRow } from "@/features/reports/types/report";
 
-const { reportServiceMock, supabaseMock } = vi.hoisted(() => ({
+const { reportServiceMock, stockServiceMock, supabaseMock } = vi.hoisted(() => ({
   reportServiceMock: {
     getFinishedGoodsSummary: vi.fn(),
+  },
+  stockServiceMock: {
+    listStockSummary: vi.fn(),
   },
   supabaseMock: {
     from: vi.fn(),
@@ -21,6 +24,10 @@ vi.mock("@/features/reports/services/report-service", () => ({
 
 vi.mock("@/lib/supabase", () => ({
   supabase: supabaseMock,
+}));
+
+vi.mock("./finished-goods-stock-service", () => ({
+  finishedGoodsStockService: stockServiceMock,
 }));
 
 import { finishedGoodsListService } from "./finished-goods-list-service";
@@ -106,6 +113,59 @@ describe("finishedGoodsListService.listProductAvailability", () => {
 
     expect(result.data).toBeNull();
     expect(result.error).toContain("Reporting views are not available");
+    expect(supabaseMock.from).not.toHaveBeenCalled();
+  });
+});
+
+describe("finishedGoodsListService.listProductStock (sellers, sql/155)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("reads the cost-free stock summary and never the cost-bearing report view", async () => {
+    stockServiceMock.listStockSummary.mockResolvedValue({
+      data: [
+        {
+          product_id: PRODUCT_ID,
+          product_name: "Roasted chicken",
+          available_quantity: 7,
+          active_batch_count: 1,
+          oldest_batch_at: "2026-08-20T10:00:00.000Z",
+          newest_batch_at: "2026-08-22T10:00:00.000Z",
+          production_status: "available",
+        },
+      ],
+      error: null,
+    });
+    mockRecipes([{ id: PRODUCT_ID, yield_unit: "kg" }]);
+
+    const result = await finishedGoodsListService.listProductStock();
+
+    expect(result.error).toBeNull();
+    expect(result.data).toEqual([
+      {
+        product_id: PRODUCT_ID,
+        product_name: "Roasted chicken",
+        available_quantity: 7,
+        yield_unit: "kg",
+        average_unit_cost: null,
+        remaining_value: null,
+        newest_batch_at: "2026-08-22T10:00:00.000Z",
+        production_status: "available",
+      },
+    ]);
+    expect(reportServiceMock.getFinishedGoodsSummary).not.toHaveBeenCalled();
+  });
+
+  it("returns the stock error without reading recipes", async () => {
+    stockServiceMock.listStockSummary.mockResolvedValue({
+      data: null,
+      error: "Failed to load finished goods stock",
+    });
+
+    const result = await finishedGoodsListService.listProductStock();
+
+    expect(result.error).toBe("Failed to load finished goods stock");
     expect(supabaseMock.from).not.toHaveBeenCalled();
   });
 });

@@ -26,6 +26,23 @@ export interface IngredientWithRelations extends Ingredient {
   supplier: Supplier | null;
 }
 
+/**
+ * Ingredient stock without cost or supplier (ingredient_stock_levels,
+ * sql/155). What every screen that only needs quantities reads.
+ */
+export interface IngredientStockLevel {
+  id: string;
+  name: string;
+  category_id: string | null;
+  unit: string;
+  current_stock: number;
+  minimum_stock: number;
+  active: boolean;
+  category: IngredientCategory | null;
+}
+
+export type IngredientStockSortField = "name" | "current_stock" | "minimum_stock";
+
 export interface IngredientFormValues {
   name: string;
   category_id: string;

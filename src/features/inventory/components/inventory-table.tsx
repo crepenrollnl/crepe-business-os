@@ -23,19 +23,12 @@ type InventoryTableProps = {
   onDelete: (item: IngredientWithRelations) => void;
   canAdjustStock?: boolean;
   onAdjust?: (item: IngredientWithRelations) => void;
-  /**
-   * Seller view: Name, Category, Unit, Current Quantity and Minimum Stock
-   * only — no prices, suppliers, purchasing columns or actions.
-   */
-  quantitiesOnly?: boolean;
 };
 
 /** Always visible: Name, Category, Current Quantity, Last Price, Price, Alert, Recommendation, Actions. */
 const COMPACT_COLUMN_COUNT = 8;
 /** Compact 8 + the remaining 10 expanded-only columns (Reason still folded into Recommendation's tooltip). */
 const EXPANDED_COLUMN_COUNT = 18;
-/** Seller view: Name, Category, Unit, Current Quantity, Minimum Stock. */
-const QUANTITIES_ONLY_COLUMN_COUNT = 5;
 
 function InventoryTableSkeleton({ columnCount }: { columnCount: number }) {
   return (
@@ -76,7 +69,7 @@ function EmptyStateIcon() {
 
 type InventoryEmptyStateProps = {
   hasActiveFilters: boolean;
-  onAddClick?: () => void;
+  onAddClick: () => void;
   columnCount: number;
 };
 
@@ -98,7 +91,7 @@ function InventoryEmptyState({
               ? "Try adjusting your search or category filter to find what you need."
               : "Add your first ingredient to start tracking stock levels."}
           </p>
-          {!hasActiveFilters && onAddClick && (
+          {!hasActiveFilters && (
             <button
               type="button"
               onClick={onAddClick}
@@ -179,16 +172,9 @@ export function InventoryTable({
   onDelete,
   canAdjustStock = false,
   onAdjust,
-  quantitiesOnly = false,
 }: InventoryTableProps) {
-  const [showAllColumns, setShowAll] = useState(false);
-  const showAll = showAllColumns && !quantitiesOnly;
-  const full = !quantitiesOnly;
-  const columnCount = quantitiesOnly
-    ? QUANTITIES_ONLY_COLUMN_COUNT
-    : showAll
-      ? EXPANDED_COLUMN_COUNT
-      : COMPACT_COLUMN_COUNT;
+  const [showAll, setShowAll] = useState(false);
+  const columnCount = showAll ? EXPANDED_COLUMN_COUNT : COMPACT_COLUMN_COUNT;
 
   if (error) {
     return (
@@ -210,18 +196,16 @@ export function InventoryTable({
 
   return (
     <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-sm">
-      {full ? (
-        <div className="flex items-center justify-end border-b border-zinc-200 bg-zinc-50 px-4 py-2">
-          <button
-            type="button"
-            onClick={() => setShowAll((prev) => !prev)}
-            aria-expanded={showAll}
-            className="text-sm font-medium text-amber-700 transition-colors hover:text-amber-800"
-          >
-            {showAll ? "Show fewer columns" : "Show more columns"}
-          </button>
-        </div>
-      ) : null}
+      <div className="flex items-center justify-end border-b border-zinc-200 bg-zinc-50 px-4 py-2">
+        <button
+          type="button"
+          onClick={() => setShowAll((prev) => !prev)}
+          aria-expanded={showAll}
+          className="text-sm font-medium text-amber-700 transition-colors hover:text-amber-800"
+        >
+          {showAll ? "Show fewer columns" : "Show more columns"}
+        </button>
+      </div>
       <div className="overflow-x-auto">
         <table className="min-w-full">
           <thead className="bg-zinc-50">
@@ -241,7 +225,7 @@ export function InventoryTable({
                   Supplier
                 </th>
               )}
-              {(showAll || quantitiesOnly) && (
+              {showAll && (
                 <th className="px-4 py-3 text-left text-sm font-semibold text-zinc-700">
                   Unit
                 </th>
@@ -254,21 +238,17 @@ export function InventoryTable({
                 align="right"
                 onSort={onSort}
               />
-              {full && (
-                <th className="px-4 py-3 text-right text-sm font-semibold text-zinc-700">
-                  Last Price
-                </th>
-              )}
-              {full && (
-                <SortableHeader
-                  label="Price"
-                  field="cost_per_unit"
-                  sortField={sortField}
-                  sortDirection={sortDirection}
-                  align="right"
-                  onSort={onSort}
-                />
-              )}
+              <th className="px-4 py-3 text-right text-sm font-semibold text-zinc-700">
+                Last Price
+              </th>
+              <SortableHeader
+                label="Price"
+                field="cost_per_unit"
+                sortField={sortField}
+                sortDirection={sortDirection}
+                align="right"
+                onSort={onSort}
+              />
               {showAll && (
                 <th className="px-4 py-3 text-right text-sm font-semibold text-zinc-700">
                   Avg Daily Usage
@@ -289,16 +269,12 @@ export function InventoryTable({
                   Target Stock
                 </th>
               )}
-              {full && (
-                <th className="px-4 py-3 text-left text-sm font-semibold text-zinc-700">
-                  Alert
-                </th>
-              )}
-              {full && (
-                <th className="px-4 py-3 text-left text-sm font-semibold text-zinc-700">
-                  Recommendation
-                </th>
-              )}
+              <th className="px-4 py-3 text-left text-sm font-semibold text-zinc-700">
+                Alert
+              </th>
+              <th className="px-4 py-3 text-left text-sm font-semibold text-zinc-700">
+                Recommendation
+              </th>
               {showAll && (
                 <th className="px-4 py-3 text-left text-sm font-semibold text-zinc-700">
                   Last Supplier
@@ -314,7 +290,7 @@ export function InventoryTable({
                   Purchase Count
                 </th>
               )}
-              {(showAll || quantitiesOnly) && (
+              {showAll && (
                 <SortableHeader
                   label="Minimum Stock"
                   field="minimum_stock"
@@ -324,11 +300,9 @@ export function InventoryTable({
                   onSort={onSort}
                 />
               )}
-              {full && (
-                <th className="px-4 py-3 text-right text-sm font-semibold text-zinc-700">
-                  Actions
-                </th>
-              )}
+              <th className="px-4 py-3 text-right text-sm font-semibold text-zinc-700">
+                Actions
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -337,7 +311,7 @@ export function InventoryTable({
             ) : items.length === 0 ? (
               <InventoryEmptyState
                 hasActiveFilters={hasActiveFilters && totalCount > 0}
-                onAddClick={quantitiesOnly ? undefined : onAddClick}
+                onAddClick={onAddClick}
                 columnCount={columnCount}
               />
             ) : (
@@ -351,7 +325,6 @@ export function InventoryTable({
                   onDelete={onDelete}
                   canAdjustStock={canAdjustStock}
                   onAdjust={onAdjust}
-                  quantitiesOnly={quantitiesOnly}
                 />
               ))
             )}

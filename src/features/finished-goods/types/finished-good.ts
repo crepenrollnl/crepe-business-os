@@ -128,12 +128,25 @@ export interface FinishedGoodsAvailableBatch {
  * Quantities and values come from report_finished_goods_summary.
  * yield_unit is joined from recipes — not recalculated in TypeScript.
  */
+/** One product of finished_goods_stock_summary (sql/155): quantities, no costs. */
+export interface FinishedGoodsStockSummaryRow {
+  product_id: string;
+  product_name: string | null;
+  available_quantity: number;
+  active_batch_count: number;
+  oldest_batch_at: string | null;
+  newest_batch_at: string | null;
+  production_status: "available" | "out_of_stock";
+}
+
 export interface FinishedGoodsListRow {
   product_id: string;
   product_name: string | null;
   available_quantity: number;
   yield_unit: string | null;
+  /** Null when there is no cost yet, and always null in the seller's stock list. */
   average_unit_cost: number | null;
+  /** Null when there is no value yet, and always null in the seller's stock list. */
   remaining_value: number | null;
   newest_batch_at: string | null;
   production_status: "available" | "out_of_stock";

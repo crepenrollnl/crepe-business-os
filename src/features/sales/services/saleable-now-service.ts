@@ -4,11 +4,15 @@
  *
  * Does not explode component BOMs or hypothetically produce missing
  * components. Does not write stock or call RPCs.
+ *
+ * Reads stock only through the cost-free views of sql/155
+ * (finished_goods_stock_summary, ingredient_stock_levels): POS is a seller
+ * screen and needs quantities, never costs.
  */
 
+import { finishedGoodsStockService } from "@/features/finished-goods/services/finished-goods-stock-service";
 import { inventoryService } from "@/features/inventory/services/inventory-service";
 import { recipeService } from "@/features/recipes/services/recipe-service";
-import { reportService } from "@/features/reports/services/report-service";
 import { toUserError } from "@/lib/service-errors";
 import { supabase } from "@/lib/supabase";
 import { fail, ok, type ServiceResult } from "@/types/service";
@@ -48,8 +52,8 @@ export async function listSaleableNow(): Promise<
   try {
     const [recipesResult, fgResult, inventoryResult] = await Promise.all([
       recipeService.getRecipes(),
-      reportService.getFinishedGoodsSummary(),
-      inventoryService.getInventory(),
+      finishedGoodsStockService.listStockSummary(),
+      inventoryService.getStockLevels(),
     ]);
 
     if (recipesResult.error || !recipesResult.data) {
@@ -57,7 +61,7 @@ export async function listSaleableNow(): Promise<
     }
 
     if (fgResult.error || !fgResult.data) {
-      return fail(fgResult.error ?? "Failed to load finished goods summary");
+      return fail(fgResult.error ?? "Failed to load finished goods stock");
     }
 
     if (inventoryResult.error || !inventoryResult.data) {

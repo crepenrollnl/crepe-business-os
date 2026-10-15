@@ -474,3 +474,25 @@ describe("recipeService.getRecipes — image_url mapping", () => {
     expect(result.data?.[1]?.image_url).toBeNull();
   });
 });
+
+describe("recipeService.getIngredients (sql/155, no costs)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("reads ingredient names from ingredient_stock_levels, not the ingredients table", async () => {
+    supabaseMock.from.mockImplementation(() =>
+      makeBuilder({
+        data: [{ id: "i-1", name: "Flour", unit: "kg" }],
+        error: null,
+      }),
+    );
+
+    const result = await recipeService.getIngredients();
+
+    expect(result.error).toBeNull();
+    expect(result.data).toEqual([{ id: "i-1", name: "Flour", unit: "kg" }]);
+    expect(supabaseMock.from).toHaveBeenCalledWith("ingredient_stock_levels");
+    expect(supabaseMock.from).not.toHaveBeenCalledWith("ingredients");
+  });
+});

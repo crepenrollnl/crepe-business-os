@@ -1,19 +1,21 @@
 /**
  * Service-level coverage for listSaleableNow (Mode A).
  *
- * Reads recipes + recipe_components, report_finished_goods_summary, and
- * ingredients.current_stock. Must not call RPCs or write tables.
+ * Reads recipes + recipe_components and the cost-free stock views of sql/155
+ * (finished_goods_stock_summary, ingredient_stock_levels). Must not call RPCs,
+ * write tables, or read any cost-bearing source.
  */
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { IngredientWithRelations } from "@/features/inventory/types/inventory";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { FinishedGoodsStockSummaryRow } from "@/features/finished-goods/types/finished-good";
+import type { IngredientStockLevel } from "@/features/inventory/types/inventory";
 import type { RecipeListItem } from "@/features/recipes/types/recipe";
-import type { FinishedGoodsSummaryRow } from "@/features/reports/types/report";
 
 const {
   getRecipesMock,
   getFinishedGoodsSummaryMock,
   getInventoryMock,
+  costReadMock,
   supabaseMock,
 } = vi.hoisted(() => {
   const supabaseMock = {
@@ -24,6 +26,7 @@ const {
     getRecipesMock: vi.fn(),
     getFinishedGoodsSummaryMock: vi.fn(),
     getInventoryMock: vi.fn(),
+    costReadMock: vi.fn(),
     supabaseMock,
   };
 });
@@ -38,20 +41,32 @@ vi.mock("@/features/recipes/services/recipe-service", () => ({
   },
 }));
 
+vi.mock("@/features/finished-goods/services/finished-goods-stock-service", () => ({
+  finishedGoodsStockService: {
+    listStockSummary: (...args: unknown[]) =>
+      getFinishedGoodsSummaryMock(...args),
+  },
+}));
+
+// The cost-bearing reads must never be used (they fail the test if called).
 vi.mock("@/features/reports/services/report-service", () => ({
   reportService: {
-    getFinishedGoodsSummary: (...args: unknown[]) =>
-      getFinishedGoodsSummaryMock(...args),
+    getFinishedGoodsSummary: (...args: unknown[]) => costReadMock(...args),
   },
 }));
 
 vi.mock("@/features/inventory/services/inventory-service", () => ({
   inventoryService: {
-    getInventory: (...args: unknown[]) => getInventoryMock(...args),
+    getStockLevels: (...args: unknown[]) => getInventoryMock(...args),
+    getInventory: (...args: unknown[]) => costReadMock(...args),
   },
 }));
 
 import { listSaleableNow } from "./saleable-now-service";
+
+afterEach(() => {
+  expect(costReadMock).not.toHaveBeenCalled();
+});
 
 const CHICKEN = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const SAUCE = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
@@ -82,15 +97,13 @@ function recipe(
 }
 
 function fgRow(
-  overrides: Partial<FinishedGoodsSummaryRow> &
-    Pick<FinishedGoodsSummaryRow, "product_id">,
-): FinishedGoodsSummaryRow {
+  overrides: Partial<FinishedGoodsStockSummaryRow> &
+    Pick<FinishedGoodsStockSummaryRow, "product_id">,
+): FinishedGoodsStockSummaryRow {
   return {
     product_name: "Component",
     available_quantity: 0,
     active_batch_count: 1,
-    average_unit_cost: 1,
-    inventory_value: 1,
     oldest_batch_at: "2026-01-01T00:00:00.000Z",
     newest_batch_at: "2026-01-01T00:00:00.000Z",
     production_status: "available",
@@ -99,18 +112,16 @@ function fgRow(
 }
 
 function ingredient(
-  overrides: Partial<IngredientWithRelations> &
-    Pick<IngredientWithRelations, "id" | "name">,
-): IngredientWithRelations {
+  overrides: Partial<IngredientStockLevel> &
+    Pick<IngredientStockLevel, "id" | "name">,
+): IngredientStockLevel {
   return {
     category_id: null,
-    supplier_id: null,
     unit: "kg",
     current_stock: 0,
     minimum_stock: 0,
-    cost_per_unit: 1,
+    active: true,
     category: null,
-    supplier: null,
     ...overrides,
   };
 }
@@ -262,26 +273,26 @@ describe("listSaleableNow", () => {
   it("fails when finished goods summary fails", async () => {
     getFinishedGoodsSummaryMock.mockResolvedValue({
       data: null,
-      error: "Failed to load finished goods summary",
+      error: "Failed to load finished goods stock",
     });
 
     const result = await listSaleableNow();
 
     expect(result.data).toBeNull();
-    expect(result.error).toBe("Failed to load finished goods summary");
+    expect(result.error).toBe("Failed to load finished goods stock");
     expect(supabaseMock.from).not.toHaveBeenCalled();
   });
 
   it("fails when inventory fails", async () => {
     getInventoryMock.mockResolvedValue({
       data: null,
-      error: "Failed to load inventory",
+      error: "Failed to load stock levels",
     });
 
     const result = await listSaleableNow();
 
     expect(result.data).toBeNull();
-    expect(result.error).toBe("Failed to load inventory");
+    expect(result.error).toBe("Failed to load stock levels");
     expect(supabaseMock.from).not.toHaveBeenCalled();
   });
 
