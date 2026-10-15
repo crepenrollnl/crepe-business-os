@@ -28,6 +28,11 @@ describe("parseInventoryStockTab", () => {
     );
   });
 
+  it("opens Requests only for ?tab=requests", () => {
+    expect(parseInventoryStockTab("requests")).toBe("requests");
+    expect(INVENTORY_STOCK_TAB_HREF.requests).toBe("/inventory?tab=requests");
+  });
+
   it("reads the first tab value from Next.js searchParams", () => {
     expect(inventoryTabSearchParam(undefined)).toBeNull();
     expect(inventoryTabSearchParam("finished-goods")).toBe("finished-goods");

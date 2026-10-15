@@ -70,6 +70,7 @@ describe("InventoryWorkspacePage", () => {
         activeTab="raw-materials"
         finishedGoods={<div data-testid="finished-goods">embedded</div>}
         writeOffs={<div data-testid="write-offs">embedded</div>}
+        writeOffRequests={<div data-testid="write-off-requests">queue</div>}
       />,
     );
 
@@ -91,6 +92,7 @@ describe("InventoryWorkspacePage", () => {
         activeTab="finished-goods"
         finishedGoods={<div data-testid="finished-goods">embedded</div>}
         writeOffs={<div data-testid="write-offs">embedded</div>}
+        writeOffRequests={<div data-testid="write-off-requests">queue</div>}
       />,
     );
 
@@ -108,6 +110,7 @@ describe("InventoryWorkspacePage", () => {
         activeTab="write-offs"
         finishedGoods={<div data-testid="finished-goods">embedded</div>}
         writeOffs={<div data-testid="write-offs">embedded</div>}
+        writeOffRequests={<div data-testid="write-off-requests">queue</div>}
       />,
     );
 
@@ -128,6 +131,7 @@ describe("InventoryWorkspacePage", () => {
         activeTab="write-offs"
         finishedGoods={<div data-testid="finished-goods">embedded</div>}
         writeOffs={<div data-testid="write-offs">embedded</div>}
+        writeOffRequests={<div data-testid="write-off-requests">queue</div>}
       />,
     );
 
@@ -138,5 +142,39 @@ describe("InventoryWorkspacePage", () => {
       screen.getByRole("link", { name: "Raw Materials" }),
     ).toHaveAttribute("aria-current", "page");
     expect(screen.getByRole("link", { name: "Finished Goods" })).toBeInTheDocument();
+  });
+
+  it("shows the owner/partner write-off requests queue on the Requests tab", () => {
+    render(
+      <InventoryWorkspacePage
+        activeTab="requests"
+        finishedGoods={<div data-testid="finished-goods">embedded</div>}
+        writeOffs={<div data-testid="write-offs">embedded</div>}
+        writeOffRequests={<div data-testid="write-off-requests">queue</div>}
+      />,
+    );
+
+    expect(screen.getByTestId("write-off-requests")).toHaveTextContent("queue");
+    expect(screen.getByRole("link", { name: "Requests" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+  });
+
+  it("gives a seller no Requests tab, even on ?tab=requests", () => {
+    asRole("seller");
+
+    render(
+      <InventoryWorkspacePage
+        activeTab="requests"
+        finishedGoods={<div data-testid="finished-goods">embedded</div>}
+        writeOffs={<div data-testid="write-offs">embedded</div>}
+        writeOffRequests={<div data-testid="write-off-requests">queue</div>}
+      />,
+    );
+
+    expect(screen.queryByRole("link", { name: "Requests" })).not.toBeInTheDocument();
+    expect(screen.queryByTestId("write-off-requests")).not.toBeInTheDocument();
+    expect(screen.getByTestId("raw-materials")).toBeInTheDocument();
   });
 });

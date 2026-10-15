@@ -12,15 +12,18 @@ type InventoryWorkspacePageProps = {
   activeTab: InventoryStockTab;
   finishedGoods: ReactNode;
   writeOffs: ReactNode;
+  /** Owner/partner queue of write-off requests (sql/157). */
+  writeOffRequests: ReactNode;
 };
 
 export function InventoryWorkspacePage({
   activeTab,
   finishedGoods,
   writeOffs,
+  writeOffRequests,
 }: InventoryWorkspacePageProps) {
-  // Sellers get no write-off UI yet (a request + owner approval flow comes
-  // later); record_write_off is owner/partner only (sql/127, sql/148).
+  // Sellers record no write-offs (record_write_off is owner/partner only,
+  // sql/127, sql/148) and decide no requests; they ask on /write-off-requests.
   const { role } = useRole();
   const showWriteOffs = canSeeCosts(role);
 
@@ -35,6 +38,8 @@ export function InventoryWorkspacePage({
           finishedGoods
         ) : activeTab === "write-offs" && showWriteOffs ? (
           writeOffs
+        ) : activeTab === "requests" && showWriteOffs ? (
+          writeOffRequests
         ) : (
           <InventoryPage embedded />
         )}

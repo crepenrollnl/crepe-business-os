@@ -8,7 +8,7 @@ import {
 
 type InventoryStockTabsProps = {
   activeTab: InventoryStockTab;
-  /** False for sellers: the Write-offs tab is not shown. */
+  /** False for sellers: the Write-offs and Requests tabs are not shown. */
   showWriteOffs?: boolean;
 };
 
@@ -16,11 +16,12 @@ export function InventoryStockTabs({
   activeTab,
   showWriteOffs = true,
 }: InventoryStockTabsProps) {
-  const tabs = showWriteOffs
+  const tabs: readonly InventoryStockTab[] = showWriteOffs
     ? INVENTORY_STOCK_TABS
-    : INVENTORY_STOCK_TABS.filter((tab) => tab !== "write-offs");
-  const currentTab =
-    activeTab === "write-offs" && !showWriteOffs ? "raw-materials" : activeTab;
+    : INVENTORY_STOCK_TABS.filter(
+        (tab) => tab !== "write-offs" && tab !== "requests",
+      );
+  const currentTab = tabs.includes(activeTab) ? activeTab : "raw-materials";
 
   return (
     <nav aria-label="Inventory stock domains">
