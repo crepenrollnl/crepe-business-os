@@ -1241,3 +1241,17 @@ jobs:
             echo "::error file=tests/sql/stock_views_without_costs.sql,title=psql failed on stock_views_without_costs::${err}"
             exit "$status"
           fi
+
+      - name: sellers_no_costs
+        run: |
+          set -euo pipefail
+          set +e
+          output=$(psql -v ON_ERROR_STOP=1 -f tests/sql/sellers_no_costs.sql 2>&1)
+          status=$?
+          set -e
+          echo "$output"
+          if [ "$status" -ne 0 ]; then
+            err=$(printf '%s' "$output" | tr '\n' ' | ')
+            echo "::error file=tests/sql/sellers_no_costs.sql,title=psql failed on sellers_no_costs::${err}"
+            exit "$status"
+          fi

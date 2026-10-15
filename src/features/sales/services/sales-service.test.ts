@@ -255,6 +255,49 @@ describe("salesService.confirmSale (DEV-027)", () => {
     expect(tablesTouched).not.toContain("production_batches");
   });
 
+  it("accepts total_cogs null for a seller (sql/156) and still returns the sale", async () => {
+    mockSaleReload();
+    supabaseMock.rpc.mockResolvedValue({
+      data: { sale_id: SALE_ID, total_cogs: null },
+      error: null,
+    });
+
+    const result = await salesService.confirmSale(SALE_ID);
+
+    expect(result.error).toBeNull();
+    expect(result.data?.sale_id).toBe(SALE_ID);
+    expect(result.data?.sale?.id).toBe(SALE_ID);
+    expect(result.data?.total_cogs).toBeNull();
+  });
+
+  it("keeps the owner's numeric total_cogs (string from the RPC is parsed)", async () => {
+    mockSaleReload();
+    supabaseMock.rpc.mockResolvedValue({
+      data: { sale_id: SALE_ID, total_cogs: "12.30" },
+      error: null,
+    });
+
+    const result = await salesService.confirmSale(SALE_ID);
+
+    expect(result.error).toBeNull();
+    expect(result.data?.total_cogs).toBe(12.3);
+  });
+
+  it.each([
+    ["a non-numeric total_cogs", { sale_id: SALE_ID, total_cogs: "abc" }],
+    ["a non-scalar total_cogs", { sale_id: SALE_ID, total_cogs: { value: 1 } }],
+    ["a missing total_cogs", { sale_id: SALE_ID }],
+    ["a missing sale_id", { total_cogs: null }],
+    ["a non-string sale_id", { sale_id: 42, total_cogs: 1 }],
+  ])("still rejects %s", async (_label, payload) => {
+    supabaseMock.rpc.mockResolvedValue({ data: payload, error: null });
+
+    const result = await salesService.confirmSale(SALE_ID);
+
+    expect(result.data).toBeNull();
+    expect(result.error).toBe("Sale confirmed but the response was invalid.");
+  });
+
   it("uses SQL total_cogs as source of truth (never calculates COGS locally)", async () => {
     mockSaleReload();
     supabaseMock.rpc.mockResolvedValue({

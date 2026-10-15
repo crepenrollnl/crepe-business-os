@@ -38,6 +38,10 @@ export interface CloseShiftResult {
   shift: Shift;
   /** Written by close_shift in the same transaction as the close. */
   salesSummary: DailySalesSummary;
-  /** Written by close_shift in the same transaction as the close. */
-  profitSummary: DailyProfitSummary;
+  /**
+   * Written by close_shift in the same transaction as the close. Null for a
+   * seller: since sql/156 close_shift returns "profit_summary": null to
+   * sellers (the summary is still written).
+   */
+  profitSummary: DailyProfitSummary | null;
 }

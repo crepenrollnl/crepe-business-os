@@ -137,7 +137,8 @@ DECLARE
   v_keep text[] := ARRAY[
     'create_and_confirm_sale', 'create_draft_sale', 'add_sale_line',
     'update_sale_line', 'delete_sale_line', 'confirm_sale', 'set_sale_paid_flag',
-    'mark_sale_queued', 'mark_sale_fulfilled', 'record_posting_failure',
+    -- record_posting_failure: revoked from the app by sql/156 (audit D2).
+    'mark_sale_queued', 'mark_sale_fulfilled',
     'resolve_posting_failure', 'get_company_settings', 'verify_sale_cost_and_profit',
     'get_inventory_movement_history_by_ingredient', 'get_reporting_workspace',
     'get_sales_by_product', 'get_my_role', 'require_role', 'open_shift',
@@ -326,7 +327,9 @@ BEGIN
        SELECT 1 FROM stock_movements
        WHERE ingredient_id = v_ing AND movement_type = 'sale_out'
      )
-     OR COALESCE((v_result ->> 'total_cogs')::numeric, 0) <= 0 THEN
+     -- sql/156: the seller's result carries no cost; the cost is still booked.
+     OR (v_result -> 'total_cogs') IS DISTINCT FROM 'null'::jsonb
+     OR COALESCE(compute_sale_total_cogs(v_sale), 0) <= 0 THEN
     RAISE EXCEPTION 'SCENARIO C FAIL: sale % row % result %', v_sale, to_jsonb(v_row), v_result;
   END IF;
   IF (SELECT count(*) FROM finished_goods_batch_consumptions c WHERE c.production_batch_id = v_batch) <> 1 THEN

@@ -304,9 +304,66 @@ describe("shiftService (DEV-112)", () => {
       expect(result.error).toBe(message);
     });
 
-    it("fails when a summary is missing from the RPC result", async () => {
+    it.each([
+      ["null", null],
+      ["absent", undefined],
+    ])("accepts a %s profit summary (seller, sql/156) as profitSummary null", async (_label, profit) => {
       supabaseMock.rpc.mockResolvedValue({
-        data: { shift: closedRow(), sales_summary: salesSummaryRow() },
+        data:
+          profit === undefined
+            ? { shift: closedRow(), sales_summary: salesSummaryRow() }
+            : {
+                shift: closedRow(),
+                sales_summary: salesSummaryRow(),
+                profit_summary: profit,
+              },
+        error: null,
+      });
+
+      const result = await shiftService.closeShift({ shift_id: SHIFT_ID });
+
+      expect(result.error).toBeNull();
+      expect(result.data?.shift).toEqual(mappedClosed());
+      expect(result.data?.salesSummary?.id).toBe(
+        "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      );
+      expect(result.data?.profitSummary).toBeNull();
+    });
+
+    it("fails when the sales summary is missing from the RPC result", async () => {
+      supabaseMock.rpc.mockResolvedValue({
+        data: { shift: closedRow(), profit_summary: profitSummaryRow() },
+        error: null,
+      });
+
+      const result = await shiftService.closeShift({ shift_id: SHIFT_ID });
+
+      expect(result.data).toBeNull();
+      expect(result.error).toBe("Shift closed but the response was invalid.");
+    });
+
+    it("fails when the shift is missing from the RPC result", async () => {
+      supabaseMock.rpc.mockResolvedValue({
+        data: {
+          sales_summary: salesSummaryRow(),
+          profit_summary: null,
+        },
+        error: null,
+      });
+
+      const result = await shiftService.closeShift({ shift_id: SHIFT_ID });
+
+      expect(result.data).toBeNull();
+      expect(result.error).toBe("Shift closed but the response was invalid.");
+    });
+
+    it("still fails on a profit summary object that does not map", async () => {
+      supabaseMock.rpc.mockResolvedValue({
+        data: {
+          shift: closedRow(),
+          sales_summary: salesSummaryRow(),
+          profit_summary: { ...profitSummaryRow(), net_revenue: "not a number" },
+        },
         error: null,
       });
 

@@ -147,8 +147,13 @@ BEGIN
     IF v_count <> 1 OR NOT EXISTS (
       SELECT 1 FROM pg_policies
       WHERE schemaname = 'public' AND tablename = v_table
-        AND policyname = v_table || '_authenticated_select'
-        AND cmd = 'SELECT' AND roles = ARRAY['authenticated']::name[] AND qual = 'true'
+        AND cmd = 'SELECT' AND roles = ARRAY['authenticated']::name[]
+        AND ((policyname = v_table || '_authenticated_select' AND qual = 'true')
+             -- sql/156: cost tables are readable by owner/partner only.
+             OR (policyname = v_table || '_owner_partner_select'
+                 AND v_table IN ('transactions', 'stock_movements', 'production_batches',
+                                 'finished_goods_batch_consumptions', 'write_offs')
+                 AND qual = '(get_my_role() = ANY (ARRAY[''owner''::text, ''partner''::text]))'))
     ) THEN
       RAISE EXCEPTION 'SCENARIO A FAIL: % policies wrong (% policies)', v_table, v_count;
     END IF;
