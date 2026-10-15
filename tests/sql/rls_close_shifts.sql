@@ -125,8 +125,12 @@ BEGIN
     SELECT count(*) INTO v_count FROM pg_policies WHERE schemaname = 'public' AND tablename = v_table;
     IF v_count <> 1
        OR NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = v_table
-                      AND policyname = v_table || '_authenticated_select' AND cmd = 'SELECT'
-                      AND roles = ARRAY['authenticated']::name[] AND qual = 'true')
+                      AND cmd = 'SELECT' AND roles = ARRAY['authenticated']::name[]
+                      AND ((policyname = v_table || '_authenticated_select' AND qual = 'true')
+                           -- sql/156: profit summaries are owner/partner only.
+                           OR (v_table = 'shift_daily_profit_summaries'
+                               AND policyname = v_table || '_owner_partner_select'
+                               AND qual = '(get_my_role() = ANY (ARRAY[''owner''::text, ''partner''::text]))')))
        OR NOT has_table_privilege('authenticated', 'public.' || v_table, 'SELECT')
        OR has_table_privilege('authenticated', 'public.' || v_table, 'INSERT')
        OR has_table_privilege('authenticated', 'public.' || v_table, 'UPDATE')

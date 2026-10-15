@@ -225,7 +225,8 @@ BEGIN
   END IF;
   IF (v_result -> 'shift' ->> 'status') IS DISTINCT FROM 'closed'
      OR (v_result -> 'sales_summary' ->> 'id')::uuid IS DISTINCT FROM v_ss.id
-     OR (v_result -> 'profit_summary' ->> 'id')::uuid IS DISTINCT FROM v_ps.id THEN
+     -- sql/156: the seller still gets the shift and the sales summary, but no profit.
+     OR (v_result -> 'profit_summary') IS DISTINCT FROM 'null'::jsonb THEN
     RAISE EXCEPTION 'SCENARIO C FAIL: returned json %', v_result;
   END IF;
   SET LOCAL ROLE authenticated;

@@ -527,7 +527,7 @@ function mapConfirmSaleError(error: unknown, fallback: string): string {
 
 function mapConfirmSaleRpcResult(
   data: unknown,
-): { sale_id: string; total_cogs: number } | null {
+): { sale_id: string; total_cogs: number | null } | null {
   if (typeof data !== "object" || data === null) {
     return null;
   }
@@ -536,10 +536,16 @@ function mapConfirmSaleRpcResult(
   const saleId = row.sale_id;
   const totalCogs = row.total_cogs;
 
-  if (
-    typeof saleId !== "string" ||
-    (typeof totalCogs !== "number" && typeof totalCogs !== "string")
-  ) {
+  if (typeof saleId !== "string") {
+    return null;
+  }
+
+  // sql/156: a seller gets "total_cogs": null (the cost is still booked).
+  if (totalCogs === null) {
+    return { sale_id: saleId, total_cogs: null };
+  }
+
+  if (typeof totalCogs !== "number" && typeof totalCogs !== "string") {
     return null;
   }
 
@@ -644,7 +650,7 @@ async function reloadConfirmedSale(
  */
 async function buildConfirmedSaleResult(rpcResult: {
   sale_id: string;
-  total_cogs: number;
+  total_cogs: number | null;
 }): Promise<ConfirmSaleResult> {
   let reloadError: string;
 

@@ -19,6 +19,15 @@
 --       get_sales_by_product, get_inventory_movement_history_by_ingredient,
 --       create_and_confirm_sale
 --   E — the OWNER still sells with create_and_confirm_sale
+--
+-- Updated for sql/156 (audit S4/U5 phase 2b): get_reporting_workspace,
+-- get_sales_by_product, verify_sale_cost_and_profit and
+-- get_inventory_movement_history_by_ingredient now carry the sql/156
+-- owner/partner guard instead of the sql/145 line, and
+-- record_posting_failure is no longer executable by authenticated. So A
+-- checks those, B expects "permission denied" for record_posting_failure,
+-- and D no longer calls these five as a seller (sql/156's own test checks
+-- that the seller is refused and the owner is not).
 -- Sequence counters are restored at the end.
 
 BEGIN;
@@ -118,6 +127,13 @@ DECLARE
     'get_reporting_workspace()',
     'get_sales_by_product(timestamp with time zone, timestamp with time zone)'
   ];
+  v_owner_partner text[] := ARRAY[
+    'verify_sale_cost_and_profit(uuid, numeric, numeric, numeric, numeric)',
+    'get_inventory_movement_history_by_ingredient(uuid)',
+    'get_reporting_workspace()',
+    'get_sales_by_product(timestamp with time zone, timestamp with time zone)'
+  ];
+  v_revoked constant text := 'record_posting_failure(text, text, uuid, uuid, text)';
   v_sig text;
   v_oid oid;
   v_calls text[] := '{}';
@@ -161,9 +177,12 @@ BEGIN
     IF NOT (SELECT p.prosecdef FROM pg_proc p WHERE p.oid = v_oid)
        OR (SELECT count(*) FROM pg_proc p,
              regexp_matches(p.prosrc,
-               'PERFORM require_role\(''owner'', ''partner'', ''seller''\);  -- sql/145', 'g')
+               CASE WHEN v_sig = ANY (v_owner_partner)
+                 THEN 'PERFORM require_role\(''owner'', ''partner''\);  -- sql/156'
+                 ELSE 'PERFORM require_role\(''owner'', ''partner'', ''seller''\);  -- sql/145'
+               END, 'g')
            WHERE p.oid = v_oid) <> 1
-       OR NOT has_function_privilege('authenticated', v_oid, 'EXECUTE')
+       OR has_function_privilege('authenticated', v_oid, 'EXECUTE') <> (v_sig <> v_revoked)
        OR has_function_privilege('anon', v_oid, 'EXECUTE') THEN
       RAISE EXCEPTION 'SCENARIO A FAIL: % guard / definer / grants wrong', v_sig;
     END IF;
@@ -223,7 +242,9 @@ BEGIN
   FOREACH v_call IN ARRAY v_calls
   LOOP
     PERFORM public.dryrun145_expect('SCENARIO B no profile', '42501',
-      'No active profile%', v_call);
+      CASE WHEN v_call LIKE 'SELECT public.record_posting_failure(%'
+        THEN 'permission denied for function%' ELSE 'No active profile%' END,
+      v_call);
   END LOOP;
   RESET ROLE;
   UPDATE profiles SET is_active = true WHERE auth_user_id = v_actor;
@@ -258,12 +279,7 @@ BEGIN
   PERFORM delete_sale_line(v_line2);
   PERFORM confirm_sale(v_sale);
   PERFORM set_sale_paid_flag(v_sale, true);
-  v_ok := verify_sale_cost_and_profit(v_sale, 0, 0, 0, 0);
-  v_failure := record_posting_failure('sale_confirm', 'sale', v_sale, NULL, 'TEST_S3_' || v_tag);
   v_result := get_company_settings();
-  v_result := get_reporting_workspace();
-  SELECT count(*) INTO v_count FROM get_sales_by_product(now() - interval '1 day', now() + interval '1 day');
-  v_result := get_inventory_movement_history_by_ingredient(v_ing);
   v_result := create_and_confirm_sale(
     p_customer_id => NULL,
     p_lines => jsonb_build_array(
@@ -279,8 +295,7 @@ BEGIN
      OR (SELECT is_paid FROM sales WHERE id = v_sale) IS NOT TRUE
      OR (SELECT count(*) FROM sale_lines WHERE sale_id = v_sale) <> 1
      OR (SELECT quantity FROM sale_lines WHERE id = v_line1) <> 2
-     OR v_ok IS NULL
-     OR NOT EXISTS (SELECT 1 FROM posting_failures WHERE id = v_failure)
+     OR v_result IS NULL
      OR v_quick IS NULL
      OR (SELECT status FROM sales WHERE id = v_quick) = 'draft' THEN
     RAISE EXCEPTION 'SCENARIO D FAIL: sale % status % lines % / % quick %',

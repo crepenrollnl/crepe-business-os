@@ -43,11 +43,14 @@ interface ShiftRow {
   created_at: string;
 }
 
-/** close_shift (sql/142) jsonb result. */
+/**
+ * close_shift (sql/142) jsonb result. profit_summary is null for a seller
+ * (sql/156: sellers never receive costs or profit).
+ */
 interface CloseShiftRpcResult {
   shift: ShiftRow;
   sales_summary: DailySalesSummaryRow;
-  profit_summary: DailyProfitSummaryRow;
+  profit_summary: DailyProfitSummaryRow | null;
 }
 
 const SHIFT_SELECT =
@@ -283,11 +286,13 @@ export const shiftService = {
       const salesSummary = result?.sales_summary
         ? mapDailySalesSummary(result.sales_summary)
         : null;
-      const profitSummary = result?.profit_summary
-        ? mapDailyProfitSummary(result.profit_summary)
+      // Null or absent for a seller (sql/156); an object must still map.
+      const rawProfitSummary = result?.profit_summary ?? null;
+      const profitSummary = rawProfitSummary
+        ? mapDailyProfitSummary(rawProfitSummary)
         : null;
 
-      if (!shift || !salesSummary || !profitSummary) {
+      if (!shift || !salesSummary || (rawProfitSummary !== null && !profitSummary)) {
         return fail("Shift closed but the response was invalid.");
       }
 

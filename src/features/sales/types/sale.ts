@@ -70,7 +70,11 @@ export interface SaleWithLines extends Sale {
 export interface ConfirmSaleResult {
   sale_id: string;
   sale: SaleWithLines | null;
-  total_cogs: number;
+  /**
+   * Null for a seller: since sql/156 confirm_sale / create_and_confirm_sale
+   * return "total_cogs": null to sellers (the COGS is still booked).
+   */
+  total_cogs: number | null;
   reloadError: string | null;
 }
 
