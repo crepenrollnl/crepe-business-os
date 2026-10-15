@@ -15,10 +15,11 @@ type RecipesTableProps = {
   sortDirection: RecipeSortDirection;
   onSort: (field: RecipeSortField) => void;
   onRetry: () => void;
-  onCreateClick: () => void;
+  /** Create / Edit / Delete are omitted for sellers (view only). */
+  onCreateClick?: () => void;
   onView: (item: RecipeListItem) => void;
-  onEdit: (item: RecipeListItem) => void;
-  onDelete: (item: RecipeListItem) => void;
+  onEdit?: (item: RecipeListItem) => void;
+  onDelete?: (item: RecipeListItem) => void;
 };
 
 function RecipesTableSkeleton() {
@@ -60,7 +61,7 @@ function EmptyStateIcon() {
 
 type RecipesEmptyStateProps = {
   hasActiveFilters: boolean;
-  onCreateClick: () => void;
+  onCreateClick?: () => void;
 };
 
 function RecipesEmptyState({
@@ -80,7 +81,7 @@ function RecipesEmptyState({
               ? "Try adjusting your search to find what you need."
               : "Create your first recipe to define ingredient bills of materials."}
           </p>
-          {!hasActiveFilters && (
+          {!hasActiveFilters && onCreateClick && (
             <button
               type="button"
               onClick={onCreateClick}

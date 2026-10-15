@@ -1,6 +1,8 @@
 "use client";
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
+import { useRole } from "@/hooks/use-role";
+import { canSeeCosts } from "@/lib/roles";
 import { AdjustStockModal } from "../components/adjust-stock-modal";
 import { DeleteDialog } from "../components/delete-dialog";
 import { IngredientModal } from "../components/ingredient-modal";
@@ -63,6 +65,11 @@ export function InventoryPage({ embedded = false }: InventoryPageProps) {
     closeAdjustModal,
     submitAdjustment,
   } = useInventoryAdjustment({ onSuccess: refreshAfterAdjustment });
+  // Sellers see quantities only: no prices, suppliers, purchasing review,
+  // and no create / edit / delete / adjust / write-off (the database refuses
+  // those for sellers anyway: sql/124, sql/125, sql/127).
+  const { role } = useRole();
+  const quantitiesOnly = !canSeeCosts(role);
 
   const content = (
     <div className="mx-auto max-w-7xl space-y-8">
@@ -82,12 +89,14 @@ export function InventoryPage({ embedded = false }: InventoryPageProps) {
         categoryFilter={categoryFilter}
         onCategoryFilterChange={setCategoryFilter}
         categories={categories}
-        onAddClick={openCreateModal}
+        onAddClick={quantitiesOnly ? undefined : openCreateModal}
       />
 
       {!loading && !error ? (
         <>
-          <PurchasingReviewInfo messages={purchasingReviewMessages} />
+          {quantitiesOnly ? null : (
+            <PurchasingReviewInfo messages={purchasingReviewMessages} />
+          )}
           <LowStockAlertsPanel alerts={lowStockAlerts} />
         </>
       ) : null}
@@ -108,6 +117,7 @@ export function InventoryPage({ embedded = false }: InventoryPageProps) {
         onDelete={openDeleteDialog}
         canAdjustStock={canAdjustStock}
         onAdjust={openAdjustModal}
+        quantitiesOnly={quantitiesOnly}
       />
 
       <IngredientModal

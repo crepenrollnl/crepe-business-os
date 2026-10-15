@@ -1,27 +1,19 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import { authService } from "@/features/auth/services/auth-service";
-import { useAsyncEffect } from "@/hooks/use-async-effect";
+import { useRole } from "@/hooks/use-role";
+import { canSeeCosts } from "@/lib/roles";
 import { inventoryAdjustmentService } from "../services/inventory-adjustment-service";
-import {
-  canAdjustInventoryStock,
-  type RecordInventoryAdjustmentInput,
-} from "../types/inventory-adjustment";
+import type { RecordInventoryAdjustmentInput } from "../types/inventory-adjustment";
 import type { IngredientWithRelations } from "../types/inventory";
 
 export function useInventoryAdjustment(options?: {
   onSuccess?: () => Promise<void> | void;
 }) {
-  const [role, setRole] = useState<string | null>(null);
-  const canAdjustStock = canAdjustInventoryStock(role);
+  const { role } = useRole();
+  // record_inventory_adjustment is owner/partner only (sql/125).
+  const canAdjustStock = canSeeCosts(role);
   const onSuccess = options?.onSuccess;
-
-  const loadRole = useCallback(async () => {
-    setRole(await authService.getMyRole());
-  }, []);
-
-  useAsyncEffect(loadRole, [loadRole]);
   const [adjustingItem, setAdjustingItem] =
     useState<IngredientWithRelations | null>(null);
   const [isAdjusting, setIsAdjusting] = useState(false);

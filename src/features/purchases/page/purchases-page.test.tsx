@@ -3,8 +3,8 @@ import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
 
-const { getMyRoleMock, useCountMock, getPurchaseReceiptAccessToken } = vi.hoisted(() => ({
-  getMyRoleMock: vi.fn(),
+const { useRoleMock, useCountMock, getPurchaseReceiptAccessToken } = vi.hoisted(() => ({
+  useRoleMock: vi.fn(),
   useCountMock: vi.fn(),
   getPurchaseReceiptAccessToken: vi.fn(),
 }));
@@ -31,11 +31,13 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn() }),
 }));
 
-vi.mock("@/features/auth/services/auth-service", () => ({
-  authService: {
-    getMyRole: () => getMyRoleMock(),
-  },
+vi.mock("@/hooks/use-role", () => ({
+  useRole: () => useRoleMock(),
 }));
+
+function asRole(role: string | null) {
+  useRoleMock.mockReturnValue({ role, loading: false, reload: () => undefined });
+}
 
 vi.mock("../utils/purchase-receipt-access-token", () => ({
   getPurchaseReceiptAccessToken: () => getPurchaseReceiptAccessToken(),
@@ -85,20 +87,20 @@ import { PurchasesPage } from "./purchases-page";
 describe("PurchasesPage receipts entry", () => {
   afterEach(() => {
     cleanup();
-    getMyRoleMock.mockReset();
+    useRoleMock.mockReset();
     useCountMock.mockReset();
     getPurchaseReceiptAccessToken.mockReset();
     getPurchaseReceiptAccessToken.mockResolvedValue(null);
   });
 
   it("hides the Receipts button from a seller", async () => {
-    getMyRoleMock.mockResolvedValue("seller");
+    asRole("seller");
     useCountMock.mockReturnValue({ count: 4 });
 
     render(<PurchasesPage />);
 
     await waitFor(() => {
-      expect(useCountMock.mock.calls.length).toBeGreaterThanOrEqual(2);
+      expect(useCountMock.mock.calls.length).toBeGreaterThanOrEqual(1);
     });
     expect(useCountMock.mock.calls.every(([enabled]) => enabled === false)).toBe(true);
     expect(screen.queryByRole("link", { name: /Receipts/ })).not.toBeInTheDocument();
@@ -106,7 +108,7 @@ describe("PurchasesPage receipts entry", () => {
   });
 
   it("shows the Receipts button and the unassigned count to an owner", async () => {
-    getMyRoleMock.mockResolvedValue("owner");
+    asRole("owner");
     useCountMock.mockReturnValue({ count: 4 });
 
     render(<PurchasesPage />);

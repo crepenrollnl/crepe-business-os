@@ -7,12 +7,12 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { PostingFailure } from "../types/posting-failure";
 
-const { listUnresolvedMock, resolveMock, repostMock, getMyRoleMock } =
+const { listUnresolvedMock, resolveMock, repostMock, useRoleMock } =
   vi.hoisted(() => ({
     listUnresolvedMock: vi.fn(),
     resolveMock: vi.fn(),
     repostMock: vi.fn(),
-    getMyRoleMock: vi.fn(),
+    useRoleMock: vi.fn(),
   }));
 
 vi.mock("../services/posting-failures-service", () => ({
@@ -23,11 +23,13 @@ vi.mock("../services/posting-failures-service", () => ({
   },
 }));
 
-vi.mock("@/features/auth/services/auth-service", () => ({
-  authService: {
-    getMyRole: (...args: unknown[]) => getMyRoleMock(...args),
-  },
+vi.mock("@/hooks/use-role", () => ({
+  useRole: () => useRoleMock(),
 }));
+
+function asRole(role: string | null) {
+  useRoleMock.mockReturnValue({ role, loading: false, reload: () => undefined });
+}
 
 import { usePostingFailures } from "./use-posting-failures";
 
@@ -62,7 +64,7 @@ describe("usePostingFailures access", () => {
   });
 
   it.each(["owner", "partner"])("loads the list for %s", async (role) => {
-    getMyRoleMock.mockResolvedValue(role);
+    asRole(role);
 
     const { result } = await renderLoaded();
 
@@ -73,7 +75,7 @@ describe("usePostingFailures access", () => {
   it.each(["seller", null])(
     "denies %s without querying posting_failures",
     async (role) => {
-      getMyRoleMock.mockResolvedValue(role);
+      asRole(role);
 
       const { result } = await renderLoaded();
 
@@ -87,7 +89,7 @@ describe("usePostingFailures access", () => {
 describe("usePostingFailures.repost (sql/154)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    getMyRoleMock.mockResolvedValue("owner");
+    asRole("owner");
   });
 
   it("reloads the list after a successful Post again (several rows may close)", async () => {

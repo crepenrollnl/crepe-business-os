@@ -8,7 +8,8 @@ type InventoryToolbarProps = {
   categoryFilter: string;
   onCategoryFilterChange: (value: string) => void;
   categories: IngredientCategory[];
-  onAddClick: () => void;
+  /** Omitted for sellers: no "Add Ingredient" button. */
+  onAddClick?: () => void;
 };
 
 export function InventoryToolbar({
@@ -30,13 +31,15 @@ export function InventoryToolbar({
         />
       </div>
 
-      <button
-        type="button"
-        onClick={onAddClick}
-        className="inline-flex shrink-0 items-center justify-center rounded-lg bg-amber-500 px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-amber-600"
-      >
-        + Add Ingredient
-      </button>
+      {onAddClick ? (
+        <button
+          type="button"
+          onClick={onAddClick}
+          className="inline-flex shrink-0 items-center justify-center rounded-lg bg-amber-500 px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-amber-600"
+        >
+          + Add Ingredient
+        </button>
+      ) : null}
     </div>
   );
 }

@@ -26,12 +26,6 @@ export const INVENTORY_ADJUSTMENT_REASON_LABELS: Record<
   other: "Other",
 };
 
-export const INVENTORY_ADJUSTMENT_ROLES = ["owner", "partner"] as const;
-
-export function canAdjustInventoryStock(role: string | null): boolean {
-  return role === "owner" || role === "partner";
-}
-
 export interface RecordInventoryAdjustmentInput {
   ingredientId: string;
   direction: InventoryAdjustmentDirection;

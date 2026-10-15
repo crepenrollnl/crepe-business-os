@@ -1,6 +1,8 @@
 "use client";
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
+import { useRole } from "@/hooks/use-role";
+import { canSeeCosts } from "@/lib/roles";
 import { DeleteDialog } from "../components/delete-dialog";
 import { RecipeEditorModal } from "../components/recipe-editor-modal";
 import { RecipeViewModal } from "../components/recipe-view-modal";
@@ -47,6 +49,9 @@ export function RecipesPage() {
     deleteRecipe,
     retry,
   } = useRecipes();
+  // Sellers may look at recipes but not change them (RLS, sql/141).
+  const { role } = useRole();
+  const canEdit = canSeeCosts(role);
 
   return (
     <DashboardLayout activePath="/recipes">
@@ -64,7 +69,7 @@ export function RecipesPage() {
         <RecipesToolbar
           search={search}
           onSearchChange={setSearch}
-          onCreateClick={openCreateModal}
+          onCreateClick={canEdit ? openCreateModal : undefined}
         />
 
         <RecipesTable
@@ -77,10 +82,10 @@ export function RecipesPage() {
           sortDirection={sortDirection}
           onSort={toggleSort}
           onRetry={retry}
-          onCreateClick={openCreateModal}
+          onCreateClick={canEdit ? openCreateModal : undefined}
           onView={(item) => void openViewModal(item)}
-          onEdit={(item) => void openEditModal(item)}
-          onDelete={openDeleteDialog}
+          onEdit={canEdit ? (item) => void openEditModal(item) : undefined}
+          onDelete={canEdit ? openDeleteDialog : undefined}
         />
 
         <RecipeEditorModal
@@ -103,7 +108,7 @@ export function RecipesPage() {
           isLoading={isLoadingViewRecipe}
           error={viewError}
           onClose={closeViewModal}
-          onEdit={editFromView}
+          onEdit={canEdit ? editFromView : undefined}
         />
 
         <DeleteDialog

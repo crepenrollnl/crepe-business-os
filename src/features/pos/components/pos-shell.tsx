@@ -3,6 +3,8 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { LogoutButton } from "@/components/logout-button";
+import { useRole } from "@/hooks/use-role";
+import { osHomePathForRole } from "@/lib/navigation";
 import { useCanOpenPurchaseReceipts } from "../hooks/use-can-open-purchase-receipts";
 import { PosTabNav, type PosTab } from "./pos-tab-nav";
 
@@ -20,6 +22,7 @@ export function PosShell({
   children,
 }: PosShellProps) {
   const receiptsAccess = useCanOpenPurchaseReceipts();
+  const { role } = useRole();
 
   return (
     <div className="flex h-dvh flex-col bg-zinc-50">
@@ -30,7 +33,7 @@ export function PosShell({
           </p>
           <div className="flex flex-wrap items-center gap-x-3">
             <Link
-              href="/"
+              href={osHomePathForRole(role)}
               className="text-sm font-medium text-amber-700 hover:text-amber-800"
             >
               Back to OS

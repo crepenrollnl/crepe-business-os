@@ -58,8 +58,8 @@ vi.mock("@/features/auth/hooks/use-auth", () => ({
   useAuth: () => ({ user: null, loading: false, signOut: vi.fn() }),
 }));
 
-vi.mock("@/features/auth/hooks/use-my-role", () => ({
-  useMyRole: () => ({ role: "owner" }),
+vi.mock("@/hooks/use-role", () => ({
+  useRole: () => ({ role: "owner", loading: false, reload: () => undefined }),
 }));
 
 vi.mock("next/navigation", () => ({

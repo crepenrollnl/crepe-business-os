@@ -240,4 +240,20 @@ describe("RecipeViewModal", () => {
     screen.getByRole("button", { name: "Edit" }).click();
     expect(edited).toBe(true);
   });
+
+  it("is view only without onEdit (sellers, S4/U5): no Edit button", () => {
+    render(
+      <RecipeViewModal
+        isOpen={true}
+        recipe={componentRecipe()}
+        isLoading={false}
+        error={null}
+        onClose={() => {}}
+      />,
+    );
+
+    expect(screen.getByText("Dough")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Close" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Edit" })).not.toBeInTheDocument();
+  });
 });

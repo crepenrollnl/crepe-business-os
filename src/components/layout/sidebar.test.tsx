@@ -5,13 +5,21 @@ import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
 
-const { useMyRoleMock } = vi.hoisted(() => ({
-  useMyRoleMock: vi.fn(),
+const { useRoleMock } = vi.hoisted(() => ({
+  useRoleMock: vi.fn(),
 }));
 
-vi.mock("@/features/auth/hooks/use-my-role", () => ({
-  useMyRole: () => useMyRoleMock(),
+vi.mock("@/hooks/use-role", () => ({
+  useRole: () => useRoleMock(),
 }));
+
+function asRole(role: string | null) {
+  useRoleMock.mockReturnValue({ role, loading: false, reload: () => undefined });
+}
+
+function menuLabels(): string[] {
+  return screen.getAllByRole("link").map((link) => link.textContent ?? "");
+}
 
 vi.mock("next/link", () => ({
   default: ({
@@ -31,17 +39,31 @@ vi.mock("next/link", () => ({
 
 import { Sidebar } from "./sidebar";
 
-describe("Sidebar posting-failures role gate", () => {
+describe("Sidebar role gate (route table, src/lib/navigation.ts)", () => {
   beforeEach(() => {
-    useMyRoleMock.mockReset();
+    useRoleMock.mockReset();
   });
 
   afterEach(() => {
     cleanup();
   });
 
-  it("does not show Posting Failures to a seller, and still shows ungated items", () => {
-    useMyRoleMock.mockReturnValue({ role: "seller" });
+  it("shows a seller only POS, Quick Sale, Inventory, Recipes and Sales", () => {
+    asRole("seller");
+
+    render(<Sidebar isOpen onClose={() => undefined} />);
+
+    expect(menuLabels()).toEqual([
+      "POS",
+      "Quick Sale",
+      "Inventory",
+      "Recipes",
+      "Sales",
+    ]);
+  });
+
+  it("does not show owner screens to a seller", () => {
+    asRole("seller");
 
     render(<Sidebar isOpen onClose={() => undefined} />);
 
@@ -63,12 +85,59 @@ describe("Sidebar posting-failures role gate", () => {
     expect(
       screen.queryByRole("link", { name: "BTW Report" }),
     ).not.toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Dashboard" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Reports" })).toBeInTheDocument();
+    for (const label of [
+      "Dashboard",
+      "Purchases",
+      "Production Planning",
+      "Production Execution",
+      "Reports",
+      "Sales by Product",
+    ]) {
+      expect(screen.queryByRole("link", { name: label })).not.toBeInTheDocument();
+    }
+    expect(screen.getByRole("link", { name: "POS" })).toHaveAttribute("href", "/pos");
+    expect(screen.getByRole("link", { name: "Quick Sale" })).toHaveAttribute(
+      "href",
+      "/sales/quick",
+    );
+  });
+
+  it("shows nothing while the role is unknown", () => {
+    asRole(null);
+
+    render(<Sidebar isOpen onClose={() => undefined} />);
+
+    expect(screen.queryAllByRole("link")).toHaveLength(0);
+  });
+
+  it("shows every menu item to an owner", () => {
+    asRole("owner");
+
+    render(<Sidebar isOpen onClose={() => undefined} />);
+
+    expect(menuLabels()).toEqual([
+      "Dashboard",
+      "POS",
+      "Quick Sale",
+      "Inventory",
+      "Recipes",
+      "Recipe Cost",
+      "Purchases",
+      "Production Planning",
+      "Production Execution",
+      "Sales",
+      "Profit and Loss",
+      "Expenses",
+      "Fixed Assets",
+      "BTW Report",
+      "Posting Failures",
+      "Reports",
+      "Sales by Product",
+    ]);
   });
 
   it("shows Posting Failures to an owner", () => {
-    useMyRoleMock.mockReturnValue({ role: "owner" });
+    asRole("owner");
 
     render(<Sidebar isOpen onClose={() => undefined} />);
 
@@ -98,7 +167,7 @@ describe("Sidebar posting-failures role gate", () => {
   });
 
   it("shows Recipe Cost to a partner", () => {
-    useMyRoleMock.mockReturnValue({ role: "partner" });
+    asRole("partner");
 
     render(<Sidebar isOpen onClose={() => undefined} />);
 

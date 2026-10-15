@@ -2,16 +2,18 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { IngredientWithRelations } from "../types/inventory";
 
-const { getMyRoleMock, recordAdjustmentMock } = vi.hoisted(() => ({
-  getMyRoleMock: vi.fn(),
+const { useRoleMock, recordAdjustmentMock } = vi.hoisted(() => ({
+  useRoleMock: vi.fn(),
   recordAdjustmentMock: vi.fn(),
 }));
 
-vi.mock("@/features/auth/services/auth-service", () => ({
-  authService: {
-    getMyRole: (...args: unknown[]) => getMyRoleMock(...args),
-  },
+vi.mock("@/hooks/use-role", () => ({
+  useRole: () => useRoleMock(),
 }));
+
+function asRole(role: string | null) {
+  useRoleMock.mockReturnValue({ role, loading: false, reload: () => undefined });
+}
 
 vi.mock("../services/inventory-adjustment-service", () => ({
   inventoryAdjustmentService: {
@@ -36,9 +38,9 @@ const item: IngredientWithRelations = {
 
 describe("useInventoryAdjustment", () => {
   beforeEach(() => {
-    getMyRoleMock.mockReset();
+    useRoleMock.mockReset();
     recordAdjustmentMock.mockReset();
-    getMyRoleMock.mockResolvedValue("owner");
+    asRole("owner");
   });
 
   it.each([
@@ -46,7 +48,7 @@ describe("useInventoryAdjustment", () => {
     ["partner", true],
     ["seller", false],
   ] as const)("canAdjustStock is %s → %s", async (role, expected) => {
-    getMyRoleMock.mockResolvedValue(role);
+    asRole(role);
     const { result } = renderHook(() => useInventoryAdjustment());
 
     await waitFor(() => {

@@ -3,17 +3,24 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
 import type { User } from "@supabase/supabase-js";
 
-const { useAuthMock, replaceMock } = vi.hoisted(() => ({
+const { useAuthMock, replaceMock, useRoleMock, pathnameMock } = vi.hoisted(() => ({
   useAuthMock: vi.fn(),
   replaceMock: vi.fn(),
+  useRoleMock: vi.fn(),
+  pathnameMock: vi.fn(),
 }));
 
 vi.mock("@/features/auth/hooks/use-auth", () => ({
   useAuth: () => useAuthMock(),
 }));
 
+vi.mock("@/hooks/use-role", () => ({
+  useRole: () => useRoleMock(),
+}));
+
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ replace: replaceMock }),
+  usePathname: () => pathnameMock(),
 }));
 
 import { AuthGuard } from "./auth-guard";
@@ -36,6 +43,14 @@ describe("AuthGuard (recovery-session gating)", () => {
   beforeEach(() => {
     useAuthMock.mockReset();
     replaceMock.mockReset();
+    // The role check (RoleGuard) is covered in role-guard.test.tsx; here an
+    // owner on an owner page passes it.
+    useRoleMock.mockReturnValue({
+      role: "owner",
+      loading: false,
+      reload: () => undefined,
+    });
+    pathnameMock.mockReturnValue("/purchases");
   });
 
   afterEach(() => {
@@ -113,5 +128,23 @@ describe("AuthGuard (recovery-session gating)", () => {
     );
 
     expect(replaceMock).not.toHaveBeenCalled();
+  });
+
+  it("applies the role check to a signed-in user: a seller on an owner page sees no content", () => {
+    useAuthMock.mockReturnValue(authState({ user: { id: "seller-1" } as User }));
+    useRoleMock.mockReturnValue({
+      role: "seller",
+      loading: false,
+      reload: () => undefined,
+    });
+
+    render(
+      <AuthGuard>
+        <div data-testid="protected-content">Protected</div>
+      </AuthGuard>,
+    );
+
+    expect(screen.queryByTestId("protected-content")).not.toBeInTheDocument();
+    expect(screen.getByTestId("access-denied")).toBeInTheDocument();
   });
 });

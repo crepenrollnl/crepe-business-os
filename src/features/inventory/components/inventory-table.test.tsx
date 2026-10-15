@@ -255,4 +255,57 @@ describe("InventoryTable compact/expanded columns", () => {
       screen.queryByRole("button", { name: "Adjust Stock" }),
     ).not.toBeInTheDocument();
   });
+
+  it("shows a seller quantities only: no prices, suppliers, purchasing columns or actions (S4/U5)", () => {
+    render(
+      <InventoryTable
+        {...defaultProps}
+        items={[ingredient()]}
+        purchasingReviews={new Map([[ingredient().id, review()]])}
+        canAdjustStock
+        onAdjust={noop}
+        quantitiesOnly
+      />,
+    );
+
+    expect(
+      screen.getAllByRole("columnheader").map((header) => header.textContent?.replace(/[↑↓↕]/g, "").trim()),
+    ).toEqual(["Name", "Category", "Unit", "Current Quantity", "Minimum Stock"]);
+    expect(screen.getByText("Flour")).toBeInTheDocument();
+    expect(screen.getByTestId("current-quantity")).toHaveTextContent("10");
+    expect(screen.getByTestId("minimum-stock")).toHaveTextContent("2");
+    expect(screen.queryByTestId("cost-per-unit")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("last-purchase-price")).not.toBeInTheDocument();
+    expect(screen.queryByText("Acme Supplies")).not.toBeInTheDocument();
+    expect(screen.queryByText(/€/)).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Show more columns" }),
+    ).not.toBeInTheDocument();
+    for (const name of ["Edit", "Delete", "Adjust Stock"]) {
+      expect(screen.queryByRole("button", { name })).not.toBeInTheDocument();
+    }
+    for (const name of ["Write off", "Movement history"]) {
+      expect(screen.queryByRole("link", { name })).not.toBeInTheDocument();
+    }
+  });
+
+  it("shows a seller an empty state without Add Ingredient", () => {
+    render(
+      <InventoryTable
+        {...defaultProps}
+        items={[]}
+        totalCount={0}
+        quantitiesOnly
+      />,
+    );
+
+    expect(screen.getByText("No ingredients yet")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "+ Add Ingredient" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText("No ingredients yet").closest("td")).toHaveAttribute(
+      "colspan",
+      "5",
+    );
+  });
 });

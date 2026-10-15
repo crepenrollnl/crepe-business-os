@@ -20,7 +20,7 @@ const {
   getSaleProfitSummaryMock,
   buildFrozenSaleProfitMock,
   getSaleCompletedPostingStatusMock,
-  getMyRoleMock,
+  useRoleMock,
 } = vi.hoisted(() => ({
   getSaleMock: vi.fn(),
   confirmSaleMock: vi.fn(),
@@ -29,7 +29,7 @@ const {
   getSaleProfitSummaryMock: vi.fn(),
   buildFrozenSaleProfitMock: vi.fn(),
   getSaleCompletedPostingStatusMock: vi.fn(),
-  getMyRoleMock: vi.fn(),
+  useRoleMock: vi.fn(),
 }));
 
 vi.mock("../services/sales-read-service", () => ({
@@ -55,11 +55,13 @@ vi.mock("@/features/accounting/services/accounting-context-service", () => ({
   },
 }));
 
-vi.mock("@/features/auth/services/auth-service", () => ({
-  authService: {
-    getMyRole: (...args: unknown[]) => getMyRoleMock(...args),
-  },
+vi.mock("@/hooks/use-role", () => ({
+  useRole: () => useRoleMock(),
 }));
+
+function asRole(role: string | null) {
+  useRoleMock.mockReturnValue({ role, loading: false, reload: () => undefined });
+}
 
 vi.mock("../services/sale-cogs-service", () => ({
   saleCogsService: {
@@ -165,7 +167,7 @@ describe("useSale.confirm (audit D2/K3: database posts the journals)", () => {
       data: "posted",
       error: null,
     });
-    getMyRoleMock.mockResolvedValue("owner");
+    asRole("owner");
   });
 
   it("confirms through confirm_sale only and never loads an accounting context", async () => {
@@ -257,7 +259,7 @@ describe("useSale accounting status visibility (audit D2/K3)", () => {
   it.each(["owner", "partner"])(
     "reads and shows the journal status for %s",
     async (role) => {
-      getMyRoleMock.mockResolvedValue(role);
+      asRole(role);
 
       const { result } = renderHook(() => useSale(SALE_ID));
 
@@ -270,7 +272,7 @@ describe("useSale accounting status visibility (audit D2/K3)", () => {
   );
 
   it("never reads or shows the journal status for a seller", async () => {
-    getMyRoleMock.mockResolvedValue("seller");
+    asRole("seller");
 
     const { result } = renderHook(() => useSale(SALE_ID));
 
@@ -282,8 +284,37 @@ describe("useSale accounting status visibility (audit D2/K3)", () => {
     expect(getSaleCompletedPostingStatusMock).not.toHaveBeenCalled();
   });
 
+  it("never requests COGS or profit (verify_sale_cost_and_profit) for a seller (S4/U5)", async () => {
+    asRole("seller");
+
+    const { result } = renderHook(() => useSale(SALE_ID));
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    await waitFor(() => expect(result.current.reviewLoading).toBe(false));
+
+    expect(result.current.showCosts).toBe(false);
+    expect(result.current.cogsSummary).toBeNull();
+    expect(result.current.profitSummary).toBeNull();
+    expect(getSaleCostSummaryMock).not.toHaveBeenCalled();
+    expect(getSaleProfitSummaryMock).not.toHaveBeenCalled();
+    expect(buildFrozenSaleProfitMock).not.toHaveBeenCalled();
+  });
+
+  it.each(["owner", "partner"])("loads COGS and profit for %s", async (role) => {
+    asRole(role);
+
+    const { result } = renderHook(() => useSale(SALE_ID));
+
+    await waitFor(() => expect(result.current.reviewLoading).toBe(false));
+    await waitFor(() =>
+      expect(getSaleCostSummaryMock).toHaveBeenCalledWith(SALE_ID),
+    );
+    expect(result.current.showCosts).toBe(true);
+    expect(getSaleProfitSummaryMock).toHaveBeenCalledWith(SALE_ID);
+  });
+
   it("treats an unknown role (get_my_role failed) like a seller", async () => {
-    getMyRoleMock.mockResolvedValue(null);
+    asRole(null);
 
     const { result } = renderHook(() => useSale(SALE_ID));
 

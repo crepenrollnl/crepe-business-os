@@ -120,4 +120,36 @@ describe("FinishedGoodsTable", () => {
     expect(screen.getByText("Failed to load finished goods")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
   });
+
+  it("shows a seller quantities only: no cost, value or write-off (S4/U5)", () => {
+    render(
+      <FinishedGoodsTable
+        items={[row]}
+        totalCount={1}
+        filteredCount={1}
+        hasActiveFilters={false}
+        loading={false}
+        error={null}
+        sortField="product_name"
+        sortDirection="asc"
+        page={1}
+        totalPages={1}
+        pageSize={25}
+        onSort={noop}
+        onRetry={noop}
+        onPageChange={noop}
+        onPageSizeChange={noop}
+        showCosts={false}
+      />,
+    );
+
+    expect(screen.getByText("Roasted chicken")).toBeInTheDocument();
+    expect(screen.getByText("7 kg")).toBeInTheDocument();
+    expect(screen.queryByText("€4.5000")).not.toBeInTheDocument();
+    expect(screen.queryByText("€31.50")).not.toBeInTheDocument();
+    expect(screen.queryByText("Avg Unit Cost")).not.toBeInTheDocument();
+    expect(screen.queryByText("Remaining Value")).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Write off" })).not.toBeInTheDocument();
+    expect(screen.getAllByRole("columnheader")).toHaveLength(3);
+  });
 });

@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "@/features/auth/providers/AuthProvider";
+import { RoleProvider } from "@/features/auth/providers/RoleProvider";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -35,7 +36,7 @@ export default function RootLayout({
     >
       <body className="min-h-full flex flex-col">
   <AuthProvider>
-    {children}
+    <RoleProvider>{children}</RoleProvider>
   </AuthProvider>
       </body>
     </html>
