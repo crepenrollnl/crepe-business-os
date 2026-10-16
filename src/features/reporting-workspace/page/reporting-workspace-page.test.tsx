@@ -54,6 +54,14 @@ vi.mock("@/features/search/components/global-search", () => ({
   GlobalSearch: () => <div data-testid="global-search" />,
 }));
 
+// The menu's pending write-off counter is shared layout, not this page.
+vi.mock(
+  "@/features/write-off-requests/hooks/use-pending-write-off-request-count",
+  () => ({
+    usePendingWriteOffRequestCount: () => 0,
+  }),
+);
+
 vi.mock("@/features/auth/hooks/use-auth", () => ({
   useAuth: () => ({ user: null, loading: false, signOut: vi.fn() }),
 }));

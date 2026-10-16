@@ -1,8 +1,12 @@
 import { ALL_ROLES, OWNER_PARTNER_ROLES, type AppRole } from "./roles";
 
+/** A live number the menu shows next to an item (owner/partner only). */
+export type NavItemCounter = "pendingWriteOffRequests";
+
 export type NavItem = {
   label: string;
   href: string;
+  counter?: NavItemCounter;
 };
 
 export interface RouteAccess {
@@ -32,6 +36,7 @@ export const routeAccess: readonly RouteAccess[] = [
   { path: "/finished-goods", roles: ALL_ROLES },
   { path: "/recipes", roles: ALL_ROLES },
   { path: "/recipes/cost-report", roles: OWNER_PARTNER_ROLES },
+  { path: "/write-off-requests", roles: ALL_ROLES },
   { path: "/purchases", roles: OWNER_PARTNER_ROLES },
   { path: "/production", roles: OWNER_PARTNER_ROLES },
   { path: "/production-planning", roles: OWNER_PARTNER_ROLES },
@@ -98,6 +103,11 @@ export const navItems: NavItem[] = [
   { label: "POS", href: "/pos" },
   { label: "Quick Sale", href: "/sales/quick" },
   { label: "Inventory", href: "/inventory" },
+  {
+    label: "Write-off requests",
+    href: "/write-off-requests",
+    counter: "pendingWriteOffRequests",
+  },
   { label: "Recipes", href: "/recipes" },
   { label: "Recipe Cost", href: "/recipes/cost-report" },
   { label: "Purchases", href: "/purchases" },

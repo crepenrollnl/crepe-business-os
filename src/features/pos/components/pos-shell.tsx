@@ -38,6 +38,12 @@ export function PosShell({
             >
               Back to OS
             </Link>
+            <Link
+              href="/write-off-requests"
+              className="text-sm font-medium text-amber-700 hover:text-amber-800"
+            >
+              Write-off request
+            </Link>
             {receiptsAccess.status === "allowed" ? (
               <Link
                 href="/purchases/receipts"

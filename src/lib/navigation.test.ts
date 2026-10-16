@@ -15,6 +15,7 @@ describe("route table (src/lib/navigation.ts)", () => {
     ["/sales", ["owner", "partner", "seller"]],
     ["/sales/quick", ["owner", "partner", "seller"]],
     ["/sales/0b7c-sale", ["owner", "partner", "seller"]],
+    ["/write-off-requests", ["owner", "partner", "seller"]],
     ["/inventory", ["owner", "partner", "seller"]],
     ["/recipes", ["owner", "partner", "seller"]],
     ["/finished-goods", ["owner", "partner", "seller"]],
@@ -73,6 +74,17 @@ describe("route table (src/lib/navigation.ts)", () => {
     expect(osHomePathForRole("seller")).toBe("/sales");
     expect(canAccessPath(osHomePathForRole("seller"), "seller")).toBe(true);
     expect(canAccessPath(SELLER_HOME_PATH, "seller")).toBe(true);
+  });
+
+  it("shows the Write-off requests menu item, with its pending counter, to every role", () => {
+    const item = navItems.find((navItem) => navItem.href === "/write-off-requests");
+    expect(item).toMatchObject({
+      label: "Write-off requests",
+      counter: "pendingWriteOffRequests",
+    });
+    for (const role of ["owner", "partner", "seller"]) {
+      expect(item && isNavItemVisible(item, role)).toBe(true);
+    }
   });
 
   it("canSeeCosts is owner and partner only", () => {

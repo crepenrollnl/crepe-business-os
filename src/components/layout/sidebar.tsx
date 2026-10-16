@@ -1,8 +1,10 @@
 "use client";
 
 import Link from "next/link";
+import { usePendingWriteOffRequestCount } from "@/features/write-off-requests/hooks/use-pending-write-off-request-count";
 import { useRole } from "@/hooks/use-role";
-import { isNavItemVisible, navItems } from "@/lib/navigation";
+import { isNavItemVisible, navItems, type NavItemCounter } from "@/lib/navigation";
+import { canSeeCosts } from "@/lib/roles";
 
 type SidebarProps = {
   isOpen: boolean;
@@ -13,6 +15,11 @@ type SidebarProps = {
 export function Sidebar({ isOpen, onClose, activePath = "/" }: SidebarProps) {
   const { role } = useRole();
   const visibleItems = navItems.filter((item) => isNavItemVisible(item, role));
+  // Counters are owner/partner only; for a seller nothing is read.
+  const pendingWriteOffRequests = usePendingWriteOffRequestCount(canSeeCosts(role));
+  const counters: Record<NavItemCounter, number> = {
+    pendingWriteOffRequests,
+  };
 
   return (
     <>
@@ -54,7 +61,18 @@ export function Sidebar({ isOpen, onClose, activePath = "/" }: SidebarProps) {
                         : "text-zinc-300 hover:bg-zinc-800 hover:text-white"
                     }`}
                   >
-                    {item.label}
+                    <span className="flex items-center justify-between gap-2">
+                      <span>{item.label}</span>
+                      {item.counter && counters[item.counter] > 0 ? (
+                        <span
+                          className="inline-flex min-w-6 justify-center rounded-full bg-amber-500 px-2 py-0.5 text-xs font-semibold text-white"
+                          data-testid={`nav-counter-${item.counter}`}
+                          aria-label={`${counters[item.counter]} pending`}
+                        >
+                          {counters[item.counter]}
+                        </span>
+                      ) : null}
+                    </span>
                   </Link>
                 </li>
               );

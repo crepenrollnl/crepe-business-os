@@ -61,6 +61,23 @@ describe("PosShell Back to OS link", () => {
   });
 });
 
+describe("PosShell write-off request link", () => {
+  afterEach(() => {
+    cleanup();
+    useRoleMock.mockReset();
+  });
+
+  it.each(["seller", "owner", "partner"])("links to /write-off-requests for %s", (role) => {
+    asRole(role);
+    renderShell();
+
+    expect(screen.getByRole("link", { name: "Write-off request" })).toHaveAttribute(
+      "href",
+      "/write-off-requests",
+    );
+  });
+});
+
 describe("PosShell receipts link", () => {
   afterEach(() => {
     cleanup();

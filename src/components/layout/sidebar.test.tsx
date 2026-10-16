@@ -1,13 +1,23 @@
 "use client";
 
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
 
-const { useRoleMock } = vi.hoisted(() => ({
+const { useRoleMock, countPendingMock } = vi.hoisted(() => ({
   useRoleMock: vi.fn(),
+  countPendingMock: vi.fn(),
 }));
+
+vi.mock(
+  "@/features/write-off-requests/services/write-off-request-service",
+  () => ({
+    writeOffRequestService: {
+      countPending: () => countPendingMock(),
+    },
+  }),
+);
 
 vi.mock("@/hooks/use-role", () => ({
   useRole: () => useRoleMock(),
@@ -42,6 +52,8 @@ import { Sidebar } from "./sidebar";
 describe("Sidebar role gate (route table, src/lib/navigation.ts)", () => {
   beforeEach(() => {
     useRoleMock.mockReset();
+    countPendingMock.mockReset();
+    countPendingMock.mockResolvedValue({ data: 0, error: null });
   });
 
   afterEach(() => {
@@ -57,6 +69,7 @@ describe("Sidebar role gate (route table, src/lib/navigation.ts)", () => {
       "POS",
       "Quick Sale",
       "Inventory",
+      "Write-off requests",
       "Recipes",
       "Sales",
     ]);
@@ -120,6 +133,7 @@ describe("Sidebar role gate (route table, src/lib/navigation.ts)", () => {
       "POS",
       "Quick Sale",
       "Inventory",
+      "Write-off requests",
       "Recipes",
       "Recipe Cost",
       "Purchases",
@@ -186,6 +200,66 @@ describe("Sidebar role gate (route table, src/lib/navigation.ts)", () => {
     expect(screen.getByRole("link", { name: "BTW Report" })).toHaveAttribute(
       "href",
       "/reports/btw",
+    );
+  });
+
+  it("shows the owner the number of pending write-off requests", async () => {
+    asRole("owner");
+    countPendingMock.mockResolvedValue({ data: 3, error: null });
+
+    render(<Sidebar isOpen onClose={() => undefined} />);
+
+    expect(
+      await screen.findByTestId("nav-counter-pendingWriteOffRequests"),
+    ).toHaveTextContent("3");
+    expect(screen.getByRole("link", { name: /Write-off requests/ })).toHaveAttribute(
+      "href",
+      "/write-off-requests",
+    );
+  });
+
+  it("hides the counter when nothing is pending", async () => {
+    asRole("partner");
+    countPendingMock.mockResolvedValue({ data: 0, error: null });
+
+    render(<Sidebar isOpen onClose={() => undefined} />);
+
+    await waitFor(() => expect(countPendingMock).toHaveBeenCalled());
+    expect(
+      screen.queryByTestId("nav-counter-pendingWriteOffRequests"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("never asks for the pending count for a seller", async () => {
+    asRole("seller");
+
+    render(<Sidebar isOpen onClose={() => undefined} />);
+
+    expect(screen.getByRole("link", { name: "Write-off requests" })).toBeInTheDocument();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(countPendingMock).not.toHaveBeenCalled();
+    expect(
+      screen.queryByTestId("nav-counter-pendingWriteOffRequests"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("reads the count again when write-off requests change", async () => {
+    asRole("owner");
+    countPendingMock
+      .mockResolvedValueOnce({ data: 2, error: null })
+      .mockResolvedValueOnce({ data: 1, error: null });
+
+    render(<Sidebar isOpen onClose={() => undefined} />);
+    expect(
+      await screen.findByTestId("nav-counter-pendingWriteOffRequests"),
+    ).toHaveTextContent("2");
+
+    window.dispatchEvent(new Event("write-off-requests:changed"));
+
+    await waitFor(() =>
+      expect(
+        screen.getByTestId("nav-counter-pendingWriteOffRequests"),
+      ).toHaveTextContent("1"),
     );
   });
 });

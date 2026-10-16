@@ -5,6 +5,7 @@ import {
   inventoryTabSearchParam,
   parseInventoryStockTab,
 } from "@/features/inventory/utils/parse-inventory-tab";
+import { WriteOffRequestsPage } from "@/features/write-off-requests/page/write-off-requests-page";
 import { WriteOffsPage } from "@/features/write-offs/page/write-offs-page";
 import { parseWriteOffPrefillItemType } from "@/features/write-offs/utils/write-off-href";
 
@@ -36,6 +37,7 @@ export default async function Page({ searchParams }: InventoryRoutePageProps) {
             prefillItemId={prefillItemId}
           />
         }
+        writeOffRequests={<WriteOffRequestsPage embedded queueOnly />}
       />
     </AuthGuard>
   );
